@@ -1,0 +1,5 @@
+[workspace]
+resolver = "3"
+members = ["core", "cli", "power-helper", "app/src-tauri"]
+# The GUI needs WebKitGTK/WebView2 to build; keep plain `cargo build` to the CLI.
+default-members = ["core", "cli"]

@@ -1,0 +1,12 @@
+.DS_Store
+target/
+build/
+node_modules/
+app/dist/
+app/src-tauri/gen/
+# Sidecars and the power helper, built by tools/ for the bundle.
+app/src-tauri/binaries/
+# Firmware images, fetched by tools/fetch_firmware.sh (only the README is kept).
+firmware/*/*
+!firmware/README.md
+*.env
