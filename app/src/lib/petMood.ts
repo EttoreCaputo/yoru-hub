@@ -12,6 +12,7 @@ export const MOODS: Record<PetMood, { scene: string; color: string }> = {
   sad: { scene: "sad", color: "#4a7bff" },
   sleepy: { scene: "yawn", color: "#7a9cff" },
   hot: { scene: "hot", color: "#ff4a30" },
+  hungry: { scene: "sigh", color: "#ffa030" },
 };
 
 export const NOW_COLORS: Record<PetNow, string> = {

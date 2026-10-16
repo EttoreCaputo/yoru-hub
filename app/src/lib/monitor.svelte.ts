@@ -366,7 +366,13 @@ type Status = {
 
 export type Link = "searching" | "connected" | "offline";
 /** The voice settings the board keeps; null where it doesn't say. */
-export type PetMood = "content" | "happy" | "excited" | "loving" | "bored" | "grumpy" | "sad" | "sleepy" | "hot";
+export type PetMood = "content" | "happy" | "excited" | "loving" | "bored" | "grumpy" | "sad" | "sleepy" | "hot" | "hungry";
+/** A Yoru's needs (firmware 0.6.0), 0-1, 1 fully met. */
+export type PetNeeds = { rest: number; food: number; fun: number; company: number; curiosity: number };
+/** What a Yoru is doing (firmware 0.6.0, life.c). */
+export type PetActivity =
+  | "lounge" | "explore" | "forage" | "snack" | "ask" | "bounce" | "peekaboo" | "loop"
+  | "daydream" | "sulk" | "dance" | "nap" | "sleep" | "wake" | "come";
 export type PetNow = "hot" | "music" | "claude" | "battery_low" | "charging" | "night" | "away" | "bored" | "quiet" | "chatter";
 /** How often the pet comments on your day out loud. */
 export type QuipLevel = "off" | "rare" | "often";
@@ -396,6 +402,11 @@ export type PetState = {
   hearing?: boolean;
   /** What it hears, while it listens. */
   room?: { floor_db: number; level_db: number; quiet_s: number; chatter: boolean };
+  /** A Yoru's life (firmware 0.6.0); a DualEye leaves these out. */
+  needs?: PetNeeds;
+  activity?: PetActivity;
+  /** Since the last sign of someone: a touch, a voice, input on the host. */
+  alone_s?: number;
 };
 export type BoardVoice = {
   volume: number | null;
@@ -728,6 +739,16 @@ class Monitor {
   /** One of a Yoru's reactions (`YORU_REACTIONS`) now: its `play_eyes`. */
   async yoruReact(name: string) {
     if (!this.preview) await invoke("yoru_react", { board: this.boardId, name });
+  }
+
+  /** A firefly for a Yoru to eat (firmware 0.6.0); throws the board's
+   * words while it sleeps or is busy. */
+  async yoruFeed() {
+    if (this.preview) {
+      if (previewPet.needs) previewPet.needs.food = Math.min(1, previewPet.needs.food + 0.3);
+      return;
+    }
+    await invoke("yoru_feed", { board: this.boardId });
   }
 
   /** Open the Yoru's own settings menu on `page`, or close it. */
@@ -1295,6 +1316,9 @@ const previewPet: PetState = {
   idle_scenes: true,
   hearing: true,
   room: { floor_db: -58, level_db: -55, quiet_s: 40, chatter: false },
+  needs: { rest: 0.8, food: 0.35, fun: 0.6, company: 0.9, curiosity: 0.5 },
+  activity: "explore",
+  alone_s: 4,
 };
 
 let previewQuips: QuipsInfo = {

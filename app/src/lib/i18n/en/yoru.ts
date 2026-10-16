@@ -97,6 +97,9 @@ export default {
     title: "Mood",
     more: "Pet",
     none: "Yoru tells its mood once it is connected.",
+    needs: "Needs",
+    feed: "Feed",
+    feeding: "A firefly is on its way",
   },
   offline: {
     title: "Yoru isn't here",

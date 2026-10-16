@@ -100,9 +100,12 @@ const YORU: BoardProfile = BoardProfile {
 with a microphone and a speaker",
     mcp_about: "Yoru is a desk pet on the user's desk: a round AMOLED screen where it lives as a small sphere \
 with two eyes and floating hands, with a touch screen, a motion sensor, two microphones and a speaker. \
-It has moods of its own, driven by the user's touches, its pet state and this computer. \
+It has moods of its own, driven by the user's touches, its pet state and this computer, \
+and a life of its own driven by its needs (rest, food, fun, company, curiosity): it explores, plays, hunts fireflies, \
+naps and comes up to the glass to ask for the user. \
 The board's tools set it up (get_settings and set_setting, brightness, volume, the mic, the wake word), \
-make it react for a few seconds (react) or play a sound, read its state (get_state), and open its settings menu on the screen (show_menu).",
+make it react for a few seconds (react) or play a sound, read its state, needs and what it is doing (get_state, get_pet), \
+give it a firefly to eat (feed), and open its settings menu on the screen (show_menu).",
 };
 
 impl BoardKind {

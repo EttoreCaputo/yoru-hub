@@ -1074,6 +1074,13 @@ async fn yoru_react(state: State<'_, AppState>, board: Option<String>, name: Str
     call_board_on(state, board, "react", serde_json::json!({"name": name})).await
 }
 
+/// A firefly drifts in for a Yoru to eat (firmware 0.6.0); the board's
+/// words come back as the error while it sleeps or is busy.
+#[tauri::command]
+async fn yoru_feed(state: State<'_, AppState>, board: Option<String>) -> Result<(), String> {
+    call_board_on(state, board, "feed", serde_json::json!({})).await
+}
+
 /// Open a Yoru's settings menu, on `page` if given, or close it.
 #[tauri::command]
 async fn yoru_show_menu(state: State<'_, AppState>, board: Option<String>, open: bool, page: Option<String>) -> Result<(), String> {
@@ -2056,7 +2063,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![status, list_ports, set_port, set_transport, wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair, set_faces, set_rotation, readings, firmware_info, identify_board, flash_board, claude_link, claude_connect, claude_disconnect, claude_alerts_info, set_claude_alerts, claude_hooks, test_claude_alert, claude_agents, claude_approve, mcp_info, claude_mcp, voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine, board_voice, set_board_volume, set_board_eyes, set_board_idle_eyes, set_board_wake_sound, set_board_pet, board_pet, quips_info, set_quips, play_board_scene, play_board_sound, test_voice, send_image, clear_image, image_preview, power_helper_status, set_power_helper, open_power_helper_settings, timers_info, timer_tool, set_timer_screen, dismiss_timers, set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze, music_cover, music_control, boards, show_board, set_primary, yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu])
+        .invoke_handler(tauri::generate_handler![status, list_ports, set_port, set_transport, wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair, set_faces, set_rotation, readings, firmware_info, identify_board, flash_board, claude_link, claude_connect, claude_disconnect, claude_alerts_info, set_claude_alerts, claude_hooks, test_claude_alert, claude_agents, claude_approve, mcp_info, claude_mcp, voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine, board_voice, set_board_volume, set_board_eyes, set_board_idle_eyes, set_board_wake_sound, set_board_pet, board_pet, quips_info, set_quips, play_board_scene, play_board_sound, test_voice, send_image, clear_image, image_preview, power_helper_status, set_power_helper, open_power_helper_settings, timers_info, timer_tool, set_timer_screen, dismiss_timers, set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze, music_cover, music_control, boards, show_board, set_primary, yoru_settings, yoru_set_setting, yoru_react, yoru_feed, yoru_show_menu])
         .build(tauri::generate_context!())
         .expect("failed to build the DualEye app")
         .run(|app, event| match event {

@@ -98,6 +98,9 @@ const it: typeof en = {
     title: "Umore",
     more: "Pet",
     none: "Yoru dice come si sente quando è collegato.",
+    needs: "Bisogni",
+    feed: "Dai da mangiare",
+    feeding: "Una lucciola sta arrivando",
   },
   offline: {
     title: "Yoru non c'è",
