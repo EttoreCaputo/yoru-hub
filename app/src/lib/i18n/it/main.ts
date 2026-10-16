@@ -8,7 +8,7 @@ const it: typeof en = {
     waiting: "Scheda pronta, in attesa dei dati",
     boot: "La scheda si sta avviando",
     lost: "Scheda persa",
-    plug: "Collega il DualEye a una porta USB",
+    plug: "Collega la scheda a una porta USB",
     connection: "Impostazioni di connessione",
   },
   render: { label: "Resa degli schermi", glass: "Vetro", pixels: "Pixel" },

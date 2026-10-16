@@ -9,6 +9,7 @@
   import NeedRow from "../settings/NeedRow.svelte";
   import { need } from "../settings/requirements";
   import Toggle from "../settings/Toggle.svelte";
+  import { onboarding } from "./state.svelte";
 
   const t = $derived(i18n.t.onboarding.claude);
   const tcl = $derived(i18n.t.settings.claude);
@@ -23,7 +24,7 @@
   });
 </script>
 
-<p class="lead">{t.lead}</p>
+<p class="lead">{t.lead[onboarding.kind ?? "none"]}</p>
 <section class="claude">
   <ClaudeConnect />
 </section>

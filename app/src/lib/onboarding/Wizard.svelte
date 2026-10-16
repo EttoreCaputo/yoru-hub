@@ -1,13 +1,15 @@
 <!--
   The first-run setup: full window, one screen per step, a progress bar.
   Every step has Back and Skip; the voice and Claude steps use the same
-  components as the settings, so both always give the same result.
+  components as the settings, so both always give the same result. It talks
+  about the companion it's setting up (`onboarding.kind`), and as Companion
+  Hub while it doesn't know which.
 -->
 <script lang="ts">
   import { fade, fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
-  import { monitor } from "../monitor.svelte";
+  import { monitor, type BoardKind } from "../monitor.svelte";
   import "../settings/settings.css";
   import { settingsData } from "../settings/data.svelte";
   import Glyph from "../settings/Glyph.svelte";
@@ -21,6 +23,10 @@
   type Step = (typeof STEPS)[number];
 
   const t = $derived(i18n.t.onboarding);
+  const kinds: BoardKind[] = ["dualeye", "yoru"];
+  const kind = $derived(onboarding.kind ?? "none");
+  /** DualEye's rings for a DualEye, Yoru (the app's mascot) otherwise. */
+  const look = $derived(kind === "dualeye" ? "dualeye" : "yoru");
   let index = $state(0);
   /** +1 going ahead, -1 back: the screens slide that way, and only going ahead skips a step that's already fine. */
   let dir = $state(1);
@@ -64,12 +70,32 @@
 </script>
 
 <div class="wizard settings-ui" role="dialog" aria-modal="true" aria-label={t.wizard.title} transition:fade={{ duration: 220 }}>
-  <div class="wback" aria-hidden="true"></div>
+  <!-- Yoru's matte body, shared by the logo, the welcome and the picker. -->
+  <svg class="defs" aria-hidden="true">
+    <defs>
+      <radialGradient id="wiz-yoru" cx="0.36" cy="0.3" r="0.78">
+        <stop offset="0" stop-color="#f6f4fc" />
+        <stop offset="0.5" stop-color="#cfcbe2" />
+        <stop offset="1" stop-color="#6f6992" />
+      </radialGradient>
+    </defs>
+  </svg>
+  <div class="wback" class:yoru={look === "yoru"} aria-hidden="true"></div>
   <header class="whead">
-    <svg class="wlogo" viewBox="0 0 40 20" aria-hidden="true">
-      <circle cx="9" cy="10" r="8" fill="none" stroke="var(--cpu)" stroke-width="2.4" stroke-dasharray="36 60" transform="rotate(-90 9 10)" stroke-linecap="round" />
-      <circle cx="31" cy="10" r="8" fill="none" stroke="var(--gpu)" stroke-width="2.4" stroke-dasharray="24 60" transform="rotate(-90 31 10)" stroke-linecap="round" />
-    </svg>
+    {#if look === "dualeye"}
+      <svg class="wlogo" viewBox="0 0 40 20" aria-hidden="true">
+        <circle cx="9" cy="10" r="8" fill="none" stroke="var(--cpu)" stroke-width="2.4" stroke-dasharray="36 60" transform="rotate(-90 9 10)" stroke-linecap="round" />
+        <circle cx="31" cy="10" r="8" fill="none" stroke="var(--gpu)" stroke-width="2.4" stroke-dasharray="24 60" transform="rotate(-90 31 10)" stroke-linecap="round" />
+      </svg>
+    {:else}
+      <svg class="wlogo" viewBox="0 0 40 20" aria-hidden="true">
+        <ellipse cx="7" cy="12.5" rx="3" ry="2.3" fill="url(#wiz-yoru)" />
+        <ellipse cx="33" cy="8" rx="3" ry="2.3" fill="url(#wiz-yoru)" />
+        <circle cx="20" cy="10" r="9" fill="url(#wiz-yoru)" />
+        <rect x="16.6" y="9" width="2" height="4.2" rx="1" fill="#17151f" />
+        <rect x="21.4" y="9" width="2" height="4.2" rx="1" fill="#17151f" />
+      </svg>
+    {/if}
     <span class="wtitle">{t.wizard.title}</span>
     <span class="wcount">{t.wizard.stepOf(index + 1, STEPS.length)}</span>
     <button class="dclose" onclick={() => finish(false)} aria-label={t.wizard.exit} title={t.wizard.exitTitle}>
@@ -91,16 +117,42 @@
       <div class="wstep" in:fly={{ x: 28 * dir, duration: 320, easing: cubicOut, delay: 60 }} out:fade={{ duration: 80 }}>
         {#if step === "welcome"}
           <div class="hello">
-            <svg class="eyes" viewBox="0 0 120 60" aria-hidden="true">
-              <circle cx="30" cy="30" r="26" class="lcd cpu" />
-              <circle cx="90" cy="30" r="26" class="lcd gpu" />
-              <circle cx="34" cy="28" r="7" class="pupil" />
-              <circle cx="94" cy="28" r="7" class="pupil" />
-            </svg>
+            {#if look === "dualeye"}
+              <svg class="eyes" viewBox="0 0 120 60" aria-hidden="true">
+                <circle cx="30" cy="30" r="26" class="lcd cpu" />
+                <circle cx="90" cy="30" r="26" class="lcd gpu" />
+                <circle cx="34" cy="28" r="7" class="pupil" />
+                <circle cx="94" cy="28" r="7" class="pupil" />
+              </svg>
+            {:else}
+              <svg class="yoru" viewBox="0 0 120 80" aria-hidden="true">
+                <ellipse cx="60" cy="76" rx="30" ry="3.5" class="floor" />
+                <ellipse cx="20" cy="50" rx="7.5" ry="6" fill="url(#wiz-yoru)" transform="rotate(-12 20 50)" />
+                <g class="wave"><ellipse cx="101" cy="30" rx="7.5" ry="6" fill="url(#wiz-yoru)" transform="rotate(-28 101 30)" /></g>
+                <circle cx="60" cy="42" r="31" fill="url(#wiz-yoru)" />
+                <g class="pills">
+                  <rect x="50.5" y="38" width="6" height="13" rx="3" />
+                  <rect x="63.5" y="38" width="6" height="13" rx="3" />
+                </g>
+              </svg>
+            {/if}
             <h1 tabindex="-1" bind:this={heading}>{t.welcome.title}</h1>
-            <p class="lead">{t.welcome.lead}</p>
+            <p class="lead">{t.welcome.lead[kind]}</p>
             <p class="hint">{t.welcome.time}</p>
           </div>
+          {#if !monitor.boardKind}
+            <!-- The board can't say what it is yet (none plugged in, or a blank one): asked here. -->
+            <div class="wfield">
+              <span class="rlabel">{t.welcome.pick}</span>
+              <div class="rots two kinds" role="radiogroup" aria-label={t.welcome.pick}>
+                {#each kinds as k (k)}
+                  <button class="rot" class:checked={kind === k} role="radio" aria-checked={kind === k} onclick={() => onboarding.pick(k)}>
+                    {i18n.t.settings.device.kinds[k]}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
           <div class="wfield">
             <span class="rlabel">
               <svg viewBox="0 0 16 16" aria-hidden="true" class="globe"
@@ -154,7 +206,7 @@
     {#if step === "welcome"}
       <button class="btn primary big" onclick={next}>{t.welcome.start} →</button>
     {:else if step === "done"}
-      <button class="btn big" onclick={() => finish(false)}>{t.done.finish}</button>
+      <button class="btn big" onclick={() => finish(false)}>{t.done.finish[kind]}</button>
     {:else}
       <button class="btn ghost" onclick={next}>{t.wizard.skip}</button>
       <button class="btn primary big" onclick={next}>{t.wizard.next} →</button>
@@ -172,6 +224,11 @@
     background: var(--bg);
     container-type: inline-size;
   }
+  .defs {
+    position: absolute;
+    width: 0;
+    height: 0;
+  }
   .wback {
     position: absolute;
     inset: 0;
@@ -179,6 +236,12 @@
     background:
       radial-gradient(50% 45% at 50% 30%, rgba(196, 240, 106, 0.05), transparent 70%),
       radial-gradient(40% 40% at 70% 80%, rgba(200, 108, 240, 0.05), transparent 70%);
+  }
+  /* Yoru's night: the violet halo of its icon. */
+  .wback.yoru {
+    background:
+      radial-gradient(45% 40% at 50% 30%, rgba(143, 134, 255, 0.1), transparent 70%),
+      radial-gradient(40% 40% at 70% 85%, rgba(106, 92, 255, 0.05), transparent 70%);
   }
   .whead {
     position: relative;
@@ -317,8 +380,52 @@
       transform: translateX(-8px);
     }
   }
+  .yoru {
+    width: 120px;
+    height: 80px;
+    margin-bottom: 6px;
+  }
+  .yoru .floor {
+    fill: rgba(0, 0, 0, 0.5);
+  }
+  .yoru .pills {
+    fill: #17151f;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: blink 4.6s ease-in-out infinite;
+  }
+  .yoru .wave {
+    transform-box: fill-box;
+    transform-origin: 20% 90%;
+    animation: wave 2.4s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%,
+    92%,
+    100% {
+      transform: scaleY(1);
+    }
+    95% {
+      transform: scaleY(0.12);
+    }
+  }
+  @keyframes wave {
+    0%,
+    50%,
+    100% {
+      transform: rotate(0);
+    }
+    20% {
+      transform: rotate(-16deg);
+    }
+    35% {
+      transform: rotate(10deg);
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
-    .eyes .pupil {
+    .eyes .pupil,
+    .yoru .pills,
+    .yoru .wave {
       animation: none;
     }
   }

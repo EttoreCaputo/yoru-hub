@@ -1,4 +1,6 @@
-// The first-run setup and the tour of the main window.
+// The first-run setup and the tour of the main window. Texts that depend on
+// the companion come as { none, dualeye, yoru }: `none` while the app doesn't
+// know which one it is.
 export default {
   wizard: {
     title: "Setup",
@@ -12,8 +14,13 @@ export default {
     optional: "Optional",
   },
   welcome: {
-    title: "Welcome to DualEye",
-    lead: "Two round screens for your computer: temperatures, a pet, timers and a voice assistant.",
+    title: "Welcome to Companion Hub",
+    lead: {
+      none: "The app for your desk companion: it connects the board to this computer, its voice and Claude Code.",
+      dualeye: "Two round screens for your computer: temperatures, a pet, timers and a voice assistant.",
+      yoru: "A small round friend for your desk: it listens, reacts, keeps you company while you work and tells you when Claude Code needs you.",
+    },
+    pick: "Your companion",
     time: "Setup takes about 3 minutes. Every step can be skipped.",
     language: "Language",
     start: "Start",
@@ -22,10 +29,14 @@ export default {
     title: "Connect the board",
     usb: "USB cable",
     wifi: "WiFi",
-    plug: "Plug the DualEye into a USB port of this computer.",
+    plug: {
+      none: "Plug the board into a USB port of this computer.",
+      dualeye: "Plug the DualEye into a USB port of this computer.",
+      yoru: "Plug Yoru into a USB port of this computer.",
+    },
     looking: "Looking for the board…",
     found: (port: string) => `Board connected on ${port}`,
-    blank: "Board found, without the DualEye firmware: the next step installs it.",
+    blank: "Board found, without its firmware: the next step installs it.",
     notFound: "Not found yet",
     tipCable: "Use a data cable: many cables only charge. The one that came with the board works.",
     tipPort: "Plug it straight into the computer, not through a hub or a monitor.",
@@ -41,7 +52,7 @@ export default {
     checking: "Checking the board's firmware…",
     upToDate: (v: string) => `Up to date (v${v})`,
     old: (from: string, to: string) => `The board has ${from}. Version v${to} is ready.`,
-    blank: (to: string) => `The board has no DualEye firmware yet. Install v${to}.`,
+    blank: (to: string) => `The board has no companion firmware yet. Install v${to}.`,
     update: "Update",
     install: "Install",
     keepPlugged: "Keep the board plugged in until it's done: about a minute.",
@@ -55,7 +66,11 @@ export default {
   },
   voice: {
     title: "Voice assistant",
-    lead: "Say “Alexa”, then ask: the board answers out loud.",
+    lead: {
+      none: "Say the wake word, then ask: the board answers out loud.",
+      dualeye: "Say “Alexa”, then ask: the board answers out loud.",
+      yoru: "Say Yoru's wake word (“Hi ESP” unless you change it), then ask: Yoru answers out loud.",
+    },
     local: "On this computer",
     localNote: "Private, works offline. Downloads the models once.",
     online: "Online",
@@ -68,13 +83,21 @@ export default {
     keyFirst: "Paste the key: as soon as it works, the assistant turns on.",
     use: "Use it",
     ready: "The assistant is on. Try it:",
-    tryTip: "The board says a sentence. Then try: “Alexa, what's the temperature?”",
+    tryTip: {
+      none: "The board says a sentence. Then try asking it the time.",
+      dualeye: "The board says a sentence. Then try: “Alexa, what's the temperature?”",
+      yoru: "Yoru says a sentence. Then try: “Hi ESP, set a timer for 10 minutes”.",
+    },
     needsBoard: "Connect the board to try the voice.",
     change: "Choose again",
   },
   claude: {
     title: "Claude Code",
-    lead: "The board shows Claude's work and its usage limits, and tells you when it needs you.",
+    lead: {
+      none: "The board follows Claude's work and tells you when it needs you.",
+      dualeye: "The board shows Claude's work and its usage limits, and tells you when it needs you.",
+      yoru: "Yoru thinks along while Claude works, cheers when it's done and calls you when it needs you.",
+    },
     noClaude: "Don't use Claude Code? Skip this step.",
     alerts: "Alerts on the board",
     connected: "Connected",
@@ -86,7 +109,7 @@ export default {
     skipped: "Skipped",
     tour: "Take the tour",
     tourNote: "1 minute around the app",
-    finish: "Start using DualEye",
+    finish: { none: "Start using Companion Hub", dualeye: "Start using DualEye", yoru: "Say hi to Yoru" },
   },
   tour: {
     next: "Next",
@@ -100,8 +123,10 @@ export default {
       telemetry: { title: "CPU and GPU", text: "Temperature, load, clock, power and fan, with the last minutes' history." },
       pet: { title: "The pet", text: "It lives on the board and has a mood. Click here to look after it." },
       timers: { title: "Timers", text: "Say “Alexa, timer for 10 minutes”: the countdown takes over one screen." },
+      yoru: { title: "Yoru, live", text: "This is Yoru as it is on your desk right now, with what it's up to above it. Click it to poke it, or send a reaction from the buttons." },
+      pills: { title: "Beside Yoru", text: "Claude Code, music, focus timers, conversations and mood: one pill each, with the details Yoru keeps off its face." },
       settings: { title: "Settings", text: "Everything is here. A dot means something needs a look: hover it to see what." },
-      tray: { title: "Menu bar", text: "Closing the window keeps DualEye running: open it again from its icon in the menu bar (the tray on Windows)." },
+      tray: { title: "Menu bar", text: "Closing the window keeps Companion Hub running: open it again from its icon in the menu bar (the tray on Windows)." },
     },
   },
   invite: {

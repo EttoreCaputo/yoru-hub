@@ -4,10 +4,11 @@
 // the tour's invitation; a newer tour offers just its new steps.
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { monitor, type BoardKind } from "../monitor.svelte";
 import { TOUR, TOUR_VERSION, type TourStep } from "./tour";
 
 /** Outside the app (the browser preview) it lives in localStorage. */
-const PREVIEW_KEY = "dualeye.onboarding";
+const PREVIEW_KEY = "companion.onboarding";
 
 type Saved = { done: boolean; tour_version: number };
 
@@ -29,6 +30,11 @@ class Onboarding {
   tour = $state<TourStep[] | null>(null);
   /** The invitation was put off until the next start. */
   later = $state(false);
+  /** The companion picked on the welcome screen, while the board can't say. */
+  picked = $state<BoardKind | null>(null);
+
+  /** The companion the setup and the tour talk about: the board's own kind, else the one picked, else the last one seen. */
+  readonly kind = $derived<BoardKind | null>(monitor.boardKind ?? this.picked ?? monitor.viewKind);
 
   /** A newer tour than the one seen, for someone who's past the setup. */
   readonly invite = $derived(this.loaded && this.done && !this.wizardOpen && !this.tour && !this.later && this.tourVersion < TOUR_VERSION);
@@ -65,12 +71,21 @@ class Onboarding {
     void this.#save({ done: true });
   }
 
-  /** The tour: every step, or only those newer than the version seen. */
+  /** Picked on the welcome screen: a blank board gets that firmware too. */
+  pick(kind: BoardKind) {
+    this.picked = kind;
+    if (!monitor.boardKind) monitor.flashKind = kind;
+  }
+
+  /** The tour: every step for the home on screen, or only those newer than the version seen. */
   startTour(onlyNew = false) {
+    // With no board ever seen the window shows DualEye's home.
+    const home = monitor.viewKind ?? "dualeye";
+    const mine = TOUR.filter((s) => !s.only || s.only === home);
     const from = onlyNew ? this.tourVersion : 0;
-    const steps = TOUR.filter((s) => s.since > from);
+    const steps = mine.filter((s) => s.since > from);
     this.wizardOpen = false;
-    this.tour = steps.length ? steps : TOUR;
+    this.tour = steps.length ? steps : mine;
   }
 
   /** Seen or declined: this version doesn't ask again. */

@@ -7,7 +7,7 @@ export default {
     waiting: "Board ready, waiting for data",
     boot: "The board is starting",
     lost: "Board lost",
-    plug: "Plug the DualEye into a USB port",
+    plug: "Plug the board into a USB port",
     connection: "Connection settings",
   },
   render: { label: "Screen rendering", glass: "Glass", pixels: "Pixels" },

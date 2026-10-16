@@ -7,6 +7,7 @@
 <script lang="ts">
   import YoruBoard from "../YoruBoard.svelte";
   import ClaudePill from "./ClaudePill.svelte";
+  import AgentsPill from "./AgentsPill.svelte";
   import MusicPill from "./MusicPill.svelte";
   import TimerPill from "./TimerPill.svelte";
   import ChatPill from "./ChatPill.svelte";
@@ -45,6 +46,10 @@
     if (v === "speaking") return { tone: "listen", text: t.island.speaking, detail: monitor.transcripts.at(-1)?.reply?.text };
     const s = monitor.last;
     if (s?.timer?.state === "ring") return { tone: "wait", text: t.island.ring(s.timer.label) };
+    const asks = monitor.agents.approvals[0];
+    if (asks) return { tone: "wait", text: t.island.claudeAsks, detail: asks.project ? `${asks.project} · ${asks.text}` : asks.text };
+    const waits = monitor.agents.sessions.find((a) => a.state === "wait");
+    if (waits) return { tone: "wait", text: t.island.claudeAsks, detail: waits.project };
     if (s?.claude?.state === "work") return { tone: "work", text: t.island.claudeWork, detail: s.claude.model };
     if (activity.claudeDone) return { tone: "done", text: t.island.claudeDone };
     if (s?.music?.state === "play") return { tone: "music", text: s.music.title, detail: s.music.artist };
@@ -121,6 +126,7 @@
 
   <div class="pills" data-tour="telemetry">
     <ClaudePill />
+    <AgentsPill />
     <MusicPill />
     <TimerPill />
     <ChatPill />

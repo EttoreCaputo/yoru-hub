@@ -10,8 +10,11 @@
 //!   weekly usage, which the transcripts can't tell.
 //!
 //! [`alerts`] tells the person at the desk when Claude needs them, finished
-//! or is running out of its limits, with Claude Code's [`hooks`].
+//! or is running out of its limits, with Claude Code's [`hooks`]. The same
+//! hooks feed [`agents`]: each session's steps, and permission requests
+//! answered from the app or the board.
 
+pub mod agents;
 pub mod alerts;
 pub mod hooks;
 pub mod mcpconfig;

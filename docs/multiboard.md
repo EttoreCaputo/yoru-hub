@@ -91,6 +91,7 @@ The rest is the plan.
 | Agent prompt and MCP text | "two round displays", faces | "one round screen, eyes", `react` names | `agent.rs:40, 93, 166-191`, `mcp.rs:43-51` |
 | Tools cache | `board-tools.json` | one file per kind | `link.rs:337` |
 | Legacy version line | `{"dualeye":…}` | none | `firmware.rs:71-80` |
+| Claude Code approvals | no | `show_approval`, `hide_approval`, the `approval` notification (`BoardProfile::approvals`) | |
 | Firmware | `firmware/dualeye/` | `firmware/yoru/` | `app/src-tauri/src/lib.rs:83, 1300, 1734` |
 
 Behaviour that differs by kind goes behind a `BoardBehaviour` trait (`on_ready`, `tick(&mut Snapshot)`, `on_settings_changed`, `read_settings`), with `dualeye.rs` (today's face, rotation and cover code moved out of `bridge.rs`) and `yoru.rs`.
@@ -126,6 +127,14 @@ Behaviour that differs by kind goes behind a `BoardBehaviour` trait (`on_ready`,
   4. the first one connected.
 
   Every DualEye still shows the countdown face.
+
+### Claude Code agents and approvals
+
+The hooks (`core/src/claude/hooks.rs`) cover `PreToolUse`, `PostToolUse`, `PostToolUseFailure` and `SessionEnd` besides the alerts' events, and `PermissionRequest`, the one Claude Code waits for. `core/src/claude/agents.rs` folds them into each session's state (`work`, `wait`, `done`, `idle`), its task and its last eight steps (file read or edited with lines added and removed, command run), and keeps the permission requests waiting. It lives in `BridgeConfig::agents`, shared with the frontend like the timers.
+
+- `host/claude_hook` feeds the steps; `host/claude_permission` holds a `PermissionRequest` until it's answered (`Agents::answer`) or `approval_wait_s` passes, then returns `{"decision"}` and the hook prints Claude Code's allow or deny. With approvals off (the default), or without the app, it answers at once and Claude Code asks in its terminal.
+- Every change raises `BridgeEvent::Agents { sessions, approvals }`, a host event (no board). The app keeps nothing of it: `claude_agents` reads the current view and `claude_approve` answers.
+- Boards whose profile has `approvals` (Yoru) get each request with `show_approval` and `hide_approval` once it's over; a tap comes back as the `approval` notification. See `docs/protocol.md` in Yoru.
 
 ## Hub, MCP, CLI
 

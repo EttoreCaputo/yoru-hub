@@ -47,6 +47,13 @@ pub struct BoardProfile {
     /// The board tool that plays a short scene of the eyes by name (`name`:
     /// one of DualEye's `play_eyes` scenes), before the pet speaks up.
     pub scene_tool: &'static str,
+    /// It shows Claude Code's permission requests with Allow and Deny
+    /// (`show_approval`, `hide_approval`) and answers with an `approval`
+    /// notification.
+    pub approvals: bool,
+    /// Board tools only the hub calls, kept from MCP clients: a model has no
+    /// business putting a permission card on the screen.
+    pub hub_only_tools: &'static [&'static str],
     /// The body the voice agent lives in, for its prompts.
     pub agent_body: &'static str,
     /// What MCP clients are told about the board.
@@ -65,6 +72,8 @@ const DUALEYE: BoardProfile = BoardProfile {
     slug: "dualeye",
     image_project: "esp32s3-dualeye-pcmonitor",
     scene_tool: "play_eyes",
+    approvals: false,
+    hub_only_tools: &[],
     agent_body: "a board with two round displays, the left one and the right one, a microphone and a speaker",
     mcp_about: "DualEye is a small USB display on the user's desk with two round screens: \
 `left` and `right`; any face goes on either one: the computer's CPU or GPU (set_face's source), network, disk, battery, \
@@ -85,6 +94,8 @@ const YORU: BoardProfile = BoardProfile {
     slug: "yoru",
     image_project: "yoru",
     scene_tool: "react",
+    approvals: true,
+    hub_only_tools: &["show_approval", "hide_approval"],
     agent_body: "a small round screen where you appear as a matte sphere with two eyes and two floating hands, \
 with a microphone and a speaker",
     mcp_about: "Yoru is a desk pet on the user's desk: a round AMOLED screen where it lives as a small sphere \
@@ -122,6 +133,11 @@ impl BoardKind {
     /// Whose firmware a flash image is, from its app descriptor's `project`.
     pub fn from_image_project(project: &str) -> Option<BoardKind> {
         Self::ALL.into_iter().find(|k| k.profile().image_project == project)
+    }
+
+    /// Some board's tool `name` is the hub's own, whichever board lists it.
+    pub fn hub_only(name: &str) -> bool {
+        Self::ALL.into_iter().any(|k| k.profile().hub_only_tools.contains(&name))
     }
 
     /// From a kind's `slug` (`dualeye`, `yoru`), as the CLI and the hub take it.

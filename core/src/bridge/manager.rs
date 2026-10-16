@@ -38,6 +38,7 @@ use crate::profile::BoardKind;
 use crate::serial;
 use crate::wifi;
 
+use super::agents;
 use super::alerts::{self, AlertInput, Targets};
 use super::sampler::{Latest, Sampler};
 use super::{BridgeConfig, BridgeEvent, EventSink, Transport, session, sleep_unless_stopped, warm_up_voice};
@@ -191,7 +192,9 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
     let targets = Targets::default();
     if let Some(hub) = &config.hub {
         let tx = Mutex::new(alert_tx.clone());
+        let feed = config.agents.clone();
         hub.set_claude_hook(Some(Arc::new(move |json| {
+            feed.on_hook(&json);
             if let Some(event) = claude_alerts::parse_hook(&json) {
                 let _ = tx.lock().unwrap().send(AlertInput::Hook(event, Instant::now()));
             }
@@ -199,6 +202,7 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
         hub.set_timers(Some(config.timers.clone()));
         hub.set_primary(Some(config.primary.clone()));
     }
+    let views = agents::listen(config);
     let latest = Latest::default();
     let sampler = Sampler::new(config);
     let shared = Shared { config, stop, latest: &latest, targets: &targets, sink: &sink, host: &host, control };
@@ -207,12 +211,16 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
             .name("companion-alerts".into())
             .spawn_scoped(scope, || alerts::alert_loop(config, stop, &targets, alert_rx, &host));
         let _ = thread::Builder::new()
+            .name("companion-agents".into())
+            .spawn_scoped(scope, || agents::agents_loop(stop, &targets, views, &host));
+        let _ = thread::Builder::new()
             .name("companion-sampler".into())
             .spawn_scoped(scope, || sampler.run(config, stop, &latest, &alert_tx, &targets));
         manage(scope, &shared, max_boards);
     });
     if let Some(hub) = &config.hub {
         hub.set_claude_hook(None);
+        hub.set_claude_permission(None);
         hub.set_timers(None);
         hub.set_primary(None);
     }

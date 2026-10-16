@@ -35,6 +35,7 @@ class Activity {
   get badge(): Badge | null {
     if (monitor.voice === "error") return "error";
     if (monitor.last?.timer?.state === "ring") return "wait";
+    if (monitor.agents.approvals.length || monitor.agents.sessions.some((s) => s.state === "wait")) return "wait";
     if (monitor.last?.claude?.state === "work") return "work";
     return this.claudeDone ? "done" : null;
   }

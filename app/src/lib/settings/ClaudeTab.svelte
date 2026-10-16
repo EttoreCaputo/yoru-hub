@@ -76,6 +76,7 @@
     <Toggle anchor="alert-done" checked={a.done} label={tcl.done} onchange={(on) => settingsData.setAlerts({ done: on })} />
     <Toggle anchor="alert-usage" checked={a.usage} label={tcl.usageAlert} onchange={(on) => settingsData.setAlerts({ usage: on })} />
     {#if a.usage && anyOn}<NeedRow need={need("statusline")} />{/if}
+    <Toggle anchor="alert-approvals" checked={a.approvals} label={tcl.approvals} title={tcl.approvalsTitle} onchange={(on) => settingsData.setAlerts({ approvals: on })} />
     <Toggle anchor="alert-speak" checked={a.speak} label={tcl.speak} onchange={(on) => settingsData.setAlerts({ speak: on })} />
     {#if a.speak}<NeedRow need={need("speak")} />{/if}
     <div class="rotation" data-anchor="alert-long">

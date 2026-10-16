@@ -64,6 +64,11 @@ impl Targets {
         }
     }
 
+    /// Every board that's ready.
+    pub fn all(&self) -> Vec<AlertTarget> {
+        self.boards.lock().unwrap().iter().map(|(_, t)| t.clone()).collect()
+    }
+
     /// Session `session` ended.
     pub fn remove(&self, session: u64) {
         self.boards.lock().unwrap().retain(|(n, _)| *n != session);

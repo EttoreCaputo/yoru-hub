@@ -227,7 +227,7 @@ impl CompanionMcp {
         }
         let mut tools: Vec<McpTool> = host.into_iter().filter_map(|t| serde_json::from_value(t).ok()).collect();
         let names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
-        for tool in &board {
+        for tool in board.iter().filter(|t| !BoardKind::hub_only(&t.name)) {
             let mut tool = tool.clone();
             if boards.len() > 1 {
                 add_board_argument(&mut tool.input_schema, &boards);
@@ -281,6 +281,7 @@ impl CompanionMcp {
                     Err(e) => text_result(&e, true),
                 })
             }
+            name if BoardKind::hub_only(name) => Err(ErrorData::invalid_params(format!("unknown tool {name}"), None)),
             _ => match self.inner.board.call_tool_on(on, name, arguments) {
                 Ok(result) => to_mcp(result),
                 Err(CallError::Rpc { code: -32602, message }) => Err(ErrorData::invalid_params(message, None)),
@@ -529,5 +530,20 @@ mod tests {
         fs::write(link::tools_cache_in(dir.path(), BoardKind::Yoru), react.to_string()).unwrap();
         assert_eq!(server.board_tools().0[0].name, "react");
         assert!(server.instructions().starts_with("Yoru is"));
+    }
+
+    #[test]
+    fn hub_only_tools_stay_with_the_hub() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = |name: &str| json!({"name": name, "description": name, "inputSchema": {"type": "object"}});
+        let tools = json!([tool("react"), tool("show_approval"), tool("hide_approval")]);
+        fs::write(link::tools_cache_in(dir.path(), BoardKind::Yoru), tools.to_string()).unwrap();
+        let board = Board::with_hub_file(Some("/dev/does-not-exist".into()), "test", None);
+        let server = CompanionMcp::new(board, Some(dir.path().to_path_buf()));
+        let names: Vec<String> = server.all_tools().iter().map(|t| t.name.to_string()).collect();
+        assert!(names.contains(&"react".to_string()));
+        assert!(!names.iter().any(|n| BoardKind::hub_only(n)), "{names:?}");
+        let refused = server.call("show_approval", json!({"id": "x", "tool": "Bash", "text": "rm -rf /", "seconds": 30}));
+        assert!(refused.is_err());
     }
 }

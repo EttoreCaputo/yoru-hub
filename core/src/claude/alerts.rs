@@ -46,11 +46,37 @@ pub struct AlertSettings {
     pub speak: bool,
     /// `it` or `en`.
     pub language: String,
+    /// Answer Claude Code's permission requests from the app or the board
+    /// ([`super::agents`]). Off, Claude Code asks in its terminal only.
+    pub approvals: bool,
+    /// How long a request waits for that answer before Claude Code asks in
+    /// its terminal; at most [`MAX_APPROVAL_WAIT_S`].
+    pub approval_wait_s: u32,
 }
+
+/// The longest a permission request waits for the app or the board, under
+/// the hook's own timeout in Claude Code.
+pub const MAX_APPROVAL_WAIT_S: u32 = 540;
 
 impl Default for AlertSettings {
     fn default() -> Self {
-        Self { needs_you: true, done: true, done_after_s: 30, usage: true, speak: true, language: system_language().into() }
+        Self {
+            needs_you: true,
+            done: true,
+            done_after_s: 30,
+            usage: true,
+            speak: true,
+            language: system_language().into(),
+            approvals: false,
+            approval_wait_s: 120,
+        }
+    }
+}
+
+impl AlertSettings {
+    /// How long a permission request waits for an answer; `None` with approvals off.
+    pub fn approval_wait(&self) -> Option<Duration> {
+        self.approvals.then(|| Duration::from_secs(u64::from(self.approval_wait_s.clamp(5, MAX_APPROVAL_WAIT_S))))
     }
 }
 

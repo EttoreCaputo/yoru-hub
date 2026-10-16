@@ -52,6 +52,7 @@ export const ENTRIES: Entry[] = [
   { tab: "claude", id: "alert-needs", label: (t) => t.claude.needsYou },
   { tab: "claude", id: "alert-done", label: (t) => t.claude.done },
   { tab: "claude", id: "alert-usage", label: (t) => t.claude.usageAlert },
+  { tab: "claude", id: "alert-approvals", label: (t) => t.claude.approvals },
   { tab: "claude", id: "alert-speak", label: (t) => t.claude.speak },
   { tab: "claude", id: "alert-long", label: (t) => t.claude.longTask, tip: (t) => t.claude.longTaskTitle },
   { tab: "claude", id: "alert-language", label: (t) => t.claude.languageAria },

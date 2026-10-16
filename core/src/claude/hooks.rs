@@ -1,11 +1,18 @@
 //! The Claude Code hooks hook-up, for [`super::alerts`].
 //!
 //! [`connect`] adds `<exe> --claude-hook` to `hooks` in Claude Code's
-//! settings.json for the events the alerts need: `UserPromptSubmit` (a turn
-//! starts), `Stop` (it ended) and `Notification` for a permission prompt or a
-//! question. Each runs async, so Claude never waits on it. [`run`] passes the
-//! hook's JSON to the running bridge through the hub and prints nothing:
-//! a `UserPromptSubmit` hook's output would end up in Claude's context.
+//! settings.json for the events the alerts and the agent feed
+//! ([`super::agents`]) need: `UserPromptSubmit` (a turn starts), `Stop` (it
+//! ended), `Notification` for a permission prompt or a question,
+//! `PreToolUse`, `PostToolUse` and `PostToolUseFailure` (each step) and
+//! `SessionEnd`. Those run async, so Claude never waits on them. [`run`]
+//! passes the hook's JSON to the running bridge through the hub and prints
+//! nothing: a `UserPromptSubmit` hook's output would end up in Claude's context.
+//!
+//! `PermissionRequest` is the one that isn't async: it waits for an answer
+//! from the app or the board (`host/claude_permission`) and prints Claude
+//! Code's decision. Without the app, or with approvals off, it answers at
+//! once with nothing and Claude Code asks in its terminal as usual.
 //! [`disconnect`] takes ours out and leaves the others as they were.
 
 use std::fs;
@@ -17,15 +24,29 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 use super::statusline::{backup, parse_object, read_settings, write_atomic, write_settings};
+use super::agents::Decision;
 use super::{config_dir, data_dir};
 use crate::hub::Board;
 
 /// The argument that turns the app binary into the hook.
 pub const FLAG: &str = "--claude-hook";
 
-/// Our hook for each event, and the `matcher` it gets.
-const EVENTS: [(&str, Option<&str>); 3] =
-    [("UserPromptSubmit", None), ("Stop", None), ("Notification", Some("permission_prompt|elicitation_dialog"))];
+/// Our hook for each event, the `matcher` it gets, and whether Claude waits
+/// for it.
+const EVENTS: [(&str, Option<&str>, bool); 8] = [
+    ("UserPromptSubmit", None, false),
+    ("Stop", None, false),
+    ("Notification", Some("permission_prompt|elicitation_dialog"), false),
+    ("PreToolUse", None, false),
+    ("PostToolUse", None, false),
+    ("PostToolUseFailure", None, false),
+    ("SessionEnd", None, false),
+    ("PermissionRequest", None, true),
+];
+
+/// How long Claude Code lets the `PermissionRequest` hook wait: past the
+/// longest wait the bridge allows ([`super::alerts::MAX_APPROVAL_WAIT_S`]).
+const PERMISSION_TIMEOUT_S: u32 = 600;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HooksStatus {
@@ -92,14 +113,19 @@ impl Paths {
         let command = format!("\"{}\" {FLAG}", exe.display());
         let hooks = settings.entry("hooks").or_insert_with(|| Value::Object(Map::new()));
         let hooks = hooks.as_object_mut().ok_or_else(|| io::Error::other("`hooks` in settings.json is not an object"))?;
-        for (event, matcher) in EVENTS {
+        for (event, matcher, waits) in EVENTS {
             let groups = hooks.entry(event).or_insert_with(|| Value::Array(Vec::new()));
             let groups = groups.as_array_mut().ok_or_else(|| io::Error::other(format!("`hooks.{event}` in settings.json is not a list")))?;
             let mut group = Map::new();
             if let Some(m) = matcher {
                 group.insert("matcher".into(), m.into());
             }
-            group.insert("hooks".into(), json!([{"type": "command", "command": command, "async": true, "timeout": 10}]));
+            let hook = if waits {
+                json!({"type": "command", "command": command, "timeout": PERMISSION_TIMEOUT_S})
+            } else {
+                json!({"type": "command", "command": command, "async": true, "timeout": 10})
+            };
+            group.insert("hooks".into(), json!([hook]));
             groups.push(Value::Object(group));
         }
         write_settings(path, &settings)?;
@@ -133,7 +159,7 @@ fn entries(settings: &Map<String, Value>) -> impl Iterator<Item = (&str, &Value)
 }
 
 fn has_ours(settings: &Map<String, Value>) -> bool {
-    EVENTS.iter().all(|(event, _)| entries(settings).any(|(e, h)| e == *event && is_ours(h)))
+    EVENTS.iter().all(|(event, _, _)| entries(settings).any(|(e, h)| e == *event && is_ours(h)))
 }
 
 fn has_any_ours(settings: &Map<String, Value>) -> bool {
@@ -163,7 +189,8 @@ fn last_event_path() -> Option<PathBuf> {
 }
 
 /// The hook itself: hand the JSON on `input` to the running bridge. Never
-/// prints and never fails loudly; without the app running it does nothing.
+/// fails loudly; without the app running it does nothing. Only a
+/// `PermissionRequest` that was answered prints, Claude Code's decision.
 pub fn run(mut input: impl Read) {
     let mut json = Vec::new();
     if input.read_to_end(&mut json).is_err() {
@@ -173,7 +200,23 @@ pub fn run(mut input: impl Read) {
         let _ = write_atomic(&path, b"");
     }
     let Ok(event) = serde_json::from_slice::<Value>(&json) else { return };
-    let _ = Board::new(None, &format!("dualeye-hook/{}", env!("CARGO_PKG_VERSION"))).claude_hook(event);
+    let board = Board::new(None, &format!("companion-hook/{}", env!("CARGO_PKG_VERSION")));
+    if event.get("hook_event_name").and_then(Value::as_str) == Some("PermissionRequest") {
+        if let Ok(Some(decision)) = board.claude_permission(event) {
+            println!("{}", permission_output(decision));
+        }
+        return;
+    }
+    let _ = board.claude_hook(event);
+}
+
+/// What a `PermissionRequest` hook prints for `decision`.
+fn permission_output(decision: Decision) -> Value {
+    let decision = match decision {
+        Decision::Allow => json!({"behavior": "allow"}),
+        Decision::Deny => json!({"behavior": "deny", "message": "The user said no from Companion Hub."}),
+    };
+    json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
 }
 
 #[cfg(test)]
@@ -198,6 +241,9 @@ mod tests {
         assert_eq!(now["hooks"]["Stop"][0]["hooks"][0]["command"], "say done");
         assert_eq!(now["hooks"]["Notification"][0]["matcher"], "permission_prompt|elicitation_dialog");
         assert_eq!(now["hooks"]["UserPromptSubmit"][0]["hooks"][0]["async"], true);
+        // The approvals wait: not async, with a long timeout.
+        assert!(now["hooks"]["PermissionRequest"][0]["hooks"][0].get("async").is_none());
+        assert_eq!(now["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], PERMISSION_TIMEOUT_S);
         assert!(dir.path().join("settings.json.companion-hub-backup").exists());
 
         // Connecting again from a moved app replaces ours.
@@ -209,6 +255,14 @@ mod tests {
         assert!(!p.disconnect().unwrap().connected);
         let back: Value = serde_json::from_str(&fs::read_to_string(p.settings.as_ref().unwrap()).unwrap()).unwrap();
         assert_eq!(back, theirs);
+    }
+
+    #[test]
+    fn permission_decisions() {
+        let allow = permission_output(Decision::Allow);
+        assert_eq!(allow["hookSpecificOutput"]["hookEventName"], "PermissionRequest");
+        assert_eq!(allow["hookSpecificOutput"]["decision"]["behavior"], "allow");
+        assert_eq!(permission_output(Decision::Deny)["hookSpecificOutput"]["decision"]["behavior"], "deny");
     }
 
     #[test]

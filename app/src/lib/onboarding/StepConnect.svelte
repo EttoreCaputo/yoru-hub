@@ -1,7 +1,8 @@
 <!--
   Setup, step 2: the board on USB, found by itself (the bridge looks all the
-  time), or on WiFi, which is set up through USB once. A board without the
-  DualEye firmware shows up as an Espressif port only: the next step installs it.
+  time), or on WiFi, which is set up through USB once. A board without
+  firmware shows up as an Espressif port only: the next step installs it. The
+  drawing is the companion being set up: DualEye's two screens, or Yoru's puck.
 -->
 <script lang="ts">
   import { i18n } from "../i18n/index.svelte";
@@ -9,8 +10,10 @@
   import { monitor, type PortInfo } from "../monitor.svelte";
   import Glyph from "../settings/Glyph.svelte";
   import WifiSetup from "../settings/WifiSetup.svelte";
+  import { onboarding } from "./state.svelte";
 
   const t = $derived(i18n.t.onboarding.connect);
+  const yoru = $derived(onboarding.kind === "yoru");
   const td = $derived(i18n.t.settings.device);
   let mode = $state<"usb" | "wifi">(monitor.port?.startsWith("WiFi") ? "wifi" : "usb");
 
@@ -54,9 +57,16 @@
 <!-- The cable going into the board: it plugs in for as long as nothing is found. -->
 <div class="plug" class:in={connected} aria-hidden="true">
   <svg viewBox="0 0 300 90">
-    <rect x="20" y="15" width="150" height="60" rx="30" class="pcb" />
-    <circle cx="50" cy="45" r="22" class="lcd l" />
-    <circle cx="140" cy="45" r="22" class="lcd r" />
+    {#if yoru}
+      <circle cx="125" cy="45" r="42" class="pcb" />
+      <circle cx="125" cy="45" r="35" class="lcd y" />
+      <rect x="111" y="36" width="9" height="19" rx="4.5" class="eye" />
+      <rect x="130" y="36" width="9" height="19" rx="4.5" class="eye" />
+    {:else}
+      <rect x="20" y="15" width="150" height="60" rx="30" class="pcb" />
+      <circle cx="50" cy="45" r="22" class="lcd l" />
+      <circle cx="140" cy="45" r="22" class="lcd r" />
+    {/if}
     <rect x="166" y="38" width="10" height="14" rx="3" class="port" />
     <g class="cable">
       <rect x="180" y="39" width="16" height="12" rx="4" class="metal" />
@@ -78,7 +88,7 @@
       <span>{t.blank}</span>
     </div>
   {:else}
-    <p class="lead">{t.plug}</p>
+    <p class="lead">{t.plug[onboarding.kind ?? "none"]}</p>
     <div class="found" role="status">
       <Glyph state="busy" />
       <span>{slow ? t.notFound : t.looking}</span>
@@ -146,6 +156,19 @@
   }
   .lcd.r {
     stroke: var(--gpu);
+  }
+  .lcd.y {
+    stroke: #8f86ff;
+  }
+  .eye {
+    fill: #3a3650;
+    transition: fill 600ms;
+  }
+  .in .eye {
+    fill: #f4f2fa;
+  }
+  .in .lcd.y {
+    fill: color-mix(in srgb, #8f86ff 14%, #08090a);
   }
   .in .lcd.l {
     fill: color-mix(in srgb, var(--cpu) 22%, #08090a);

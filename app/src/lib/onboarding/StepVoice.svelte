@@ -10,6 +10,7 @@
   import Glyph from "../settings/Glyph.svelte";
   import KeyField from "../settings/KeyField.svelte";
   import VoiceStatus from "../settings/VoiceStatus.svelte";
+  import { onboarding } from "./state.svelte";
 
   const t = $derived(i18n.t.onboarding.voice);
   const voice = $derived(settingsData.voice);
@@ -64,7 +65,7 @@
   const downloading = $derived(voice?.download ? voice.models.find((m) => m.id === voice.download?.[0]) : null);
 </script>
 
-<p class="lead">{t.lead}</p>
+<p class="lead">{t.lead[onboarding.kind ?? "none"]}</p>
 
 {#if !voice}
   <p class="empty">{i18n.t.settings.common.loading}</p>
@@ -76,7 +77,7 @@
   <section class="voice">
     <VoiceStatus inSetup />
   </section>
-  <p class="hint">{monitor.link === "connected" ? t.tryTip : t.needsBoard}</p>
+  <p class="hint">{monitor.link === "connected" ? t.tryTip[onboarding.kind ?? "none"] : t.needsBoard}</p>
   <div class="actions">
     <button class="btn small" onclick={() => ((chosen = false), (mode = mode ?? "local"))}>{t.change}</button>
   </div>

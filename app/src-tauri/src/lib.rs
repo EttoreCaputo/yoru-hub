@@ -56,6 +56,7 @@ use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use companion_core::agent;
+use companion_core::claude::agents::{Agents, AgentsView, Decision};
 use companion_core::claude::alerts::AlertSettings;
 use companion_core::quips::QuipLevel;
 use companion_core::claude::hooks::{self, HooksStatus};
@@ -295,6 +296,8 @@ impl Link {
             BridgeEvent::Firmware { firmware } => self.firmware = Some(firmware.clone()),
             // `AppState` keeps faces and rotation, and the timers.
             BridgeEvent::Settings { .. } | BridgeEvent::Wake { .. } | BridgeEvent::TimerFired { .. } => {}
+            // `AppState::agents` keeps the feed.
+            BridgeEvent::Agents { .. } => {}
             BridgeEvent::Transcript { id, transcript } => {
                 if self.transcripts.len() == TRANSCRIPTS {
                     self.transcripts.pop_front();
@@ -452,6 +455,8 @@ struct AppState {
     claude_alerts: Arc<Mutex<AlertSettings>>,
     /// Handed to every bridge; kept in their own file.
     timers: Arc<Timers>,
+    /// Handed to every bridge: Claude Code's sessions and permission requests.
+    agents: Arc<Agents>,
     /// Handed to every bridge: what's playing, and its cover for the mirror.
     music: Arc<Music>,
     /// Handed to every bridge, like `faces`.
@@ -1708,6 +1713,18 @@ async fn test_claude_alert() -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Claude Code's sessions and the permission requests waiting, for Yoru's home.
+#[tauri::command]
+fn claude_agents(state: State<AppState>) -> AgentsView {
+    state.agents.view()
+}
+
+/// Answer permission request `id`; false when it's no longer waiting.
+#[tauri::command]
+fn claude_approve(state: State<AppState>, id: String, allow: bool) -> bool {
+    state.agents.answer(&id, if allow { Decision::Allow } else { Decision::Deny })
+}
+
 /// The Timers tab: what's running and where it shows.
 #[derive(Serialize)]
 struct TimersInfo {
@@ -1820,7 +1837,7 @@ fn start_bridge(app: &AppHandle, port: Option<String>) -> BoardManager {
     let handle = app.clone();
     let state = app.state::<AppState>();
     let (faces, rotation, hub, voice) = (state.faces.clone(), state.rotation.clone(), state.hub.clone(), state.voice.clone());
-    let (claude_alerts, timers) = (state.claude_alerts.clone(), state.timers.clone());
+    let (claude_alerts, timers, agents) = (state.claude_alerts.clone(), state.timers.clone(), state.agents.clone());
     let (music, follow_pointer) = (state.music.clone(), state.follow_pointer.clone());
     let (quips, board_settings, primary) = (state.quips.clone(), state.board_settings.clone(), state.primary.clone());
     let transport = state.settings.lock().unwrap().transport;
@@ -1834,6 +1851,7 @@ fn start_bridge(app: &AppHandle, port: Option<String>) -> BoardManager {
         hub,
         voice,
         claude_alerts,
+        agents,
         timers,
         music,
         follow_pointer,
@@ -2007,6 +2025,7 @@ pub fn run() {
                 voice: Arc::default(),
                 claude_alerts,
                 timers: Arc::new(Timers::open(timers::default_file())),
+                agents: Arc::default(),
                 music: Arc::default(),
                 follow_pointer,
                 quips,
@@ -2037,7 +2056,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![status, list_ports, set_port, set_transport, wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair, set_faces, set_rotation, readings, firmware_info, identify_board, flash_board, claude_link, claude_connect, claude_disconnect, claude_alerts_info, set_claude_alerts, claude_hooks, test_claude_alert, mcp_info, claude_mcp, voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine, board_voice, set_board_volume, set_board_eyes, set_board_idle_eyes, set_board_wake_sound, set_board_pet, board_pet, quips_info, set_quips, play_board_scene, play_board_sound, test_voice, send_image, clear_image, image_preview, power_helper_status, set_power_helper, open_power_helper_settings, timers_info, timer_tool, set_timer_screen, dismiss_timers, set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze, music_cover, music_control, boards, show_board, set_primary, yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu])
+        .invoke_handler(tauri::generate_handler![status, list_ports, set_port, set_transport, wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair, set_faces, set_rotation, readings, firmware_info, identify_board, flash_board, claude_link, claude_connect, claude_disconnect, claude_alerts_info, set_claude_alerts, claude_hooks, test_claude_alert, claude_agents, claude_approve, mcp_info, claude_mcp, voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine, board_voice, set_board_volume, set_board_eyes, set_board_idle_eyes, set_board_wake_sound, set_board_pet, board_pet, quips_info, set_quips, play_board_scene, play_board_sound, test_voice, send_image, clear_image, image_preview, power_helper_status, set_power_helper, open_power_helper_settings, timers_info, timer_tool, set_timer_screen, dismiss_timers, set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze, music_cover, music_control, boards, show_board, set_primary, yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu])
         .build(tauri::generate_context!())
         .expect("failed to build the DualEye app")
         .run(|app, event| match event {

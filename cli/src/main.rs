@@ -517,6 +517,7 @@ fn main() -> ExitCode {
         })),
         // The alerts need the hooks in Claude Code's settings (the app's Display tab adds them).
         claude_alerts: Arc::default(),
+        agents: Arc::default(),
         timers: Arc::new(Timers::open(timers::default_file())),
         music: Arc::default(),
         follow_pointer: Arc::new(AtomicBool::new(!args.no_follow_pointer)),
@@ -590,6 +591,8 @@ fn main() -> ExitCode {
                         (n, Some(w)) => format!(", {n} frames lost -> {w}"),
                     }
                 ),
+                // The app's feed; every step would flood the terminal.
+                BridgeEvent::Agents { .. } => {}
                 BridgeEvent::TimerFired { text, error: None, .. } => println!("{tag}timer: {text}"),
                 BridgeEvent::TimerFired { text, error: Some(e), .. } => println!("{tag}timer: {text} (not said: {e})"),
                 BridgeEvent::Quip { quip, text, error: None } => println!("{tag}pet ({}): {text}", quip.topic.name()),

@@ -19,6 +19,7 @@
 //! | `host/snapshot` | `{"snapshot": Snapshot or null, "age_ms"}`: the bridge's latest sample |
 //! | `host/say` `{"text","language"?}` | How it was spoken, once played |
 //! | `host/claude_hook` (a Claude Code hook's JSON) | `{"taken"}`: whether a bridge takes alerts |
+//! | `host/claude_permission` (a `PermissionRequest` hook's JSON) | `{"decision": "allow" \| "deny" \| null}`, once answered in the app or on the board; `null` at once without a bridge or with approvals off |
 //! | `host/timers` `{"name","arguments","language"?}` | `{"text","is_error"}`: a [`Timers::tools`] tool, run on the bridge's timers |
 //!
 //! With several boards attached, a request for a board (`tools/...`,
@@ -41,6 +42,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::claude::agents::Decision;
+use crate::claude::alerts::MAX_APPROVAL_WAIT_S;
 use crate::link::{CallError, Hello, Link, Tool, ToolResult};
 use crate::profile::BoardKind;
 use crate::serial;
@@ -167,6 +170,8 @@ struct Shared {
     snapshot: Mutex<Option<(Snapshot, Instant)>>,
     /// Takes Claude Code's hook events, while a bridge runs.
     claude_hook: Mutex<Option<HookFn>>,
+    /// Answers Claude Code's permission requests, while a bridge runs.
+    claude_permission: Mutex<Option<PermissionFn>>,
     /// The bridge's timers, while it runs.
     timers: Mutex<Option<Arc<Timers>>>,
     clients: AtomicUsize,
@@ -214,6 +219,7 @@ impl Hub {
             primary: Mutex::default(),
             snapshot: Mutex::default(),
             claude_hook: Mutex::default(),
+            claude_permission: Mutex::default(),
             timers: Mutex::default(),
             clients: AtomicUsize::new(0),
             calls: AtomicU64::new(0),
@@ -280,6 +286,11 @@ impl Hub {
     /// What `host/claude_hook` hands its event to; `None` without a bridge.
     pub(crate) fn set_claude_hook(&self, hook: Option<HookFn>) {
         *self.shared.claude_hook.lock().unwrap() = hook;
+    }
+
+    /// What `host/claude_permission` asks; `None` without a bridge.
+    pub(crate) fn set_claude_permission(&self, ask: Option<PermissionFn>) {
+        *self.shared.claude_permission.lock().unwrap() = ask;
     }
 
     /// The timers `host/timers` works on; `None` without a bridge.
@@ -455,6 +466,9 @@ pub(crate) type SayFn = Arc<dyn Fn(&str, Option<&str>) -> Result<Value, String> 
 /// Take a Claude Code hook's JSON; it must not wait on the board.
 pub(crate) type HookFn = Arc<dyn Fn(Value) + Send + Sync>;
 
+/// Hold a `PermissionRequest` hook's JSON until it is answered, or give up.
+pub(crate) type PermissionFn = Arc<dyn Fn(Value) -> Option<Decision> + Send + Sync>;
+
 fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i64, String)> {
     // Which board, for the hub only: the board itself isn't told.
     let wanted = params.as_object_mut().and_then(|p| p.remove("board")).and_then(|b| b.as_str().map(str::to_string));
@@ -480,6 +494,12 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
                 hook(params);
             }
             return Ok(json!({"taken": taken}));
+        }
+        "host/claude_permission" => {
+            // Each client has its own thread: this one may wait minutes.
+            let ask = shared.claude_permission.lock().unwrap().clone();
+            let decision = ask.and_then(|ask| ask(params));
+            return Ok(json!({"decision": decision}));
         }
         "host/timers" => {
             let timers = shared.timers.lock().unwrap().clone().ok_or((NO_BOARD, "the bridge isn't running".to_string()))?;
@@ -825,6 +845,18 @@ impl Board {
         hub.request("host/claude_hook", event)
     }
 
+    /// Hand a `PermissionRequest` hook's JSON to the running bridge and wait
+    /// for the answer from the app or the board: `None` leaves it to Claude
+    /// Code's own dialog.
+    pub fn claude_permission(&self, event: Value) -> Result<Option<Decision>, CallError> {
+        let mut slot = self.hub.lock().unwrap();
+        let hub = self.hub_client(&mut slot).ok_or_else(|| CallError::Unavailable("the app isn't running".into()))?;
+        *self.route.lock().unwrap() = Some(Route::Hub);
+        let wait = Duration::from_secs(u64::from(MAX_APPROVAL_WAIT_S) + 10);
+        let reply = hub.request_waiting("host/claude_permission", event, wait)?;
+        Ok(serde_json::from_value(reply["decision"].clone()).unwrap_or(None))
+    }
+
     /// Run timer tool `name` ([`Timers::tools`]) on the running bridge's
     /// timers; without a bridge, on the ones kept on disk, which ring once
     /// the app or `dualeye` runs again. `Err` is the tool's failure, as text.
@@ -978,6 +1010,16 @@ mod tests {
         hub.set_claude_hook(Some(Arc::new(move |v| *sink.lock().unwrap() = Some(v))));
         assert_eq!(board.claude_hook(json!({"hook_event_name": "Stop"})).unwrap()["taken"], true);
         assert_eq!(got.lock().unwrap().as_ref().unwrap()["hook_event_name"], "Stop");
+    }
+
+    #[test]
+    fn permission_requests_wait_for_the_bridge() {
+        let (dir, hub) = hub();
+        let board = Board::with_hub_file(None, "test", Some(dir.path().join("hub.json")));
+        let request = json!({"hook_event_name": "PermissionRequest", "tool_name": "Bash"});
+        assert_eq!(board.claude_permission(request.clone()).unwrap(), None);
+        hub.set_claude_permission(Some(Arc::new(|v: Value| (v["tool_name"] == "Bash").then_some(Decision::Deny))));
+        assert_eq!(board.claude_permission(request).unwrap(), Some(Decision::Deny));
     }
 
     fn info(id: &str, kind: BoardKind) -> BoardInfo {

@@ -83,6 +83,7 @@ pub(super) fn run(
         let speaker = speaker.clone();
         let voice_state = voice_state.clone();
         let timers = config.timers.clone();
+        let agents = config.agents.clone();
         Link::open(port, move |event| match event {
             LinkEvent::Log(line) => sink(BridgeEvent::BoardLog { line }),
             LinkEvent::Text(line) => {
@@ -114,6 +115,7 @@ pub(super) fn run(
             }
             LinkEvent::Notification { method, params } if method == "utterance_end" => receiving.lock().unwrap().end(&params),
             LinkEvent::Notification { method, params } if method == "playback_end" => speaker.playback_end(params),
+            LinkEvent::Notification { method, params } if method == "approval" => super::agents::on_notification(&agents, &params),
             LinkEvent::Audio(payload) => receiving.lock().unwrap().audio(&payload),
             LinkEvent::Notification { .. } | LinkEvent::Closed(_) => {}
         })?

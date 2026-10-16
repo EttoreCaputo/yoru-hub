@@ -17,6 +17,8 @@
 //!   single screen ([`yoru`]).
 //! - [`alerts`]: what is said out loud of the host's own accord: Claude Code
 //!   alerts, timers that are up, the pet's comments on your day.
+//! - [`agents`]: Claude Code's sessions step by step, and its permission
+//!   requests, to the frontend and to the boards that can answer them.
 //!
 //! With a [`Hub`] other processes (the MCP server, `companion call`) use the
 //! board through this connection, and bring Claude Code's hook events
@@ -26,6 +28,7 @@
 //!   each, up to a cap. [`Bridge`] is the manager with one board at most, as
 //!   the bridge always was.
 
+mod agents;
 mod alerts;
 mod behaviour;
 mod dualeye;
@@ -44,6 +47,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::claude::agents::{AgentSession, Agents, Approval};
 use crate::claude::alerts::{Alert, AlertSettings};
 use crate::diary;
 use crate::firmware::BoardFirmware;
@@ -96,6 +100,9 @@ pub struct BridgeConfig {
     pub voice: Arc<Mutex<VoiceConfig>>,
     /// Which Claude Code alerts to give, and how. Shared like `voice`.
     pub claude_alerts: Arc<Mutex<AlertSettings>>,
+    /// Claude Code's sessions and permission requests, fed by the hooks.
+    /// Shared, so the frontend reads and answers them.
+    pub agents: Arc<Agents>,
     /// Timers, pomodoro and reminders: the board shows and rings them, the
     /// voice and hub clients set them.
     pub timers: Arc<Timers>,
@@ -128,6 +135,7 @@ impl Default for BridgeConfig {
             adopt_board_settings: true,
             voice: Arc::default(),
             claude_alerts: Arc::default(),
+            agents: Arc::default(),
             timers: Arc::default(),
             music: Arc::default(),
             follow_pointer: Arc::new(AtomicBool::new(true)),
@@ -211,6 +219,9 @@ pub enum BridgeEvent {
     /// An alert about Claude Code, and how it went: `error` says why it
     /// didn't reach the board (or wasn't spoken).
     ClaudeAlert { alert: Alert, text: String, error: Option<String> },
+    /// Claude Code's sessions or permission requests changed: all of them,
+    /// as [`Agents::view`] has them.
+    Agents { sessions: Vec<AgentSession>, approvals: Vec<Approval> },
     /// A timer or reminder is up (or a pomodoro moved on); `text` is what was
     /// said about it, `error` why it wasn't.
     TimerFired { fired: Fired, text: String, error: Option<String> },

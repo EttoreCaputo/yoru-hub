@@ -9,6 +9,7 @@ import { listen } from "@tauri-apps/api/event";
 import { DEFAULT_FACES, DEFAULT_ROTATIONS, type Faces, type Rotations } from "./firmware";
 import { changelogFor, updateFor, type Update } from "./updates";
 import { BUNDLED_VERSION } from "./bundled";
+import { previewAgents } from "./previewAgents";
 
 /** In MiB. System RAM under `cpu`, VRAM under `gpu`. */
 export type Memory = { used_mb: number; total_mb: number };
@@ -48,7 +49,38 @@ export type ClaudeAlertSettings = {
   usage: boolean;
   speak: boolean;
   language: string;
+  /** Answer permission requests in the app and on Yoru. */
+  approvals: boolean;
+  approval_wait_s: number;
 };
+/** `AgentState` in companion-core: what one Claude Code session is up to. */
+export type AgentState = "work" | "wait" | "done" | "idle";
+export type StepKind = "read" | "edit" | "write" | "run" | "search" | "web" | "agent" | "ask" | "other";
+/** One tool call of a session; `ok` absent while it runs. */
+export type AgentStep = { kind: StepKind; tool: string; text: string; added?: number; removed?: number; ok?: boolean; at: number };
+export type AgentSession = {
+  id: string;
+  project?: string;
+  state: AgentState;
+  task?: string;
+  waiting?: string;
+  steps: AgentStep[];
+  since: number;
+  updated: number;
+};
+/** A permission request waiting for Allow or Deny. Times are Unix ms. */
+export type Approval = {
+  id: string;
+  session: string;
+  project?: string;
+  tool: string;
+  kind: StepKind;
+  text: string;
+  detail?: string;
+  asked: number;
+  expires: number;
+};
+export type AgentsView = { sessions: AgentSession[]; approvals: Approval[] };
 export type ClaudeAlertsInfo = {
   settings: ClaudeAlertSettings;
   hooks: { connected: boolean; last_event_s: number | null; settings_path: string | null };
@@ -194,6 +226,7 @@ type BridgeEventBody =
   | { kind: "spoken"; id: number; spoken: Spoken }
   | { kind: "voice_error"; message: string }
   | { kind: "timer_fired"; text: string; error: string | null }
+  | ({ kind: "agents" } & AgentsView)
   | { kind: "disconnected"; port: string; reason: string; permission_denied: boolean };
 
 /** What the board's "eyes" overlay shows. */
@@ -412,6 +445,8 @@ class Monitor {
   pet = $state<PetState | null | undefined>(undefined);
   /** Transcribed utterances, oldest first. */
   transcripts = $state<TranscriptEntry[]>([]);
+  /** Claude Code's sessions step by step, and the permission requests waiting. */
+  agents = $state<AgentsView>({ sessions: [], approvals: [] });
   /** What each screen's image face shows, as data URLs; null without a picture. */
   images = $state<Record<Side, string | null>>({ left: null, right: null });
   /** An image on its way to the board: which screen and how far (0–1). */
@@ -484,7 +519,10 @@ class Monitor {
         if (kind && kind !== this.#lastKind) saveLastKind((this.#lastKind = kind));
       });
     });
-    if (this.preview) startPreviewFeed((e) => this.#apply(e), () => this.faces, () => this.rotation);
+    if (this.preview) {
+      startPreviewFeed((e) => this.#apply(e), () => this.faces, () => this.rotation);
+      previewAgents.start((e) => this.#apply(e));
+    }
     else void this.#connect();
     this.#watchPointer();
     this.#watchPet();
@@ -519,6 +557,7 @@ class Monitor {
     await listen<FlashEvent>("flash", (e) => this.#applyFlash(e.payload));
     await listen<{ side: Side; progress: number }>("image", (e) => (this.sending = e.payload));
     await listen<DeviceInfo[]>("boards", (e) => this.#applyBoards(e.payload));
+    invoke<AgentsView>("claude_agents").then((v) => (this.agents = v)).catch(() => {});
     for (const side of ["left", "right"] as Side[]) {
       invoke<string | null>("image_preview", { side }).then((url) => (this.images[side] = url)).catch(() => {});
     }
@@ -640,6 +679,9 @@ class Monitor {
       }
       case "timer_fired":
         if (this.timers) void this.timersInfo();
+        break;
+      case "agents":
+        this.agents = { sessions: e.sessions, approvals: e.approvals };
         break;
       case "listening":
       case "utterance":
@@ -913,6 +955,12 @@ class Monitor {
       return;
     }
     await invoke("test_claude_alert");
+  }
+
+  /** Allow or deny permission request `id`; false when it no longer waits. */
+  async approve(id: string, allow: boolean): Promise<boolean> {
+    if (this.preview) return previewAgents.answer(id, allow);
+    return invoke<boolean>("claude_approve", { id, allow });
   }
 
   async timersInfo(): Promise<TimersInfo> {
@@ -1214,7 +1262,7 @@ let previewMcp: McpInfo = {
 let previewClaudeLink: ClaudeLink = { connected: false, chained: null, last_update_s: null, settings_path: "~/.claude/settings.json" };
 
 let previewAlerts: ClaudeAlertsInfo = {
-  settings: { needs_you: true, done: true, done_after_s: 30, usage: true, speak: true, language: "en" },
+  settings: { needs_you: true, done: true, done_after_s: 30, usage: true, speak: true, language: "en", approvals: true, approval_wait_s: 120 },
   hooks: { connected: false, last_event_s: null, settings_path: "~/.claude/settings.json" },
   can_speak: true,
   last: null,
