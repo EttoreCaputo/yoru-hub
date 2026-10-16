@@ -1,6 +1,6 @@
 // The main window: title bar, mirror, telemetry cards, update banner, tray menu.
 export default {
-  tray: { show: "Show DualEye", quit: "Quit" },
+  tray: { show: "Show Companion Hub", quit: "Quit" },
   caption: {
     live: "Mirroring the board live",
     stale: "No new data: the board keeps the last frame",

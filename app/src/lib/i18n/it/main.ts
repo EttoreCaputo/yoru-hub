@@ -1,7 +1,7 @@
 import type en from "../en/main";
 
 const it: typeof en = {
-  tray: { show: "Mostra DualEye", quit: "Esci" },
+  tray: { show: "Mostra Companion Hub", quit: "Esci" },
   caption: {
     live: "Specchio della scheda in tempo reale",
     stale: "Nessun dato nuovo: la scheda mostra l'ultimo",

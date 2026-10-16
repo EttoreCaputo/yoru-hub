@@ -4,7 +4,8 @@ import main from "./main";
 import onboarding from "./onboarding";
 import pet from "./pet";
 import settings from "./settings";
+import yoru from "./yoru";
 
-const en = { main, faces, pet, settings, onboarding };
+const en = { main, faces, pet, settings, onboarding, yoru };
 export type Messages = typeof en;
 export default en;

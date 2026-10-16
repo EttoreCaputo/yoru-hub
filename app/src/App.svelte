@@ -1,6 +1,6 @@
 <script lang="ts">
   import Board from "./lib/Board.svelte";
-  import YoruBoard from "./lib/YoruBoard.svelte";
+  import YoruHome from "./lib/yoru/YoruHome.svelte";
   import Drawer from "./lib/Drawer.svelte";
   import FacePicker from "./lib/FacePicker.svelte";
   import Telemetry from "./lib/Telemetry.svelte";
@@ -33,7 +33,8 @@
   // A compact mirror: the board keeps its proportions but leaves the room to the charts.
   const size = $derived(Math.round(Math.max(130, Math.min(210, heroW / 3.4, winH * 0.25))));
   const board = $derived(monitor.boardState);
-  const yoru = $derived(monitor.boardKind === "yoru");
+  // A Yoru that went away keeps its own home, asleep, instead of turning into a DualEye.
+  const yoru = $derived(monitor.viewKind === "yoru");
   const shown = $derived(monitor.shown);
 
   // The face the board is on: from the last line it got, classic until the first one.
@@ -111,13 +112,12 @@
     onUpdate={() => settingsNav.go({ tab: "device", id: "firmware" })}
   />
 
+  {#if yoru}
+    <YoruHome {winH} />
+  {:else}
   <section class="hero" bind:clientWidth={heroW}>
     <div class="board" class:off={board === "off"} data-tour="board">
-      {#if yoru}
-        <YoruBoard {board} {size} voice={monitor.voice} gaze={monitor.gaze} />
-      {:else}
-        <Board cpu={screen("cpu")} gpu={screen("gpu")} {board} {size} cpuGlow={glow("cpu")} gpuGlow={glow("gpu")} {pixels} {rotation} voice={monitor.voice} eyes={monitor.eyes} onpick={openPicker} picking={picking?.id ?? null} />
-      {/if}
+      <Board cpu={screen("cpu")} gpu={screen("gpu")} {board} {size} cpuGlow={glow("cpu")} gpuGlow={glow("gpu")} {pixels} {rotation} voice={monitor.voice} eyes={monitor.eyes} onpick={openPicker} picking={picking?.id ?? null} />
     </div>
 
     <div class="caption">
@@ -131,25 +131,22 @@
       {/if}
     </div>
 
-    {#if yoru}
-      <div class="spec" aria-hidden="true">ESP32-S3 · CO5300 AMOLED · 466 × 466</div>
-    {:else}
-      <div class="toggle" role="group" aria-label={t.render.label}>
+    <div class="toggle" role="group" aria-label={t.render.label}>
         <button class:active={!pixels} onclick={() => (pixels = false)}>{t.render.glass}</button>
         <button class:active={pixels} onclick={() => (pixels = true)}>{t.render.pixels}</button>
         <span class="thumb" class:right={pixels}></span>
       </div>
-      <div class="spec" aria-hidden="true">
-        ESP32-S3 · 2 × GC9A01 · 240 × 240
-        <span class="tip">{pixels ? t.tipPixels : t.tipFaces}</span>
-      </div>
-    {/if}
+    <div class="spec" aria-hidden="true">
+      ESP32-S3 · 2 × GC9A01 · 240 × 240
+      <span class="tip">{pixels ? t.tipPixels : t.tipFaces}</span>
+    </div>
   </section>
 
   <section class="cards" data-tour="telemetry">
     <Telemetry id="cpu" lcd={1} metrics={monitor.last?.cpu} fan={fanRpm(monitor.last, "cpu")} samples={monitor.history} />
     <Telemetry id="gpu" lcd={2} metrics={monitor.last?.gpu} fan={fanRpm(monitor.last, "gpu")} samples={monitor.history} />
   </section>
+  {/if}
 
   {#if picking && !yoru}
     <FacePicker id={picking.id} anchor={picking.anchor} onclose={() => (picking = null)} />

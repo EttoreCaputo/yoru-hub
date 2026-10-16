@@ -1,31 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Yoru, the hub's mascot: a matte sphere with two pill eyes and two floating
+       hands, waving from the night (yoru/docs/CONCEPT.md, "The mascot"). -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1a1c20"/>
-      <stop offset="1" stop-color="#050607"/>
-    </linearGradient>
-    <radialGradient id="glowA" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#c4f06a" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#c4f06a" stop-opacity="0"/>
+    <radialGradient id="night" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0" stop-color="#1d1a33"/>
+      <stop offset="0.6" stop-color="#0c0b16"/>
+      <stop offset="1" stop-color="#040407"/>
     </radialGradient>
-    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#c86cf0" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#c86cf0" stop-opacity="0"/>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8f86ff" stop-opacity="0.32"/>
+      <stop offset="0.55" stop-color="#6a5cff" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#6a5cff" stop-opacity="0"/>
     </radialGradient>
+    <radialGradient id="body" cx="0.36" cy="0.3" r="0.78">
+      <stop offset="0" stop-color="#f6f4fc"/>
+      <stop offset="0.5" stop-color="#cfcbe2"/>
+      <stop offset="1" stop-color="#6f6992"/>
+    </radialGradient>
+    <radialGradient id="shade" cx="0.5" cy="1.05" r="0.7">
+      <stop offset="0" stop-color="#1a1530" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#1a1530" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="floor" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#000" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="tile"><rect x="64" y="64" width="896" height="896" rx="210"/></clipPath>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="210" fill="url(#bg)"/>
-  <rect x="64.5" y="64.5" width="895" height="895" rx="209.5" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="3"/>
-  <circle cx="330" cy="512" r="260" fill="url(#glowA)"/>
-  <circle cx="694" cy="512" r="260" fill="url(#glowB)"/>
-  <rect x="420" y="452" width="184" height="120" rx="14" fill="#15171a"/>
-  <g>
-    <circle cx="330" cy="512" r="176" fill="#000" stroke="#2a2d31" stroke-width="10"/>
-    <circle cx="330" cy="512" r="140" fill="none" stroke="#163012" stroke-width="34"/>
-    <circle cx="330" cy="512" r="140" fill="none" stroke="#c4f06a" stroke-width="34" stroke-linecap="round" stroke-dasharray="560 880" transform="rotate(-90 330 512)"/>
+
+  <rect x="64" y="64" width="896" height="896" rx="210" fill="url(#night)"/>
+  <g clip-path="url(#tile)">
+    <circle cx="512" cy="530" r="420" fill="url(#halo)"/>
+    <!-- A few stars: it is the night's creature. -->
+    <circle cx="232" cy="236" r="7" fill="#fff" opacity="0.55"/>
+    <circle cx="792" cy="200" r="5" fill="#fff" opacity="0.4"/>
+    <circle cx="840" cy="318" r="3.5" fill="#fff" opacity="0.3"/>
+    <circle cx="182" cy="380" r="3.5" fill="#fff" opacity="0.28"/>
+    <ellipse cx="512" cy="860" rx="250" ry="34" fill="url(#floor)"/>
   </g>
-  <g>
-    <circle cx="694" cy="512" r="176" fill="#000" stroke="#2a2d31" stroke-width="10"/>
-    <circle cx="694" cy="512" r="140" fill="none" stroke="#2a1238" stroke-width="34"/>
-    <circle cx="694" cy="512" r="140" fill="none" stroke="#c86cf0" stroke-width="34" stroke-linecap="round" stroke-dasharray="360 880" transform="rotate(-90 694 512)"/>
-  </g>
+  <rect x="64.5" y="64.5" width="895" height="895" rx="209.5" fill="none" stroke="#ffffff" stroke-opacity="0.09" stroke-width="3"/>
+
+  <!-- Hands: the left one resting, the right one up in a wave. -->
+  <ellipse cx="186" cy="618" rx="58" ry="46" fill="url(#body)" transform="rotate(-12 186 618)"/>
+  <ellipse cx="842" cy="438" rx="58" ry="46" fill="url(#body)" transform="rotate(-28 842 438)"/>
+
+  <circle cx="512" cy="548" r="262" fill="url(#body)"/>
+  <circle cx="512" cy="548" r="262" fill="url(#shade)"/>
+
+  <rect x="434" y="520" width="48" height="108" rx="24" fill="#18161f"/>
+  <rect x="542" y="520" width="48" height="108" rx="24" fill="#18161f"/>
 </svg>

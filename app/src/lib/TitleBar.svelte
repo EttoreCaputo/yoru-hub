@@ -50,17 +50,35 @@
   const KIND_NAMES = { dualeye: "DualEye", yoru: "Yoru" } as const;
   const boardName = (b: DeviceInfo) => (b.kind ? KIND_NAMES[b.kind] : b.target.replace(/^.*\//, ""));
   const shortId = (b: DeviceInfo) => (b.id ? b.id.slice(-4) : "");
-  const brand = $derived(monitor.boards.length > 1 ? "Companion Hub" : monitor.boardKind ? KIND_NAMES[monitor.boardKind] : "Companion Hub");
+  const brand = $derived(monitor.boards.length > 1 ? "Companion Hub" : monitor.viewKind ? KIND_NAMES[monitor.viewKind] : "Companion Hub");
+  const yoruLogo = $derived(monitor.boards.length <= 1 && monitor.viewKind === "yoru");
 </script>
 
 <header class="bar" data-tauri-drag-region>
   <div class="brand" data-tauri-drag-region>
+    {#if yoruLogo}
+      <svg class="logo yoru" viewBox="0 0 40 20" aria-hidden="true">
+        <defs>
+          <radialGradient id="bar-yoru" cx="0.36" cy="0.3" r="0.78">
+            <stop offset="0" stop-color="#f4f2fa" />
+            <stop offset="0.55" stop-color="#c3bedb" />
+            <stop offset="1" stop-color="#6e6890" />
+          </radialGradient>
+        </defs>
+        <ellipse cx="7" cy="12.5" rx="3" ry="2.3" fill="url(#bar-yoru)" />
+        <ellipse cx="33" cy="8" rx="3" ry="2.3" fill="url(#bar-yoru)" />
+        <circle cx="20" cy="10" r="9" fill="url(#bar-yoru)" />
+        <rect x="16.6" y="9" width="2" height="4.2" rx="1" fill="#17151f" />
+        <rect x="21.4" y="9" width="2" height="4.2" rx="1" fill="#17151f" />
+      </svg>
+    {:else}
     <svg class="logo" viewBox="0 0 40 20" aria-hidden="true">
       <circle cx="9" cy="10" r="8" fill="none" stroke="var(--cpu)" stroke-width="2.4" stroke-dasharray="36 60" transform="rotate(-90 9 10)" stroke-linecap="round" />
       <circle cx="31" cy="10" r="8" fill="none" stroke="var(--gpu)" stroke-width="2.4" stroke-dasharray="24 60" transform="rotate(-90 31 10)" stroke-linecap="round" />
       <circle cx="9" cy="10" r="8" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="2.4" />
       <circle cx="31" cy="10" r="8" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="2.4" />
     </svg>
+    {/if}
     <span class="name" data-tauri-drag-region>{brand}</span>
     {#if monitor.preview}<span class="badge" title={t.bar.previewTitle}>{t.bar.previewBadge}</span>{/if}
     {#if monitor.boards.length > 1}

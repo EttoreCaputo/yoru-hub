@@ -66,6 +66,7 @@ Desktop app:
 cd app
 npm install
 npm run dev                 # UI only, in a browser, with synthetic data: no board or Rust needed
+                            # (open it with ?board=yoru to see a Yoru instead of a DualEye)
 npm run tauri dev           # the real app, hot reload on UI changes
 npm run tauri build         # release build + installers, in target/release/bundle/
 ```

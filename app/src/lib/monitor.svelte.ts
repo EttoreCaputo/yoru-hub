@@ -449,6 +449,11 @@ class Monitor {
   bundledAll = $state<Partial<Record<BoardKind, ImageInfo>>>({});
   /** The kind of the connected board, when its firmware says. */
   boardKind: BoardKind | null = $derived(this.link === "connected" ? (firmwareKind(this.boardFirmware) ?? this.#helloKind) : null);
+  /** The kind of the last board shown, kept across launches. */
+  #lastKind = $state<BoardKind | null>(loadLastKind());
+  /** The kind the window is laid out for: the board's, else the last one seen,
+   * so a Yoru that goes away sleeps in its own home instead of turning into a DualEye. */
+  viewKind: BoardKind | null = $derived(this.boardKind ?? this.#lastKind);
   /** Which firmware to flash on a board that doesn't say what it is (a blank one): the user picks. */
   flashKind = $state<BoardKind | null>(null);
   /** The kind whose firmware a flash writes: the board's own, else the one picked. */
@@ -473,6 +478,12 @@ class Monitor {
     if (this.#started) return;
     this.#started = true;
     setInterval(() => (this.now = Date.now()), 250);
+    $effect.root(() => {
+      $effect(() => {
+        const kind = this.boardKind;
+        if (kind && kind !== this.#lastKind) saveLastKind((this.#lastKind = kind));
+      });
+    });
     if (this.preview) startPreviewFeed((e) => this.#apply(e), () => this.faces, () => this.rotation);
     else void this.#connect();
     this.#watchPointer();
@@ -1153,6 +1164,26 @@ class Monitor {
   }
 }
 
+const LAST_KIND_KEY = "companion.lastKind";
+
+function loadLastKind(): BoardKind | null {
+  try {
+    const kind = localStorage.getItem(LAST_KIND_KEY);
+    return kind === "dualeye" || kind === "yoru" ? kind : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastKind(kind: BoardKind) {
+  try {
+    localStorage.setItem(LAST_KIND_KEY, kind);
+  } catch {}
+}
+
+/** The board the browser preview pretends to be: `?board=yoru` for a Yoru, a DualEye otherwise. */
+const previewKind: BoardKind = typeof location !== "undefined" && new URLSearchParams(location.search).get("board") === "yoru" ? "yoru" : "dualeye";
+
 /** What the browser preview shows for a Yoru's settings. */
 const previewYoruSettings: YoruSettings = {
   brightness: { value: 80, min: 5, max: 100 },
@@ -1309,14 +1340,21 @@ function startPreviewFeed(emit: (e: BridgeEvent) => void, faces: () => Faces, ro
   ];
   setTimeout(() => emit({ kind: "connected", port: "/dev/ttyACM0" }), 600);
   boot.forEach((line, i) => setTimeout(() => emit({ kind: "board_log", line }), 900 + i * 90));
-  // Firmware from before versioning, so the update offer shows up.
-  setTimeout(() => emit({ kind: "firmware", firmware: { state: "legacy" } }), 8000);
+  // DualEye: firmware from before versioning, so the update offer shows up.
+  if (previewKind === "yoru") setTimeout(() => emit({ kind: "firmware", firmware: { state: "version", kind: "yoru", version: BUNDLED_VERSION.yoru ?? "0.5.0", idf: "v6.1", protocol: 2 } }), 700);
+  else setTimeout(() => emit({ kind: "firmware", firmware: { state: "legacy" } }), 8000);
   // Now and then someone says the wake word: listening, then thinking, then back to idle.
   const voice = (state: VoiceState, at: number) => setTimeout(() => emit({ kind: "voice_state", state }), at);
-  const phrases: [string, string, string, string[]][] = [
-    ["Metti la faccia rings a sinistra.", "it", "Fatto: faccia rings sullo schermo sinistro.", ["set_face: left: rings"]],
-    ["What is the GPU temperature?", "en", "The GPU is at 41 degrees.", []],
-  ];
+  const phrases: [string, string, string, string[]][] =
+    previewKind === "yoru"
+      ? [
+          ["Yoru, metti un timer di dieci minuti.", "it", "Fatto! Dieci minuti, si parte.", ["set_timer: 10 min"]],
+          ["Is Claude still working?", "en", "Yes, it's on it. I'll cheer when it's done.", []],
+        ]
+      : [
+          ["Metti la faccia rings a sinistra.", "it", "Fatto: faccia rings sullo schermo sinistro.", ["set_face: left: rings"]],
+          ["What is the GPU temperature?", "en", "The GPU is at 41 degrees.", []],
+        ];
   let said = 0;
   setInterval(() => {
     voice("listening", 0);
