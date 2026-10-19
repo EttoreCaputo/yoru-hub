@@ -1,12 +1,12 @@
 //! Share the board between processes. Only one process can hold the serial
-//! port, and while the app or `dualeye` streams, the bridge holds it. Its
-//! [`Hub`] lets others (`dualeye mcp`, `dualeye call`) use the board through
+//! port, and while the app or `yoru` runs, the bridge holds it. Its
+//! [`Hub`] lets others (`yoru mcp`, `yoru call`) use the board through
 //! the bridge instead of opening the port a second time. [`Board`] is the
 //! other side: it goes through a running hub, and opens the port for the call
 //! itself when there is none.
 //!
 //! The hub listens on 127.0.0.1, on a port the OS picks, and leaves the port
-//! and a random token in `hub.json` in DualEye's data folder, readable by this
+//! and a random token in `hub.json` in the data folder, readable by this
 //! user only. A client's first request is `hello` with that token. Then, one
 //! JSON-RPC 2.0 message per line, a request at a time:
 //!
@@ -21,10 +21,11 @@
 //! | `host/claude_hook` (a Claude Code hook's JSON) | `{"taken"}`: whether a bridge takes alerts |
 //! | `host/claude_permission` (a `PermissionRequest` hook's JSON) | `{"decision": "allow" \| "deny" \| null}`, once answered in the app or on the board; `null` at once without a bridge or with approvals off |
 //! | `host/timers` `{"name","arguments","language"?}` | `{"text","is_error"}`: a [`Timers::tools`] tool, run on the bridge's timers |
+//! | `host/notify` `{"title","text"?,"urgency"?,"source"?,"url"?}` | `{"id"}`: a notification in the assistant's inbox, delivered to the board |
 //!
 //! With several boards attached, a request for a board (`tools/...`,
 //! `media/...`, `wifi/...`, `host/say`) takes `"board"` in its params: a
-//! board's id, or its kind (`dualeye`, `yoru`) when only one of that kind is
+//! board's id, or its kind (`yoru`) when only one of that kind is
 //! there. Without it the request goes to the only board, else to the only
 //! board with the tool called, else to the primary board; otherwise it fails
 //! with [`SEVERAL_BOARDS`]. `tools/list` without `board` lists every board's
@@ -174,6 +175,8 @@ struct Shared {
     claude_permission: Mutex<Option<PermissionFn>>,
     /// The bridge's timers, while it runs.
     timers: Mutex<Option<Arc<Timers>>>,
+    /// The assistant, whose inbox `host/notify` posts to, while a bridge runs.
+    assistant: Mutex<Option<Arc<crate::Assistant>>>,
     clients: AtomicUsize,
     calls: AtomicU64,
     last_call: Mutex<Option<(String, Instant)>>,
@@ -221,13 +224,14 @@ impl Hub {
             claude_hook: Mutex::default(),
             claude_permission: Mutex::default(),
             timers: Mutex::default(),
+            assistant: Mutex::default(),
             clients: AtomicUsize::new(0),
             calls: AtomicU64::new(0),
             last_call: Mutex::default(),
         });
         let thread = {
             let shared = shared.clone();
-            thread::Builder::new().name("companion-hub".into()).spawn(move || accept_loop(&listener, &shared))?
+            thread::Builder::new().name("yoru-hub".into()).spawn(move || accept_loop(&listener, &shared))?
         };
         Ok(Arc::new(Hub { shared, file, thread: Some(thread) }))
     }
@@ -293,6 +297,11 @@ impl Hub {
         *self.shared.claude_permission.lock().unwrap() = ask;
     }
 
+    /// The assistant `host/notify` posts to; `None` without a bridge.
+    pub(crate) fn set_assistant(&self, assistant: Option<Arc<crate::Assistant>>) {
+        *self.shared.assistant.lock().unwrap() = assistant;
+    }
+
     /// The timers `host/timers` works on; `None` without a bridge.
     pub(crate) fn set_timers(&self, timers: Option<Arc<Timers>>) {
         *self.shared.timers.lock().unwrap() = timers;
@@ -347,7 +356,7 @@ fn accept_loop(listener: &TcpListener, shared: &Arc<Shared>) {
         match listener.accept() {
             Ok((stream, _)) => {
                 let shared = shared.clone();
-                let _ = thread::Builder::new().name("dualeye-hub-client".into()).spawn(move || {
+                let _ = thread::Builder::new().name("yoru-hub-client".into()).spawn(move || {
                     shared.clients.fetch_add(1, Ordering::Relaxed);
                     let _ = serve_client(stream, &shared);
                     shared.clients.fetch_sub(1, Ordering::Relaxed);
@@ -512,6 +521,17 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
                 None => Err((INVALID_PARAMS, format!("unknown timer tool `{name}`"))),
             };
         }
+        "host/notify" => {
+            let assistant = shared.assistant.lock().unwrap().clone().ok_or((NO_BOARD, "the Yoru app isn't running".to_string()))?;
+            let title = params.get("title").and_then(Value::as_str).filter(|t| !t.trim().is_empty());
+            let Some(title) = title else { return Err((INVALID_PARAMS, "expected {\"title\": string, ...}".into())) };
+            let text = params.get("text").and_then(Value::as_str).unwrap_or_default();
+            let source = params.get("source").and_then(Value::as_str).unwrap_or("Claude Code");
+            let urgency = params.get("urgency").and_then(Value::as_str).and_then(crate::assistant::Urgency::parse).unwrap_or_default();
+            let url = params.get("url").and_then(Value::as_str).map(str::to_string);
+            let id = assistant.inbox.post(source, title, text, urgency, url, None);
+            return Ok(json!({"id": id}));
+        }
         "host/snapshot" => {
             let snapshot = shared.snapshot.lock().unwrap();
             let (snap, age) = match &*snapshot {
@@ -649,7 +669,7 @@ impl HubClient {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Route {
-    /// Through the app's or `dualeye`'s bridge.
+    /// Through the app's or `yoru`'s bridge.
     Hub,
     /// The port, opened for that call only.
     Direct,
@@ -670,7 +690,7 @@ pub struct Board {
 
 impl Board {
     /// `port` is only used when no bridge runs; `None` auto-detects the board.
-    /// `client` names this process to the hub (`dualeye-mcp/0.1.0`).
+    /// `client` names this process to the hub (`yoru-mcp/0.1.0`).
     pub fn new(port: Option<String>, client: &str) -> Self {
         Self::with_hub_file(port, client, hub_file())
     }
@@ -796,7 +816,7 @@ impl Board {
 
     /// Speak through the board's speaker, in `language` (`it`, `en`) or the
     /// one the text looks like. Needs a bridge with text-to-speech (the app
-    /// with spoken replies on, or `dualeye --tts`). Returns once it's played.
+    /// with spoken replies on, or `yoru --tts`). Returns once it's played.
     pub fn say(&self, text: &str, language: Option<&str>) -> Result<Value, CallError> {
         self.say_on(None, text, language)
     }
@@ -806,7 +826,7 @@ impl Board {
         let mut slot = self.hub.lock().unwrap();
         let hub = self
             .hub_client(&mut slot)
-            .ok_or_else(|| CallError::Unavailable("speaking needs the DualEye app with spoken replies on, or dualeye --tts, running".into()))?;
+            .ok_or_else(|| CallError::Unavailable("speaking needs the Yoru app with spoken replies on, or yoru --tts, running".into()))?;
         *self.route.lock().unwrap() = Some(Route::Hub);
         let reply = hub.request_waiting("host/say", self.aimed(json!({"text": text, "language": language}), on), SAY_TIMEOUT);
         if matches!(reply, Err(CallError::Io(_) | CallError::Closed | CallError::Invalid(_))) {
@@ -840,7 +860,7 @@ impl Board {
     /// Only through the hub: without a bridge there is nobody to tell.
     pub fn claude_hook(&self, event: Value) -> Result<Value, CallError> {
         let mut slot = self.hub.lock().unwrap();
-        let hub = self.hub_client(&mut slot).ok_or_else(|| CallError::Unavailable("the DualEye app isn't running".into()))?;
+        let hub = self.hub_client(&mut slot).ok_or_else(|| CallError::Unavailable("the Yoru app isn't running".into()))?;
         *self.route.lock().unwrap() = Some(Route::Hub);
         hub.request("host/claude_hook", event)
     }
@@ -859,7 +879,7 @@ impl Board {
 
     /// Run timer tool `name` ([`Timers::tools`]) on the running bridge's
     /// timers; without a bridge, on the ones kept on disk, which ring once
-    /// the app or `dualeye` runs again. `Err` is the tool's failure, as text.
+    /// the app or `yoru` runs again. `Err` is the tool's failure, as text.
     pub fn timer_tool(&self, name: &str, arguments: &Value, language: &str) -> Result<String, String> {
         {
             let mut slot = self.hub.lock().unwrap();
@@ -880,6 +900,14 @@ impl Board {
         *self.route.lock().unwrap() = Some(Route::Direct);
         let timers = Timers::open(timers::default_file());
         timers.call_tool(name, arguments, language).unwrap_or_else(|| Err(format!("unknown timer tool `{name}`")))
+    }
+
+    /// Put a notification in the running app's inbox (`host/notify`).
+    pub fn notify(&self, params: Value) -> Result<String, CallError> {
+        let mut slot = self.hub.lock().unwrap();
+        let hub = self.hub_client(&mut slot).ok_or_else(|| CallError::Unavailable("the Yoru app isn't running".into()))?;
+        let reply = hub.request("host/notify", params)?;
+        Ok(reply["id"].as_str().unwrap_or_default().to_string())
     }
 
     /// The bridge's latest sample and its age; `None` without a bridge, or
@@ -1030,11 +1058,11 @@ mod tests {
     fn a_call_reaches_one_board() {
         let one = [info("aa", BoardKind::Yoru)];
         assert_eq!(pick(&one, None, |_| false, None), Ok(0));
-        let boards = [info("aa", BoardKind::Yoru), info("bb", BoardKind::DualEye), info("cc", BoardKind::DualEye)];
-        // Named by id, or by the only board of its kind.
+        let boards = [info("aa", BoardKind::Yoru), info("bb", BoardKind::Yoru), info("cc", BoardKind::Yoru)];
+        // Named by id; a kind names a board only when it is the only one.
         assert_eq!(pick(&boards, Some("cc"), |_| false, None), Ok(2));
-        assert_eq!(pick(&boards, Some("yoru"), |_| false, None), Ok(0));
-        assert_eq!(pick(&boards, Some("dualeye"), |_| false, None).unwrap_err().0, SEVERAL_BOARDS);
+        assert_eq!(pick(&one, Some("yoru"), |_| false, None), Ok(0));
+        assert_eq!(pick(&boards, Some("yoru"), |_| false, None).unwrap_err().0, SEVERAL_BOARDS);
         assert_eq!(pick(&boards, Some("zz"), |_| false, None).unwrap_err().0, NO_BOARD);
         // Unnamed: the only one with the tool, else the primary one.
         assert_eq!(pick(&boards, None, |i| i == 1, Some("cc")), Ok(1));

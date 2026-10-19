@@ -48,11 +48,11 @@ pub enum BoardFirmware {
 
 impl BoardFirmware {
     /// Which kind of board runs it, when that is known: firmware from before
-    /// versioning was DualEye's, and a blank board could be either.
+    /// versioning was DualEye's, which this host doesn't drive.
     pub fn kind(&self) -> Option<BoardKind> {
         match self {
             BoardFirmware::Version { kind, .. } => Some(*kind),
-            BoardFirmware::Legacy => Some(BoardKind::DualEye),
+            BoardFirmware::Legacy => None,
             BoardFirmware::Missing => None,
         }
     }
@@ -153,9 +153,8 @@ mod tests {
 
     #[test]
     fn finds_the_version_reply_in_a_console_line() {
-        let want = BoardFirmware::Version { kind: BoardKind::DualEye, version: "0.2.0".into(), idf: Some("v6.1".into()), protocol: 1 };
-        assert_eq!(parse_version_line(r#"{"dualeye":"0.2.0","idf":"v6.1"}"#), Some(want.clone()));
-        assert_eq!(parse_version_line(r#"I (9) x: {"dualeye":"0.2.0","idf":"v6.1"}"#), Some(want));
+        // Only DualEye printed a version line; Yoru always spoke protocol v2.
+        assert_eq!(parse_version_line(r#"{"dualeye":"0.2.0","idf":"v6.1"}"#), None);
         assert_eq!(parse_version_line(r#"{"v":1,"cpu":{}}"#), None);
     }
 
@@ -163,7 +162,6 @@ mod tests {
     fn images_are_checked_against_the_board() {
         let yoru = image_of("yoru", "0.5.3");
         assert_eq!(check_image(BoardKind::Yoru, &yoru).unwrap().version, "0.5.3");
-        assert!(check_image(BoardKind::DualEye, &yoru).unwrap_err().contains("Yoru firmware"));
         assert!(check_image(BoardKind::Yoru, &image("1.0.0")).unwrap_err().contains("`eye`"));
         assert!(check_image(BoardKind::Yoru, &[0; 100]).is_err());
     }

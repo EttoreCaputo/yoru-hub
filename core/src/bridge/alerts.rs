@@ -1,7 +1,6 @@
 //! What the host says of its own accord, on a thread of its own: Claude Code
-//! alerts ([`crate::claude::alerts`]), timers that are up, and the pet's
-//! comments on your day ([`crate::quips`]), each once the board is out of
-//! any voice conversation.
+//! alerts ([`crate::claude::alerts`]) and timers that are up, each once the
+//! board is out of any voice conversation.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -11,16 +10,16 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
+use crate::assistant::{InboxChange, Notification, Urgency};
 use crate::claude::ClaudeMetrics;
 use crate::claude::alerts::{self, Alert, AlertSettings, Alerts, HookEvent};
 use crate::link::Link;
 use crate::profile::BoardKind;
-use crate::quips::Quip;
 use crate::timers::Fired;
 use crate::voice::Speaker;
 
 use super::floor::Floor;
-use super::{BridgeConfig, BridgeEvent, EventSink, TOOL_TIMEOUT, sleep_unless_stopped};
+use super::{BridgeConfig, BridgeEvent, EventSink, sleep_unless_stopped};
 
 /// What the alerts thread gets: a hook event (with when it came) or the
 /// Claude usage of a snapshot.
@@ -29,8 +28,8 @@ pub(super) enum AlertInput {
     Metrics(ClaudeMetrics),
     /// A timer that's up, to be said.
     Timer(Fired),
-    /// The pet has something to say about your day.
-    Quip(Quip),
+    /// The assistant's inbox changed.
+    Inbox(InboxChange),
 }
 
 /// A board the alerts can go to, while its session has it ready.
@@ -46,7 +45,7 @@ pub(super) struct AlertTarget {
 }
 
 /// The boards that are ready, each under its session's number, and the voice
-/// floor between them. Alerts, timers and quips go to one board only
+/// floor between them. Alerts and timers go to one board only
 /// ([`Targets::speaker`]).
 #[derive(Default)]
 pub(super) struct Targets {
@@ -72,11 +71,6 @@ impl Targets {
     /// Session `session` ended.
     pub fn remove(&self, session: u64) {
         self.boards.lock().unwrap().retain(|(n, _)| *n != session);
-    }
-
-    /// Some board's voice overlay isn't idle: someone is talking with it.
-    pub fn in_conversation(&self) -> bool {
-        self.boards.lock().unwrap().iter().any(|(_, t)| *t.voice_state.lock().unwrap() != "idle")
     }
 
     /// The board that speaks: the one `origin` names (where a timer was
@@ -115,18 +109,25 @@ pub(super) fn alert_loop(config: &BridgeConfig, stop: &AtomicBool, targets: &Tar
             Err(RecvTimeoutError::Disconnected) => return,
         };
         let settings = config.claude_alerts.lock().unwrap().clone();
+        if let AlertInput::Inbox(change) = &input {
+            match change {
+                InboxChange::New(n) => {
+                    let error = deliver_notification(config, stop, targets, n).err();
+                    on_event(BridgeEvent::Notified { id: n.id.clone(), error });
+                }
+                InboxChange::Removed(id) => mirror(targets, "hide_notification", json!({"id": id})),
+                InboxChange::Cleared => mirror(targets, "clear_notifications", json!({})),
+            }
+            continue;
+        }
         let alert = match &input {
             AlertInput::Hook(event, at) => alerts.on_hook(event, &settings, *at),
             AlertInput::Metrics(metrics) => alerts.on_metrics(metrics, &settings),
+            AlertInput::Inbox(_) => continue,
             AlertInput::Timer(fired) => {
                 let text = fired.spoken();
                 let error = say_timer(config, stop, targets, fired).err();
                 on_event(BridgeEvent::TimerFired { fired: fired.clone(), text, error });
-                continue;
-            }
-            AlertInput::Quip(quip) => {
-                let (text, error) = say_quip(config, stop, targets, quip, &settings.language);
-                on_event(BridgeEvent::Quip { quip: quip.clone(), text, error });
                 continue;
             }
         };
@@ -165,37 +166,49 @@ fn say_timer(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, fired:
     speaker.speak(&link, &tts, &fired.spoken(), &fired.timer.language).map(|_| ())
 }
 
-/// Put `quip` in the pet's words (the language model's, or the fallback's)
-/// and say it after a scene, once the board is out of any conversation:
-/// what was said, and why it wasn't.
-fn say_quip(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, quip: &Quip, language: &str) -> (String, Option<String>) {
-    let (tts, agent) = {
-        let voice = config.voice.lock().unwrap();
-        (voice.tts.clone(), voice.agent.clone())
-    };
-    let board = speaker(config, targets, None);
-    let kind = board.as_ref().map(|(_, t)| t.kind).unwrap_or_default();
-    let text = agent.and_then(|a| a.quip(&quip.fact, language, kind).ok()).unwrap_or_else(|| quip.fallback(language));
-    let Some(tts) = tts else { return (text, Some("spoken replies are off".into())) };
-    let Some((link, AlertTarget { speaker, voice_state, .. })) = board else { return (text, Some("the board isn't connected".into())) };
-    let until = Instant::now() + CONVERSATION_WAIT;
-    while *voice_state.lock().unwrap() != "idle" && Instant::now() < until && !stop.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(250));
+/// Put `n` on every board's inbox; an urgent one is also said, by the board
+/// that speaks. In quiet hours anything less than urgent arrives silently.
+fn deliver_notification(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, n: &Notification) -> Result<(), String> {
+    let quiet = config.assistant.as_ref().is_some_and(|a| a.quiet_now());
+    let urgency = if quiet && n.urgency < Urgency::Urgent { Urgency::Low } else { n.urgency };
+    let boards: Vec<Arc<Link>> = targets.all().into_iter().filter_map(|t| t.link.upgrade()).collect();
+    if boards.is_empty() {
+        return Err("the board isn't connected".into());
     }
-    if *voice_state.lock().unwrap() != "idle" {
-        // Talking with it meanwhile: the moment's gone.
-        return (text, Some("the board was in a conversation".into()));
+    let args = notification_args(n, urgency);
+    for link in &boards {
+        // Firmware before 0.10.0 doesn't have the inbox.
+        let _ = link.call_tool("show_notification", args.clone(), super::TOOL_TIMEOUT);
     }
-    if link.call_tool(kind.profile().scene_tool, json!({"name": quip.topic.scene()}), TOOL_TIMEOUT).is_ok_and(|r| !r.is_error) {
-        // Speaking would cut the scene short.
-        thread::sleep(QUIP_SCENE);
+    if urgency == Urgency::Urgent {
+        let Some(tts) = config.voice.lock().unwrap().tts.clone() else { return Ok(()) };
+        let (link, AlertTarget { speaker, voice_state, .. }) = self::speaker(config, targets, None).ok_or("the board isn't connected")?;
+        let until = Instant::now() + CONVERSATION_WAIT;
+        while *voice_state.lock().unwrap() != "idle" && Instant::now() < until && !stop.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(250));
+        }
+        let text = if n.text.is_empty() { n.title.clone() } else { format!("{}. {}", n.title, n.text) };
+        let language = crate::intents::guess_language(&text);
+        speaker.speak(&link, &tts, &text, language)?;
     }
-    let error = speaker.speak(&link, &tts, &text, language).err();
-    (text, error)
+    Ok(())
 }
 
-/// The scene before the words, long enough to be seen.
-const QUIP_SCENE: Duration = Duration::from_millis(1500);
+/// Call `tool` on every board that's ready.
+fn mirror(targets: &Targets, tool: &str, args: serde_json::Value) {
+    for link in targets.all().into_iter().filter_map(|t| t.link.upgrade()) {
+        let _ = link.call_tool(tool, args.clone(), super::TOOL_TIMEOUT);
+    }
+}
+
+/// `show_notification`'s arguments for `n`, at `urgency`.
+pub(super) fn notification_args(n: &Notification, urgency: Urgency) -> serde_json::Value {
+    let mut args = json!({"id": n.id, "source": n.source, "title": n.title, "text": n.text, "urgency": urgency.name()});
+    if n.url.is_some() {
+        args["actions"] = json!(["Open"]);
+    }
+    args
+}
 
 /// From a timer's end to saying why: the first chime's length and a breath.
 const TIMER_SPEECH_DELAY: Duration = Duration::from_millis(2600);

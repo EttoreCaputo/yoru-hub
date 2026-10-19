@@ -3,7 +3,7 @@
 //!
 //! Each engine is a Python package (`piper-tts`, GPL-3.0), run as a
 //! separate process and installed into a virtualenv of its own in
-//! DualEye's data folder with [`install`]. [`Tts`] starts the servers
+//! the data folder with [`install`]. [`Tts`] starts the servers
 //! its voices need in the background, restarts one that dies and stops them
 //! when dropped ([`crate::sidecar`]). One server speaks every voice of its
 //! engine: each request names the one for its language. Voices come from
@@ -55,7 +55,7 @@ impl Engine {
         }
     }
 
-    /// What it's called in DualEye's data folder, commands and errors.
+    /// What it's called in the data folder, commands and errors.
     pub fn key(self) -> &'static str {
         match self {
             Engine::Piper => "piper",
@@ -75,7 +75,7 @@ impl Engine {
         }
     }
 
-    /// Where its virtualenv lives: `piper/` in DualEye's data folder.
+    /// Where its virtualenv lives: `piper/` in the data folder.
     pub fn dir(self) -> Option<PathBuf> {
         crate::claude::data_dir().map(|d| d.join(self.key()))
     }

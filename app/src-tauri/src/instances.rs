@@ -1,4 +1,4 @@
-//! One DualEye at a time, and always the newest one.
+//! One Yoru app at a time, and always the newest one.
 //!
 //! The single-instance plugin hands a second launch to the process already
 //! running, which would keep the old build on the port after an update. So the
@@ -13,15 +13,15 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use companion_core::claude::statusline;
-use companion_core::mcp;
+use yoru_core::claude::statusline;
+use yoru_core::mcp;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, UpdateKind};
 use tauri::{AppHandle, Manager};
 
 /// Set on the successor: the pid it must outlive.
-const WAIT_PID_ENV: &str = "COMPANION_WAIT_PID";
+const WAIT_PID_ENV: &str = "YORU_WAIT_PID";
 /// Set on the successor when the old window was hidden in the tray.
-const HIDDEN_ENV: &str = "COMPANION_START_HIDDEN";
+const HIDDEN_ENV: &str = "YORU_START_HIDDEN";
 const CHECK_EVERY: Duration = Duration::from_secs(5);
 const EXIT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -124,7 +124,7 @@ fn hand_over(app: &AppHandle, binary: &Path) {
     }
     match cmd.spawn() {
         Ok(_) => app.exit(0),
-        Err(e) => eprintln!("dualeye: could not start {}: {e}", binary.display()),
+        Err(e) => eprintln!("yoru: could not start {}: {e}", binary.display()),
     }
 }
 

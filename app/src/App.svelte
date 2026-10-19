@@ -1,335 +1,50 @@
 <script lang="ts">
-  import Board from "./lib/Board.svelte";
-  import YoruHome from "./lib/yoru/YoruHome.svelte";
-  import Drawer from "./lib/Drawer.svelte";
-  import FacePicker from "./lib/FacePicker.svelte";
-  import Telemetry from "./lib/Telemetry.svelte";
-  import TitleBar from "./lib/TitleBar.svelte";
-  import UpdateBanner from "./lib/UpdateBanner.svelte";
-  import { heatColor, screenFor, type DeviceId } from "./lib/firmware";
-  import { fanRpm, monitor } from "./lib/monitor.svelte";
   import { i18n } from "./lib/i18n/index.svelte";
-  import { settingsData } from "./lib/settings/data.svelte";
-  import { settingsNav } from "./lib/settings/nav.svelte";
-  import { onboarding } from "./lib/onboarding/state.svelte";
-  import Tour from "./lib/onboarding/Tour.svelte";
-  import TourInvite from "./lib/onboarding/TourInvite.svelte";
-  import Wizard from "./lib/onboarding/Wizard.svelte";
+  import Board from "./lib/pages/Board.svelte";
+  import Connectors from "./lib/pages/Connectors.svelte";
+  import Conversation from "./lib/pages/Conversation.svelte";
+  import Inbox from "./lib/pages/Inbox.svelte";
+  import Memory from "./lib/pages/Memory.svelte";
+  import Routines from "./lib/pages/Routines.svelte";
+  import Settings from "./lib/pages/Settings.svelte";
+  import Today from "./lib/pages/Today.svelte";
+  import Setup from "./lib/Setup.svelte";
+  import Sidebar from "./lib/Sidebar.svelte";
+  import { store } from "./lib/store.svelte";
+  import WindowBar from "./lib/WindowBar.svelte";
 
-  monitor.start();
+  store.start();
   i18n.start();
-  settingsData.start();
-  onboarding.start();
-  const t = $derived(i18n.t.main);
 
-  /** The screen whose faces are open, and where it is. */
-  let picking = $state<{ id: DeviceId; anchor: { x: number; y: number } } | null>(null);
-  const openPicker = (id: DeviceId, rect: DOMRect) =>
-    (picking = picking?.id === id ? null : { id, anchor: { x: rect.left + rect.width / 2, y: rect.bottom } });
-  let pixels = $state(false);
-  let heroW = $state(0);
-  let winH = $state(0);
-
-  // A compact mirror: the board keeps its proportions but leaves the room to the charts.
-  const size = $derived(Math.round(Math.max(130, Math.min(210, heroW / 3.4, winH * 0.25))));
-  const board = $derived(monitor.boardState);
-  // A Yoru that went away keeps its own home, asleep, instead of turning into a DualEye.
-  const yoru = $derived(monitor.viewKind === "yoru");
-  const shown = $derived(monitor.shown);
-
-  // The face the board is on: from the last line it got, classic until the first one.
-  // `id` is the screen (cpu: left, gpu: right); its source picks the metrics.
-  const source = (id: DeviceId): DeviceId => shown?.face?.src?.[id] ?? id;
-  const screen = (id: DeviceId) => {
-    const src = source(id);
-    const side = id === "cpu" ? "left" : "right";
-    // A running timer takes over the screen the host picked, while the board is live.
-    const takeover = board === "live" && shown?.timer?.screen === side;
-    return screenFor(
-      src,
-      takeover ? "timer" : (shown?.face?.[id] ?? "classic"),
-      shown?.[src],
-      board === "stale",
-      board === "waiting",
-      {
-        fan: fanRpm(shown, src),
-        claude: shown?.claude,
-        net: shown?.net,
-        disk: shown?.disk,
-        bat: shown?.bat,
-        image: monitor.images[side],
-        timer: shown?.timer,
-        timerAgeMs: monitor.now - monitor.sentAt,
-        nowMs: monitor.now,
-        music: shown?.music,
-        cover: monitor.cover,
-        musicAgeMs: monitor.now - monitor.sentAt,
-        gaze: monitor.gaze,
-      },
-    );
-  };
-  // A line without `rot` turns both screens upright. Before the first line the
-  // board keeps its last rotation, which normally is the one picked here.
-  const rotation = $derived(shown ? { cpu: shown.rot?.cpu ?? 0, gpu: shown.rot?.gpu ?? 0 } : monitor.rotation);
-  const glow = (id: DeviceId) => {
-    const src = source(id);
-    const m = shown?.[src];
-    const active = (board === "live" || board === "stale") && m?.temp_c !== undefined;
-    return { color: heatColor(src, m?.temp_c), level: active ? 0.25 + ((m?.load_pct ?? 0) / 100) * 0.75 : 0.12 };
-  };
-
-  const caption = $derived.by(() => {
-    switch (board) {
-      case "live":
-        return t.caption.live;
-      case "stale":
-        return t.caption.stale;
-      case "waiting":
-        return t.caption.waiting;
-      case "boot":
-        return t.caption.boot;
-      default:
-        return monitor.link === "offline" ? t.caption.lost : t.caption.plug;
-    }
+  const PAGES = { today: Today, conversation: Conversation, inbox: Inbox, connectors: Connectors, routines: Routines, memory: Memory, yoru: Board, settings: Settings };
+  const Page = $derived(PAGES[store.page]);
+  let main: HTMLElement | undefined = $state();
+  // Each page starts at its top.
+  $effect(() => {
+    void store.page;
+    main?.scrollTo({ top: 0 });
   });
 </script>
 
-<svelte:window bind:innerHeight={winH} />
-
 <div class="app">
-  <div class="backdrop" aria-hidden="true"></div>
-  <TitleBar
-    onSettings={() => {
-      picking = null;
-      settingsNav.show();
-    }}
-    onPet={() => {
-      picking = null;
-      settingsNav.show("pet");
-    }}
-  />
-  <UpdateBanner
-    onUpdate={() => settingsNav.go({ tab: "device", id: "firmware" })}
-  />
-
-  {#if yoru}
-    <YoruHome {winH} />
-  {:else}
-  <section class="hero" bind:clientWidth={heroW}>
-    <div class="board" class:off={board === "off"} data-tour="board">
-      <Board cpu={screen("cpu")} gpu={screen("gpu")} {board} {size} cpuGlow={glow("cpu")} gpuGlow={glow("gpu")} {pixels} {rotation} voice={monitor.voice} eyes={monitor.eyes} onpick={openPicker} picking={picking?.id ?? null} />
-    </div>
-
-    <div class="caption">
-      <span class="state {board}"></span>
-      <span>{caption}</span>
-      {#if board === "off"}
-        <button
-          class="link"
-          onclick={() => settingsNav.go({ tab: "device", id: "connection" })}>{t.caption.connection}</button
-        >
-      {/if}
-    </div>
-
-    <div class="toggle" role="group" aria-label={t.render.label}>
-        <button class:active={!pixels} onclick={() => (pixels = false)}>{t.render.glass}</button>
-        <button class:active={pixels} onclick={() => (pixels = true)}>{t.render.pixels}</button>
-        <span class="thumb" class:right={pixels}></span>
-      </div>
-    <div class="spec" aria-hidden="true">
-      ESP32-S3 · 2 × GC9A01 · 240 × 240
-      <span class="tip">{pixels ? t.tipPixels : t.tipFaces}</span>
-    </div>
-  </section>
-
-  <section class="cards" data-tour="telemetry">
-    <Telemetry id="cpu" lcd={1} metrics={monitor.last?.cpu} fan={fanRpm(monitor.last, "cpu")} samples={monitor.history} />
-    <Telemetry id="gpu" lcd={2} metrics={monitor.last?.gpu} fan={fanRpm(monitor.last, "gpu")} samples={monitor.history} />
-  </section>
-  {/if}
-
-  {#if picking && !yoru}
-    <FacePicker id={picking.id} anchor={picking.anchor} onclose={() => (picking = null)} />
-  {/if}
-  <Drawer />
-  <TourInvite />
-  {#if onboarding.wizardOpen}<Wizard />{/if}
-  {#if onboarding.tour}<Tour steps={onboarding.tour} />{/if}
+  <Sidebar />
+  <main bind:this={main}>
+    <Page />
+  </main>
+  <WindowBar />
+  {#if store.onboarding && !store.onboarding.done}<Setup />{/if}
 </div>
 
 <style>
   .app {
     position: relative;
+    display: grid;
+    grid-template-columns: 228px minmax(0, 1fr);
     height: 100vh;
-    display: grid;
-    grid-template-rows: auto auto auto minmax(0, 1fr);
-    overflow: hidden;
   }
-
-  .backdrop {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      radial-gradient(60% 50% at 50% 38%, rgba(255, 255, 255, 0.035), transparent 70%),
-      radial-gradient(40% 30% at 50% 100%, rgba(120, 130, 160, 0.05), transparent 70%);
-  }
-  .backdrop::before {
-    /* A dotted floor that fades toward the edges. */
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1.2px);
-    background-size: 22px 22px;
-    mask-image: radial-gradient(70% 55% at 50% 45%, #000 10%, transparent 75%);
-    -webkit-mask-image: radial-gradient(70% 55% at 50% 45%, #000 10%, transparent 75%);
-    opacity: 0.55;
-  }
-  .backdrop::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    opacity: 0.06;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-    mix-blend-mode: overlay;
-  }
-
-  .hero {
+  main {
     position: relative;
-    display: grid;
-    place-items: center;
-    /* Room for the toggle above the board and the caption below it. */
-    padding: 34px 0 30px;
-    /* Clip the screen glow without making the hero scrollable. */
-    contain: paint;
-  }
-  .board {
-    transition:
-      filter 800ms ease,
-      opacity 800ms ease;
-    animation: rise 1100ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  }
-  .board.off {
-    filter: saturate(0.6) brightness(0.85);
-  }
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translateY(24px) scale(0.97);
-    }
-  }
-
-  .caption {
-    position: absolute;
-    bottom: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font: 450 12.5px/1 var(--sans);
-    color: var(--dim);
-    white-space: nowrap;
-  }
-  .state {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--faint);
-  }
-  .state.live {
-    background: #5ee38a;
-    box-shadow: 0 0 8px #5ee38a;
-  }
-  .state.stale {
-    background: var(--stale);
-  }
-  .link {
-    border: 0;
-    background: none;
-    padding: 0;
-    color: var(--text);
-    font: inherit;
-    text-decoration: underline;
-    text-decoration-color: rgba(255, 255, 255, 0.25);
-    text-underline-offset: 3px;
-    cursor: pointer;
-  }
-
-  .toggle {
-    position: absolute;
-    top: 6px;
-    right: 22px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 3px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid var(--line);
-  }
-  .toggle button {
-    position: relative;
-    z-index: 1;
-    width: 62px;
-    height: 24px;
-    border: 0;
-    background: none;
-    color: var(--faint);
-    font: 550 11px/1 var(--sans);
-    cursor: pointer;
-    transition: color 200ms;
-  }
-  .toggle button.active {
-    color: var(--text);
-  }
-  .thumb {
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 62px;
-    height: 24px;
-    border-radius: 7px;
-    background: rgba(255, 255, 255, 0.08);
-    transition: transform 280ms cubic-bezier(0.3, 0.8, 0.2, 1);
-  }
-  .thumb.right {
-    transform: translateX(62px);
-  }
-  .tip {
-    display: block;
-    margin-top: 8px;
-    color: var(--dim);
-    letter-spacing: 0.04em;
-    text-transform: none;
-    font-family: var(--sans);
-    font-size: 11.5px;
-  }
-  .spec {
-    position: absolute;
-    top: 12px;
-    left: 24px;
-    font: 500 10px/1 var(--mono);
-    letter-spacing: 0.12em;
-    color: var(--faint);
-    text-transform: uppercase;
-  }
-
-  .cards {
-    position: relative;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-    padding: 0 18px 18px;
-    min-height: 0;
-  }
-  @media (max-width: 1040px) {
-    .cards {
-      grid-template-columns: 1fr;
-      height: auto;
-    }
-    .app {
-      overflow-y: auto;
-      grid-template-rows: auto auto auto auto;
-    }
+    overflow-y: auto;
+    padding-top: 18px;
   }
 </style>

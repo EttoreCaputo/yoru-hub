@@ -10,6 +10,7 @@ Companion Hub (desktop app, CLI) is MIT-licensed, see [LICENSE](../LICENSE). Thi
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` | b11146 | MIT | Same; the voice agent's language model |
 | [Tauri](https://tauri.app) and the Rust crates in `Cargo.lock` | | MIT or Apache-2.0 (a few: BSD, ISC, Zlib, Unicode-3.0) | Linked into the app |
 | [Svelte](https://svelte.dev) | | MIT | The app's interface |
+| Service marks from [Simple Icons](https://simpleicons.org) | 16.35.0 (Slack: 13.21.0) | CC0-1.0 (the brands are their owners' trademarks) | `app/src/lib/icons/services.ts`, to tell the connectors apart |
 
 The license texts of whisper.cpp and llama.cpp are in the app's resources (`licenses/`). The two servers run as separate processes on `127.0.0.1`.
 

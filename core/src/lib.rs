@@ -1,27 +1,26 @@
-//! Host side of the DualEye PC monitor.
+//! Host side of Yoru, the personal assistant whose body is a round
+//! ESP32-S3 board on the desk.
 //!
-//! [`Collector`] reads CPU, GPU, memory and fan sensors straight from the OS (no
-//! CoolerControl or other daemon), [`Snapshot`] is the JSON the firmware
-//! parses, [`Link`] speaks the board's USB protocol (framing in [`protocol`],
-//! JSON-RPC and board tools), [`Bridge`] ties them together on a background
-//! thread, [`Hub`] shares the bridge's connection with other processes and
-//! [`Board`] uses it (or the port, when no bridge runs), and [`Esptool`] identifies and flashes the board.
-//! [`firmware`] reads the version of a flash image and of the board's firmware.
-//! [`ClaudeUsage`] adds Claude Code's usage for the Claude faces, [`Timers`]
-//! the timers, pomodoro and reminders the timer face counts down, [`Music`]
-//! what's playing for the music face, [`pointer`] where the mouse is for the
-//! eyes face, [`presence`] the time and whether you're there for the pet. The CLI
-//! and a Tauri app are both thin shells over this.
+//! [`Link`] speaks the board's protocol (framing in [`protocol`], JSON-RPC
+//! and board tools), [`Bridge`] keeps the board connected on a background
+//! thread and sends it the computer's [`Snapshot`], [`Hub`] shares that
+//! connection with other processes and [`Board`] uses it (or the port, when
+//! no bridge runs), and [`Esptool`] identifies and flashes the board.
+//! [`firmware`] reads the version of a flash image and of the board's
+//! firmware. The voice ([`voice`], [`Stt`], [`Tts`]) and the [`Agent`] answer
+//! what Yoru hears; [`Timers`] keeps timers and reminders, [`ClaudeUsage`]
+//! and [`claude`] follow Claude Code. The CLI and the Tauri app are thin
+//! shells over this.
 
 pub mod agent;
-pub mod apps;
+pub mod assistant;
 pub mod bridge;
 pub mod claude;
 pub mod cloud;
-pub mod diary;
+#[cfg(feature = "connectors")]
+pub mod connectors;
 #[cfg(feature = "download")]
 pub mod download;
-pub mod eval;
 pub mod firmware;
 pub mod flasher;
 pub mod hardware;
@@ -29,17 +28,13 @@ pub mod hub;
 pub mod intents;
 pub mod link;
 pub mod llm;
-pub mod media;
 pub mod models;
-pub mod music;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod pointer;
 pub mod presence;
 pub mod profile;
 pub mod protocol;
-pub mod quips;
-pub mod sensors;
 pub mod serial;
 pub(crate) mod sidecar;
 pub mod snapshot;
@@ -50,7 +45,8 @@ pub mod voice;
 pub mod wifi;
 
 pub use agent::{Agent, Toolbox, Turn};
-pub use bridge::{Bridge, BridgeConfig, BridgeEvent, Manager, ManagerEvent, ScreenSettings, Transport};
+pub use assistant::Assistant;
+pub use bridge::{Bridge, BridgeConfig, BridgeEvent, Manager, ManagerEvent, Transport};
 pub use claude::{ClaudeMetrics, ClaudeState, ClaudeUsage};
 pub use firmware::{BoardFirmware, ImageInfo};
 pub use flasher::{ChipInfo, Esptool, FlashEvent};
@@ -59,12 +55,10 @@ pub use hub::{Board, BoardInfo, Hub, HubStatus, Route};
 pub use link::{CallError, Hello, Link, LinkEvent, Tool, ToolResult};
 pub use llm::{Llm, LlmConfig};
 pub use profile::{BoardKind, BoardProfile};
-pub use sensors::{Collector, Reading};
 pub use serial::PortInfo;
 pub use sidecar::keep_warm;
+pub use snapshot::Snapshot;
 pub use stt::{Stt, SttConfig, SttLanguage, Transcript};
-pub use music::{BoardMusic, Music, NowPlaying};
 pub use timers::{BoardTimer, ShowOn, TimerInfo, Timers};
 pub use tts::{Tts, TtsConfig};
 pub use voice::{Speaker, Spoken, Utterance, VoiceConfig};
-pub use snapshot::{Battery, DeviceMetrics, Disk, Face, Faces, Fan, Memory, Net, Rotation, Rotations, Snapshot, Source, Sources};

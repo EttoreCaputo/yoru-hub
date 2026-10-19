@@ -10,7 +10,7 @@
   `YORU_REACTIONS`, and `at` restarts it when the same one comes again.
 -->
 <script lang="ts">
-  import type { BoardState, Gaze, VoiceState } from "./monitor.svelte";
+  import type { BoardState, Gaze, VoiceState } from "./types";
 
   export type Badge = "work" | "done" | "wait" | "error";
 

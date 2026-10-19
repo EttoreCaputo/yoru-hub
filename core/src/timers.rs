@@ -1,9 +1,9 @@
 //! Timers, a pomodoro and reminders, kept on the host.
 //!
-//! [`Timers`] holds them, by the wall clock, in `timers.json` in DualEye's
+//! [`Timers`] holds them, by the wall clock, in `timers.json` in the
 //! data folder, so they outlive the app and a reminder set for 17:00 still
 //! comes. Whoever has one (the bridge, the app, the voice agent, the hub for
-//! `dualeye timer` and MCP) starts, pauses and cancels them; the bridge calls
+//! `yoru timer` and MCP) starts, pauses and cancels them; the bridge calls
 //! [`Timers::tick`] once a second and puts [`Timers::board_view`], the timer
 //! that ends first, in each snapshot: the board's `timer` face counts it
 //! down, takes over the screen [`ShowOn`] picks while it runs and rings when

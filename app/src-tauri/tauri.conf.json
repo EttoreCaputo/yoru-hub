@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Companion Hub",
+  "productName": "Yoru",
   "version": "0.1.0",
-  "identifier": "com.companionhub.desktop",
+  "identifier": "it.bytebusters.yoru.hub",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,14 +13,14 @@
     "windows": [
       {
         "label": "main",
-        "title": "Companion Hub",
+        "title": "Yoru",
         "width": 1240,
         "height": 820,
         "minWidth": 940,
         "minHeight": 660,
         "center": true,
         "decorations": false,
-        "backgroundColor": "#060708"
+        "backgroundColor": "#000000"
       }
     ],
     "security": {
@@ -35,8 +35,8 @@
     "copyright": "Copyright (c) 2026 Ettore Caputo",
     "license": "MIT",
     "licenseFile": "../../LICENSE",
-    "homepage": "https://github.com/EttoreCaputo/companion-hub",
-    "shortDescription": "Desktop hub for the DualEye and Yoru desk companions",
+    "homepage": "https://github.com/EttoreCaputo/Yoru",
+    "shortDescription": "Yoru, the personal assistant with a body on the desk",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "macOS": {
       "signingIdentity": "-"

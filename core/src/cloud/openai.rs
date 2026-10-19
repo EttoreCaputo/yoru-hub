@@ -8,7 +8,8 @@ use serde_json::{Map, Value};
 
 use super::{Client, CloudError, TranscriptionReply};
 
-const TIMEOUT: Duration = Duration::from_secs(30);
+/// An assistant's turn with tools takes longer than a voice command's.
+const TIMEOUT: Duration = Duration::from_secs(60);
 /// What a chat request may carry: llama.cpp's own settings (`top_k`,
 /// `chat_template_kwargs`) are refused by most services.
 const CHAT_FIELDS: &[&str] = &["messages", "tools", "tool_choice", "temperature", "top_p", "max_tokens", "seed", "stop", "response_format"];
@@ -20,7 +21,7 @@ fn agent() -> &'static ureq::Agent {
 }
 
 fn url(client: &Client, path: &str) -> String {
-    format!("{}{path}", client.model.provider.base_url)
+    format!("{}{path}", client.model.provider.url())
 }
 
 fn auth(client: &Client) -> String {
@@ -37,7 +38,10 @@ fn read(client: &Client, sent: Result<ureq::http::Response<ureq::Body>, ureq::Er
     match status {
         200..=299 => Ok(body),
         401 | 403 => Err(CloudError::BadKey { provider }),
-        429 => Err(CloudError::RateLimited { provider, retry_after }),
+        429 => {
+            let (wait, per_day) = limit_of(&error_message(&body));
+            Err(CloudError::RateLimited { provider, retry_after: retry_after.or(wait), per_day })
+        }
         _ => Err(CloudError::Status { provider, status, message: error_message(&body) }),
     }
 }
@@ -48,6 +52,42 @@ fn error_message(body: &[u8]) -> String {
         .ok()
         .and_then(|v| v.pointer("/error/message").and_then(Value::as_str).map(str::to_string))
         .unwrap_or_else(|| String::from_utf8_lossy(body).chars().take(300).collect())
+}
+
+/// What a 429's message says: when to try again, and whether the day's
+/// allowance ran out. Groq's: "Rate limit reached for model `…` on tokens
+/// per day (TPD): Limit 200000, Used …. Please try again in 7m12.5s."
+fn limit_of(message: &str) -> (Option<Duration>, bool) {
+    let per_day = message.contains("per day");
+    let wait = message.split_once("try again in ").and_then(|(_, rest)| parse_wait(rest.split_whitespace().next()?));
+    (wait, per_day)
+}
+
+/// `1h2m7.5s`, `7m12.5s`, `450ms`, `3.2s.`
+fn parse_wait(text: &str) -> Option<Duration> {
+    let text = text.trim_end_matches(['.', ',']);
+    let mut total = 0.0;
+    let mut number = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c.is_ascii_digit() || c == '.' {
+            number.push(c);
+            continue;
+        }
+        let n: f64 = number.parse().ok()?;
+        number.clear();
+        total += match c {
+            'h' => n * 3600.0,
+            'm' if chars.peek() == Some(&'s') => {
+                chars.next();
+                n / 1000.0
+            }
+            'm' => n * 60.0,
+            's' => n,
+            _ => return None,
+        };
+    }
+    (number.is_empty() && total > 0.0).then(|| Duration::from_secs_f64(total))
 }
 
 fn json(client: &Client, body: &[u8]) -> Result<Value, CloudError> {
@@ -66,8 +106,14 @@ fn chat_request(client: &Client, request: &Value) -> Value {
         body.remove("tool_choice");
     }
     body.insert("model".into(), client.model.model.model.into());
+    let asked = body.get("max_tokens").and_then(Value::as_u64);
     if let Ok(Value::Object(params)) = serde_json::from_str::<Value>(client.model.model.params) {
         body.extend(params);
+    }
+    // The params' limit is a floor for a model that thinks before it answers;
+    // a request that needs more (the assistant's) keeps its own.
+    if let (Some(asked), Some(floor)) = (asked, body.get("max_tokens").and_then(Value::as_u64)) {
+        body.insert("max_tokens".into(), asked.max(floor).into());
     }
     Value::Object(body)
 }
@@ -116,6 +162,22 @@ mod tests {
         assert!(body.get("top_k").is_none() && body.get("chat_template_kwargs").is_none());
         let body = chat_request(&client, &json!({"messages": [], "tool_choice": "none"}));
         assert!(body.get("tool_choice").is_none());
+        // More than the params' floor is kept.
+        assert_eq!(chat_request(&client, &json!({"messages": [], "max_tokens": 4096}))["max_tokens"], 4096);
+    }
+
+    #[test]
+    fn reads_groqs_limits() {
+        let day = "Rate limit reached for model `openai/gpt-oss-120b` in organization `org_1` service tier `on_demand` on tokens per day (TPD): \
+                   Limit 200000, Used 199655, Requested 1530. Please try again in 8m31.2s. Need more tokens?";
+        let (wait, per_day) = limit_of(day);
+        assert!(per_day);
+        assert_eq!(wait.map(|d| d.as_millis()), Some(511_200));
+        let minute = "Rate limit reached ... on tokens per minute (TPM): Limit 8000, Used 7000, Requested 1900. Please try again in 6.75s.";
+        assert_eq!(limit_of(minute), (Some(Duration::from_millis(6750)), false));
+        assert_eq!(parse_wait("1h2m3s"), Some(Duration::from_secs(3723)));
+        assert_eq!(parse_wait("450ms"), Some(Duration::from_millis(450)));
+        assert_eq!(limit_of("too many"), (None, false));
     }
 
     #[test]

@@ -1,15 +1,15 @@
 //! Drive every board found, on USB and WiFi, and print what each one does:
 //! a check of the manager with real boards, until the CLI has it.
 //!
-//!     cargo run -p companion-core --example boards [SECONDS]
+//!     cargo run -p yoru-core --example boards [SECONDS]
 
 use std::time::{Duration, Instant};
 
-use companion_core::{BridgeConfig, BridgeEvent, Manager};
+use yoru_core::{BridgeConfig, BridgeEvent, Manager};
 
 fn main() {
     let seconds = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(15);
-    let config = BridgeConfig { diary: None, ..Default::default() };
+    let config = BridgeConfig::default();
     let started = Instant::now();
     let manager = Manager::spawn(config, None, move |e| {
         let who = match (&e.target, &e.board_kind, &e.board) {

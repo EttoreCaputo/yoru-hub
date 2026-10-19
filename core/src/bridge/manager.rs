@@ -21,7 +21,7 @@
 //! other boards carry on.
 //!
 //! Events carry the session they come from ([`ManagerEvent`]); the host's own
-//! (alerts, timers, quips, the voice's start-up) carry none.
+//! (alerts, timers, the voice's start-up) carry none.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -95,7 +95,7 @@ impl Manager {
         let thread = {
             let control = control.clone();
             thread::Builder::new()
-                .name("companion-manager".into())
+                .name("yoru-manager".into())
                 .spawn(move || run_with(&config, max_boards, &flag, sink, &control))
                 .expect("spawn manager thread")
         };
@@ -201,6 +201,13 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
         })));
         hub.set_timers(Some(config.timers.clone()));
         hub.set_primary(Some(config.primary.clone()));
+        hub.set_assistant(config.assistant.clone());
+    }
+    if let Some(assistant) = &config.assistant {
+        let tx = Mutex::new(alert_tx.clone());
+        assistant.inbox.set_delivery(Some(Arc::new(move |change| {
+            let _ = tx.lock().unwrap().send(AlertInput::Inbox(change));
+        })));
     }
     let views = agents::listen(config);
     let latest = Latest::default();
@@ -208,21 +215,25 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
     let shared = Shared { config, stop, latest: &latest, targets: &targets, sink: &sink, host: &host, control };
     thread::scope(|scope| {
         let _ = thread::Builder::new()
-            .name("companion-alerts".into())
+            .name("yoru-alerts".into())
             .spawn_scoped(scope, || alerts::alert_loop(config, stop, &targets, alert_rx, &host));
         let _ = thread::Builder::new()
-            .name("companion-agents".into())
+            .name("yoru-agents".into())
             .spawn_scoped(scope, || agents::agents_loop(stop, &targets, views, &host));
         let _ = thread::Builder::new()
-            .name("companion-sampler".into())
+            .name("yoru-sampler".into())
             .spawn_scoped(scope, || sampler.run(config, stop, &latest, &alert_tx, &targets));
         manage(scope, &shared, max_boards);
     });
+    if let Some(assistant) = &config.assistant {
+        assistant.inbox.set_delivery(None);
+    }
     if let Some(hub) = &config.hub {
         hub.set_claude_hook(None);
         hub.set_claude_permission(None);
         hub.set_timers(None);
         hub.set_primary(None);
+        hub.set_assistant(None);
     }
 }
 
@@ -357,7 +368,7 @@ fn start<'scope, 'env>(scope: &'scope Scope<'scope, 'env>, shared: &'env Shared<
     let thread = {
         let (info, target) = (info.clone(), target.to_string());
         thread::Builder::new()
-            .name(format!("companion-session-{number}"))
+            .name(format!("yoru-session-{number}"))
             .spawn_scoped(scope, move || session::run(&target, shared.config, shared.stop, &info, shared.latest, shared.targets, &sink))
             .ok()?
     };

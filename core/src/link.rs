@@ -197,7 +197,7 @@ impl Link {
         });
         let reader = {
             let shared = shared.clone();
-            thread::Builder::new().name("dualeye-link".into()).spawn(move || read_loop(rx, &shared, &on_event))?
+            thread::Builder::new().name("yoru-link".into()).spawn(move || read_loop(rx, &shared, &on_event))?
         };
         Ok(Self { tx: Mutex::new(tx), shared, next_id: AtomicU64::new(1), reader: Some(reader), peer })
     }
@@ -270,7 +270,7 @@ impl Link {
 
     /// One `hello`; the handshake retries it while the board boots.
     pub fn hello(&self, timeout: Duration) -> Result<Hello, CallError> {
-        let client = format!("companion-core/{}", env!("CARGO_PKG_VERSION"));
+        let client = format!("yoru-core/{}", env!("CARGO_PKG_VERSION"));
         let reply = self.call("hello", json!({"protocol": PROTOCOL, "client": client}), timeout)?;
         serde_json::from_value(reply).map_err(|e| CallError::Invalid(e.to_string()))
     }

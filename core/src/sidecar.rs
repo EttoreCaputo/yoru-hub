@@ -43,7 +43,7 @@ const WARM_CHECK: Duration = Duration::from_secs(30);
 /// again before someone speaks, not when they do.
 pub fn keep_warm<T: Send + Sync + 'static>(sidecar: &Arc<T>, rewarm: impl Fn(&T) + Send + 'static) {
     let weak: Weak<T> = Arc::downgrade(sidecar);
-    let _ = thread::Builder::new().name("dualeye-keep-warm".into()).spawn(move || {
+    let _ = thread::Builder::new().name("yoru-keep-warm".into()).spawn(move || {
         loop {
             thread::sleep(WARM_CHECK);
             let Some(sidecar) = weak.upgrade() else { return };

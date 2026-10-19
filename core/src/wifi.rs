@@ -1,4 +1,4 @@
-//! The boards on WiFi (DualEye firmware 1.4.3, `docs/protocol.md`, "WiFi"):
+//! The boards on WiFi (Yoru's `docs/protocol.md`, "WiFi"):
 //! the boards paired with this computer, finding them with mDNS, and the TCP
 //! session, where every frame is sealed with AES-256-GCM after both ends
 //! proved they hold the pairing key the board gave over USB. Each kind of
@@ -41,7 +41,7 @@ pub struct Paired {
     /// The pairing key, hex.
     pub key: String,
     /// Which kind of board it is: its service and handshake. Files from
-    /// before there were kinds only had DualEyes.
+    /// before there were kinds were taken as the only board this host drives, Yoru.
     #[serde(default)]
     pub kind: BoardKind,
     /// The network it was set up on, for the app to show.
@@ -476,27 +476,16 @@ mod tests {
     fn handshake_with_the_wrong_key() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        let board = thread::spawn(move || fake_board(listener, [3; 32], "a1b2c3d4e5f6", BoardKind::DualEye));
-        let err = connect(addr, &[4; 32], None, BoardKind::DualEye.profile()).err().unwrap();
-        board.join().unwrap();
-        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
-    }
-
-    /// A Yoru never pairs with a host that thinks it's a DualEye: the labels differ.
-    #[test]
-    fn handshake_with_the_wrong_kind() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
         let board = thread::spawn(move || fake_board(listener, [3; 32], "a1b2c3d4e5f6", BoardKind::Yoru));
-        let err = connect(addr, &[3; 32], None, BoardKind::DualEye.profile()).err().unwrap();
+        let err = connect(addr, &[4; 32], None, BoardKind::Yoru.profile()).err().unwrap();
         board.join().unwrap();
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
     }
 
     #[test]
-    fn paired_files_without_a_kind_are_dualeyes() {
+    fn paired_files_without_a_kind_are_yorus() {
         let old: Paired = serde_json::from_value(json!({"id": "a1b2c3d4e5f6", "key": "00"})).unwrap();
-        assert_eq!(old.kind, BoardKind::DualEye);
+        assert_eq!(old.kind, BoardKind::Yoru);
         let yoru: Paired = serde_json::from_value(json!({"id": "a1b2c3d4e5f6", "key": "00", "kind": "yoru"})).unwrap();
         assert_eq!(yoru.kind, BoardKind::Yoru);
     }
@@ -505,8 +494,8 @@ mod tests {
     fn handshake_with_another_board() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        let board = thread::spawn(move || fake_board(listener, [3; 32], "ffffffffffff", BoardKind::DualEye));
-        let err = connect(addr, &[3; 32], Some("a1b2c3d4e5f6"), BoardKind::DualEye.profile()).err().unwrap();
+        let board = thread::spawn(move || fake_board(listener, [3; 32], "ffffffffffff", BoardKind::Yoru));
+        let err = connect(addr, &[3; 32], Some("a1b2c3d4e5f6"), BoardKind::Yoru.profile()).err().unwrap();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         board.join().unwrap();
     }

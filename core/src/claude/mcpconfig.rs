@@ -1,7 +1,7 @@
-//! The DualEye MCP server in Claude Code, without a terminal.
+//! Yoru's MCP server in Claude Code, without a terminal.
 //!
-//! [`connect`] does what `claude mcp add --scope user dualeye -- <exe> --mcp`
-//! does: it adds `dualeye` to `mcpServers` in Claude Code's user config,
+//! [`connect`] does what `claude mcp add --scope user yoru -- <exe> --mcp`
+//! does: it adds `yoru` to `mcpServers` in Claude Code's user config,
 //! `~/.claude.json` (`.claude.json` in `CLAUDE_CONFIG_DIR` when that's set).
 //! Every other key of that file stays as it was. [`disconnect`] takes ours
 //! out.
@@ -15,13 +15,13 @@ use serde_json::{Map, Value, json};
 
 use super::statusline::{backup, parse_object, read_settings, write_settings};
 /// Our name in `mcpServers`.
-pub const NAME: &str = "companion-hub";
+pub const NAME: &str = "yoru";
 /// `mcp::FLAG`, here without the `mcp` feature.
 const FLAG: &str = "--mcp";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct McpConfigStatus {
-    /// Claude Code's config has a `dualeye` server that runs this app.
+    /// Claude Code's config has a `yoru` server that runs this app.
     pub registered: bool,
     pub config_path: Option<PathBuf>,
 }
@@ -30,7 +30,7 @@ pub fn status() -> McpConfigStatus {
     status_at(config_path())
 }
 
-/// Register `exe --mcp` as the `dualeye` MCP server for every project, with a
+/// Register `exe --mcp` as the `yoru` MCP server for every project, with a
 /// one-off backup of the config.
 pub fn connect(exe: &Path) -> io::Result<McpConfigStatus> {
     connect_at(config_path(), exe)
@@ -101,18 +101,18 @@ mod tests {
         fs::write(&path, theirs.to_string()).unwrap();
 
         assert!(!status_at(Some(path.clone())).registered);
-        assert!(connect_at(Some(path.clone()), Path::new("/Applications/Companion Hub.app/companion-hub")).unwrap().registered);
+        assert!(connect_at(Some(path.clone()), Path::new("/Applications/Yoru.app/yoru-app")).unwrap().registered);
         let now: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(now["numStartups"], 12);
         assert_eq!(now["mcpServers"]["github"]["command"], "gh-mcp");
-        assert_eq!(now["mcpServers"]["companion-hub"]["command"], "/Applications/Companion Hub.app/companion-hub");
-        assert_eq!(now["mcpServers"]["companion-hub"]["args"], json!(["--mcp"]));
-        assert!(dir.path().join(".claude.json.companion-hub-backup").exists());
+        assert_eq!(now["mcpServers"]["yoru"]["command"], "/Applications/Yoru.app/yoru-app");
+        assert_eq!(now["mcpServers"]["yoru"]["args"], json!(["--mcp"]));
+        assert!(dir.path().join(".claude.json.yoru-backup").exists());
 
         // A moved app replaces ours.
-        connect_at(Some(path.clone()), Path::new("/opt/companion-hub")).unwrap();
+        connect_at(Some(path.clone()), Path::new("/opt/yoru-app")).unwrap();
         let now: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(now["mcpServers"]["companion-hub"]["command"], "/opt/companion-hub");
+        assert_eq!(now["mcpServers"]["yoru"]["command"], "/opt/yoru-app");
 
         assert!(!disconnect_at(Some(path.clone())).unwrap().registered);
         let back: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -123,15 +123,15 @@ mod tests {
     fn connect_creates_the_config() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".claude.json");
-        assert!(connect_at(Some(path.clone()), Path::new("/x/companion-hub")).unwrap().registered);
-        assert!(!dir.path().join(".claude.json.companion-hub-backup").exists());
+        assert!(connect_at(Some(path.clone()), Path::new("/x/yoru-app")).unwrap().registered);
+        assert!(!dir.path().join(".claude.json.yoru-backup").exists());
     }
 
     #[test]
-    fn someone_elses_dualeye_is_left_alone() {
+    fn someone_elses_yoru_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".claude.json");
-        let theirs = json!({"mcpServers": {"companion-hub": {"command": "my-own", "args": []}}});
+        let theirs = json!({"mcpServers": {"yoru": {"command": "my-own", "args": []}}});
         fs::write(&path, theirs.to_string()).unwrap();
         assert!(!disconnect_at(Some(path.clone())).unwrap().registered);
         let back: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();

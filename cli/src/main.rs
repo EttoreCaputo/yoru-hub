@@ -1,31 +1,30 @@
-//! Stream this PC's CPU/GPU/fan sensors to the DualEye board.
+//! `yoru`: Yoru, the personal assistant with a body on the desk, from the
+//! command line. Without a subcommand it keeps the board connected, answers
+//! what it hears, delivers the inbox and runs the watchers and the recap.
 //!
 //! Close `idf.py monitor` first: it owns the same serial port.
 //!
-//!   dualeye                 # auto-detect the board and stream; faces and rotation stay as the board has them
-//!   dualeye --once          # print one snapshot, no serial
-//!   dualeye --sensors       # list every raw sensor the backends see
-//!   dualeye --cpu-face rings --gpu-face claude
-//!   dualeye --cpu-rotation 180    # a board mounted upside down
-//!   dualeye --voice-dump          # keep what the board hears after its wake word as WAV files
-//!   dualeye --claude-statusline   # Claude Code status line helper (reads stdin)
-//!   dualeye tools                 # list the board's tools
-//!   dualeye call set_face --screen left --face rings
-//!   dualeye call show_text '{"text":"Ciao"}'
-//!   dualeye mcp                   # MCP server on stdio, for Claude Code / Claude Desktop
-//!   dualeye models download small # a Whisper model, for `dualeye --stt`
-//!   dualeye piper install         # Piper, for `dualeye --tts` (needs Python 3)
-//!   dualeye models download it_IT-paola-medium   # a voice for it
-//!   dualeye --stt --tts           # voice commands with spoken replies
-//!   dualeye models download qwen3.5-4b           # a language model, for `dualeye --llm`
-//!   dualeye --stt --tts --llm     # ...understood by a local language model (llama-server)
-//!   dualeye cloud key groq        # save a Groq API key (read from stdin), for cloud models
-//!   dualeye --stt groq:whisper-large-v3-turbo --llm groq:openai/gpt-oss-20b   # ...run by Groq instead
-//!   dualeye ask "metti rings a sinistra"         # type a command to the language model
-//!   dualeye eval                  # run the voice commands' eval set against the language model
-//!   dualeye say "Ciao!"           # speak through a running bridge's speaker
-//!   dualeye timer 10m pasta       # a timer on the board (also: timer, timer cancel, timer remind 17:30 call Marco, timer pomodoro)
-//!   dualeye music                 # what's playing (also: music pause, play, next, previous)
+//!   yoru                          # connect the board and run (the app does the same)
+//!   yoru --stt --tts              # ...and talk with it, with spoken replies
+//!   yoru cloud key groq           # Yoru's brain, free with daily limits: a Groq API key (read from stdin)
+//!   yoru cloud key anthropic      # ...or Claude, paid and the best: an Anthropic API key
+//!   yoru settings provider groq   # which brain (anthropic, groq, auto); groq_model openai/gpt-oss-20b
+//!   yoru ask "che email ho?"      # ask the assistant, as if said to the board
+//!   yoru inbox                    # the notifications (also: inbox read ID, dismiss ID, clear)
+//!   yoru memory                   # what Yoru knows about you (also: memory edit, memory forget TEXT)
+//!   yoru watch                    # the watchers (also: watch add-task NAME MINUTES TASK, watch run ID, watch remove ID)
+//!   yoru recap                    # the morning recap, now
+//!   yoru connectors presets       # services Yoru can connect to (also: add, login, tools, call)
+//!   yoru tools                    # list the board's tools
+//!   yoru call react --name happy
+//!   yoru mcp                      # MCP server on stdio, for Claude Code / Claude Desktop
+//!   yoru models download small    # a Whisper model, for `yoru --stt`
+//!   yoru piper install            # Piper, for `yoru --tts` (needs Python 3)
+//!   yoru say "Ciao!"              # speak through a running bridge's speaker
+//!   yoru timer 10m pasta          # a timer the board rings
+//!   yoru --claude-statusline      # Claude Code status line helper (reads stdin)
+
+mod connectors_cmd;
 
 use std::process::ExitCode;
 use std::collections::HashSet;
@@ -35,39 +34,34 @@ use std::thread;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use companion_core::agent;
-use companion_core::bridge::{self, BridgeConfig, BridgeEvent, ManagerEvent, Transport};
-use companion_core::claude::{hooks, statusline};
-use companion_core::cloud::{self, CloudRef, Provider};
-use companion_core::hardware::{self, Hardware};
-use companion_core::models::{self, Kind, Model};
-use companion_core::tts::{self, Tts, TtsConfig};
-use companion_core::stt::{self, Stt, SttConfig, SttEngine, SttLanguage};
-use companion_core::eval::{self, EvalSet, Responder};
-use companion_core::llm::{self, Llm, LlmConfig, LocalLlm};
-use companion_core::diary;
-use companion_core::quips::QuipLevel;
-use companion_core::timers::{self, Timers};
-use companion_core::voice::{self, VoiceConfig};
-use companion_core::wifi;
-use companion_core::{
-    Agent, Board, BoardFirmware, ClaudeUsage, Collector, Face, Faces, Hub, Memory, Rotation, Rotations, Snapshot, Source, Sources, Tool, Toolbox, intents, mcp, media,
-    serial,
-};
+use yoru_core::agent;
+use yoru_core::assistant::{self, Assistant, Channel, TaskHost, watchers::{self, Watcher, Watchers, WatchKind}};
+use yoru_core::bridge::{self, BridgeConfig, BridgeEvent, ManagerEvent, Transport};
+use yoru_core::claude::{hooks, statusline};
+use yoru_core::cloud::{self, CloudRef, Provider};
+use yoru_core::hardware::{self, Hardware};
+use yoru_core::models::{self, Kind, Model};
+use yoru_core::tts::{self, Tts, TtsConfig};
+use yoru_core::stt::{self, Stt, SttConfig, SttEngine, SttLanguage};
+use yoru_core::llm::{self, Llm, LlmConfig, LocalLlm};
+use yoru_core::timers::{self, Timers};
+use yoru_core::voice::{self, VoiceConfig};
+use yoru_core::wifi;
+use yoru_core::{Agent, Board, BoardFirmware, Hub, Snapshot, Tool, Toolbox, intents, mcp, serial};
 use serde_json::{Map, Value, json};
 
 #[derive(Parser)]
-#[command(name = "dualeye", version, about = "Stream PC sensors to the ESP32-S3 DualEye board", args_conflicts_with_subcommands = true)]
+#[command(name = "yoru", version, about = "Yoru, the personal assistant with a body on the desk", args_conflicts_with_subcommands = true)]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
-    /// Serial port, or `wifi` for the board set up with `dualeye wifi set`
+    /// Serial port, or `wifi` for the board set up with `yoru wifi set`
     /// (default: as --transport says)
-    #[arg(long, env = "COMPANION_PORT")]
+    #[arg(long, env = "YORU_PORT")]
     port: Option<String>,
     /// Which board the commands talk to when several are connected: its id
-    /// (see `boards`), or its kind (dualeye, yoru)
-    #[arg(long, global = true, env = "COMPANION_BOARD")]
+    /// (see `boards`), or its kind (yoru)
+    #[arg(long, global = true, env = "YORU_BOARD")]
     board: Option<String>,
     /// Without --port: auto (USB when the board is plugged in, otherwise
     /// WiFi), usb or wifi
@@ -76,33 +70,6 @@ struct Args {
     /// Milliseconds between snapshots
     #[arg(long, default_value_t = 1000, value_parser = clap::value_parser!(u64).range(200..))]
     interval_ms: u64,
-    /// Watch face on the left screen: classic, rings, plus, bar, claude, clawd,
-    /// net, disk, battery, image, timer, music or eyes. Without any face, source or rotation flag
-    /// the board keeps its own; with one, the others fall back to classic,
-    /// the usual source and 0
-    #[arg(long)]
-    cpu_face: Option<Face>,
-    /// Watch face on the right screen, from the same list
-    #[arg(long)]
-    gpu_face: Option<Face>,
-    /// Whose metrics classic, rings, plus and bar show on the left screen: cpu (default) or gpu
-    #[arg(long)]
-    cpu_source: Option<Source>,
-    /// Likewise on the right screen: gpu (default) or cpu
-    #[arg(long)]
-    gpu_source: Option<Source>,
-    /// Turn the left (CPU) screen clockwise: 0, 90, 180 or 270 degrees
-    #[arg(long)]
-    cpu_rotation: Option<Rotation>,
-    /// Turn the right (GPU) screen clockwise: 0, 90, 180 or 270 degrees
-    #[arg(long)]
-    gpu_rotation: Option<Rotation>,
-    /// Print one snapshot as JSON and exit, without opening the port
-    #[arg(long, conflicts_with_all = ["sensors", "list_ports"])]
-    once: bool,
-    /// List every raw sensor reading and exit
-    #[arg(long, conflicts_with = "list_ports")]
-    sensors: bool,
     /// List serial ports and exit
     #[arg(long)]
     list_ports: bool,
@@ -117,15 +84,15 @@ struct Args {
     /// Do not print a line per snapshot
     #[arg(long, short)]
     quiet: bool,
-    /// Don't send the mouse pointer to the eyes face: its eyes look about on their own
+    /// Don't send the mouse pointer to Yoru's eyes: they look about on their own
     #[arg(long)]
     no_follow_pointer: bool,
     /// Save each utterance the board streams after its wake word as a WAV
-    /// file, in DIR or in `voice/` in DualEye's data folder
+    /// file, in DIR or in `voice/` in the data folder
     #[arg(long, value_name = "DIR", num_args = 0..=1, default_missing_value = "")]
     voice_dump: Option<std::path::PathBuf>,
     /// Transcribe what the board hears with whisper.cpp (`whisper-server` on
-    /// the PATH): a model from `dualeye models` (default: small), a ggml
+    /// the PATH): a model from `yoru models` (default: small), a ggml
     /// model file, or a cloud model (`groq:whisper-large-v3-turbo`)
     #[arg(long, value_name = "MODEL|FILE", num_args = 0..=1, default_missing_value = "small")]
     stt: Option<String>,
@@ -133,10 +100,10 @@ struct Args {
     #[arg(long, default_value = "auto")]
     stt_language: SttLanguage,
     /// Answer voice commands out loud through the board's speaker, with
-    /// Piper (`dualeye piper install`) and the downloaded voices
+    /// Piper (`yoru piper install`) and the downloaded voices
     #[arg(long)]
     tts: bool,
-    /// A voice from `dualeye models` for its language, instead of the
+    /// A voice from `yoru models` for its language, instead of the
     /// default one (repeat for Italian and English); a cloud one like
     /// `groq:hannah` too, or a voice of an ElevenLabs account for both
     /// (`elevenlabs:voice/<voice_id>`)
@@ -146,18 +113,10 @@ struct Args {
     /// the wake word
     #[arg(long, requires = "tts")]
     no_follow_up: bool,
-    /// Don't pause the music playing on this computer while the board
-    /// listens
-    #[arg(long)]
-    no_pause_music: bool,
     /// Don't keep the downloaded models loaded: those standing in for cloud
     /// ones start when they're needed, one that stops when it's next asked
     #[arg(long)]
     no_keep_warm: bool,
-    /// How often the pet comments on your day out loud (with --tts): once a
-    /// day at most (rare), up to three times (often), or never (off)
-    #[arg(long, default_value = "rare", value_parser = ["off", "rare", "often"])]
-    quips: String,
     #[command(flatten)]
     llm: LlmArgs,
 }
@@ -165,7 +124,7 @@ struct Args {
 #[derive(clap::Args, Clone)]
 struct LlmArgs {
     /// Understand voice commands with a local language model (llama.cpp's
-    /// `llama-server` on the PATH): a model from `dualeye models`, a GGUF
+    /// `llama-server` on the PATH): a model from `yoru models`, a GGUF
     /// file, or a cloud model (`groq:openai/gpt-oss-20b`). Without it, a few
     /// fixed phrases are understood
     #[arg(long, value_name = "MODEL|FILE", num_args = 0..=1, default_missing_value = models::DEFAULT_LLM)]
@@ -174,28 +133,28 @@ struct LlmArgs {
     /// (default: as many as fit)
     #[arg(long, value_name = "N")]
     llm_gpu_layers: Option<u32>,
-    /// How the language model talks: cute (default), playful, calm, sassy,
-    /// butler, minimal, or a description of your own
+    /// How the local language model talks: cute (default), playful, calm,
+    /// sassy, butler, minimal, or a description of your own
     #[arg(long, value_name = "NAME|TEXT")]
     personality: Option<String>,
 }
 
-/// Talk to the board's tools. While the app or a streaming `dualeye` runs,
+/// Talk to the board's tools. While the app or a running `yoru` runs,
 /// these go through it; otherwise they open the port for the call.
 #[derive(Subcommand)]
 enum Command {
     /// List the tools the board offers
     Tools {
-        #[arg(long, env = "COMPANION_PORT")]
+        #[arg(long, env = "YORU_PORT")]
         port: Option<String>,
         /// Print the full `tools/list` result as JSON
         #[arg(long)]
         json: bool,
     },
-    /// Call a board tool: `call set_face --screen left --face rings`, or
-    /// `call set_face '{"screen":"left","face":"rings"}'`
+    /// Call a board tool: `call react --name happy`, or
+    /// `call react '{"name":"happy"}'`
     Call {
-        #[arg(long, env = "COMPANION_PORT")]
+        #[arg(long, env = "YORU_PORT")]
         port: Option<String>,
         /// Print the full result as JSON
         #[arg(long)]
@@ -207,11 +166,11 @@ enum Command {
         args: Vec<String>,
     },
     /// Run an MCP server on stdin/stdout with the board's tools plus
-    /// get_metrics and get_claude_usage. Add it to Claude Code with
-    /// `claude mcp add dualeye -- dualeye mcp`
+    /// get_claude_usage, speak and the timers. Add it to Claude Code with
+    /// `claude mcp add yoru -- yoru mcp`
     Mcp {
-        /// Used only when neither the app nor a streaming `dualeye` is running
-        #[arg(long, env = "COMPANION_PORT")]
+        /// Used only when neither the app nor a running `yoru` is running
+        #[arg(long, env = "YORU_PORT")]
         port: Option<String>,
     },
     /// List the Whisper models for `--stt` and the voices for `--tts`, or
@@ -230,57 +189,56 @@ enum Command {
         #[command(subcommand)]
         action: Option<EngineAction>,
     },
-    /// Type a command to the language model, as if said to the board: it
-    /// runs the board's tools and prints its answer
+    /// Ask Yoru the assistant, as if said to the board: it uses your
+    /// services, the web (on Claude) and the board, and prints its answer. With --llm, a
+    /// local language model answers instead, with the board's tools only
     Ask {
         text: String,
         /// it or en (default: what the text looks like)
         #[arg(long)]
         language: Option<String>,
-        #[arg(long, env = "COMPANION_PORT")]
+        #[arg(long, env = "YORU_PORT")]
         port: Option<String>,
         #[command(flatten)]
         llm: LlmArgs,
     },
-    /// Run the voice commands' eval set (about 50, Italian and English) on a
-    /// simulated board: accuracy and latency of a language model, or of the
-    /// fixed phrases with --rules
-    Eval {
-        #[command(flatten)]
-        llm: LlmArgs,
-        /// The fixed phrases (M5) instead of a language model
-        #[arg(long, conflicts_with = "llm")]
-        rules: bool,
-        /// commands (the main set), holdout (other phrasings), or a JSON file
-        #[arg(long, default_value = "commands")]
-        set: String,
-        /// Only the cases in this language: it or en
-        #[arg(long)]
-        language: Option<String>,
-        /// Print every case, not only the failures
-        #[arg(long, short)]
-        verbose: bool,
-        /// Print the results as JSON
-        #[arg(long)]
-        json: bool,
+    /// The inbox: `inbox` lists it, `inbox read ID`, `inbox dismiss ID`,
+    /// `inbox clear`
+    Inbox {
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
     },
-    /// Put a picture or an animated GIF on a screen, for its image face:
-    /// `dualeye image cat.gif --screen left`, then `--cpu-face image`.
-    /// `--clear` takes it off
-    Image {
-        /// PNG, JPEG, GIF, WebP or BMP; cropped to the middle square
-        #[arg(required_unless_present = "clear")]
-        file: Option<std::path::PathBuf>,
-        /// left or right
-        #[arg(long, default_value = "left", value_parser = ["left", "right"])]
-        screen: String,
-        #[arg(long)]
-        clear: bool,
-        #[arg(long, env = "COMPANION_PORT")]
-        port: Option<String>,
+    /// What Yoru knows about you: `memory` prints it, `memory edit` opens it
+    /// in $EDITOR, `memory forget TEXT`, `memory remember SECTION TEXT`
+    Memory {
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
     },
-    /// Timers, reminders and a pomodoro, shown and rung by the board while
-    /// the app or `dualeye` runs: `timer` lists them, `timer 10m [label]`
+    /// The watchers: `watch` lists them; `watch add-task NAME MINUTES TASK`,
+    /// `watch add-tool NAME MINUTES TOOL [JSON]`, `watch run ID`,
+    /// `watch on|off ID`, `watch remove ID`
+    Watch {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Give the morning recap now
+    Recap,
+    /// Yoru's connectors to your services (MCP servers): list, presets, add,
+    /// login, tools, call…
+    Connectors {
+        #[command(subcommand)]
+        action: connectors_cmd::Action,
+    },
+    /// The assistant's settings: `settings` prints them, `settings KEY VALUE`
+    /// changes one (name, provider: anthropic, groq or auto; model: Claude's;
+    /// groq_model; effort, task_effort, web_search: Claude only; recap,
+    /// recap_at, recap_weekdays_only, quiet, quiet_from, quiet_to)
+    Settings {
+        key: Option<String>,
+        value: Option<String>,
+    },
+    /// Timers, reminders and a pomodoro, rung by the board while the app or
+    /// `yoru` runs: `timer` lists them, `timer 10m [label]`
     /// (or 90s, 1h30m, 25 for minutes) starts one, `timer cancel|pause|resume
     /// [label|all]`, `timer remind 17:30|20m <text>`, `timer pomodoro [stop |
     /// WORK BREAK ROUNDS]`
@@ -291,33 +249,28 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// What's playing on this computer, as the music face shows it; `music
-    /// play|pause|toggle|next|previous` controls it
-    Music {
-        action: Option<String>,
-    },
-    /// The board's WiFi (firmware 1.4.3): `wifi` shows it, `wifi scan` lists
+    /// The board's WiFi: `wifi` shows it, `wifi scan` lists
     /// the networks it sees, `wifi set SSID` joins one and pairs this
     /// computer (over USB; the password is read from stdin), `wifi on|off`,
     /// `wifi pair` pairs this computer with a board set up from another one,
-    /// `wifi forget`. Then `dualeye --transport wifi` streams over it
+    /// `wifi forget`. Then `yoru --transport wifi` runs over it
     Wifi {
-        #[arg(long, env = "COMPANION_PORT")]
+        #[arg(long, env = "YORU_PORT")]
         port: Option<String>,
         #[command(subcommand)]
         action: Option<WifiAction>,
     },
-    /// List the boards connected: through the app or a streaming
-    /// `companion`, or the one on the port
+    /// List the boards connected: through the app or a running `yoru`, or
+    /// the one on the port
     Boards {
-        #[arg(long, env = "COMPANION_PORT")]
+        #[arg(long, env = "YORU_PORT")]
         port: Option<String>,
         /// Print them as JSON
         #[arg(long)]
         json: bool,
     },
     /// Speak through the board's speaker. Needs the app with spoken replies
-    /// on, or `dualeye --tts`, running
+    /// on, or `yoru --tts`, running
     Say {
         text: String,
         /// it or en (default: what the text looks like)
@@ -354,7 +307,7 @@ fn parse_transport(s: &str) -> Result<Transport, String> {
 
 #[derive(Subcommand)]
 enum EngineAction {
-    /// Create a virtualenv in DualEye's data folder and pip install the engine into it
+    /// Create a virtualenv in the data folder and pip install the engine into it
     Install {
         /// The Python 3 to create it with (default: python3 on the PATH, or
         /// the newest python3.N the engine supports)
@@ -365,7 +318,7 @@ enum EngineAction {
 
 #[derive(Subcommand)]
 enum CloudAction {
-    /// Save a provider's API key in DualEye's data folder, read from stdin
+    /// Save a provider's API key in the data folder, read from stdin
     /// so it stays out of the shell's history (its environment variable,
     /// like GROQ_API_KEY, wins over it)
     Key {
@@ -399,8 +352,12 @@ fn main() -> ExitCode {
         Some(Command::Cloud { action }) => return cloud_command(action),
         Some(Command::Piper { action }) => return engine_command(tts::Engine::Piper, action),
         Some(Command::Ask { text, language, port, llm }) => return ask(&text, language.as_deref(), port, &llm),
-        Some(Command::Eval { llm, rules, set, language, verbose, json }) => return eval(&llm, rules, &set, language.as_deref(), verbose, json),
-        Some(Command::Image { file, screen, clear, port }) => return image(port, file.as_deref(), &screen, clear),
+        Some(Command::Inbox { args }) => return inbox_command(&args),
+        Some(Command::Memory { args }) => return memory_command(&args),
+        Some(Command::Watch { args }) => return watch_command(&args),
+        Some(Command::Recap) => return recap(),
+        Some(Command::Connectors { action }) => return connectors_cmd::run(action),
+        Some(Command::Settings { key, value }) => return settings_command(key.as_deref(), value.as_deref()),
         Some(Command::Say { text, language }) => {
             return match board(None).say(&text, language.as_deref()) {
                 Ok(r) => {
@@ -414,7 +371,6 @@ fn main() -> ExitCode {
             };
         }
         Some(Command::Timer { language, args }) => return timer(language.as_deref(), &args),
-        Some(Command::Music { action }) => return music(action.as_deref()),
         Some(Command::Wifi { port, action }) => return wifi_command(port, action),
         Some(Command::Mcp { port }) => {
             return match mcp::serve_stdio(port) {
@@ -437,30 +393,11 @@ fn main() -> ExitCode {
     }
     if args.list_ports {
         for p in serial::list_ports() {
-            let mark = if p.is_board { "  <- DualEye" } else { "" };
+            let mark = if p.is_board { "  <- Yoru?" } else { "" };
             println!("{:<24} {:04x}:{:04x}  {}{mark}", p.name, p.vid, p.pid, p.product.unwrap_or_default());
         }
         return ExitCode::SUCCESS;
     }
-    if args.sensors {
-        let mut collector = Collector::new();
-        collector.readings();
-        thread::sleep(Duration::from_millis(500));
-        for r in collector.readings() {
-            println!("{:<28} {:<28} {:>9.1} {}", r.source, r.label, r.value, r.unit);
-        }
-        return ExitCode::SUCCESS;
-    }
-    if args.once {
-        let mut collector = Collector::new();
-        collector.sample();
-        thread::sleep(Duration::from_millis(500));
-        let mut snapshot = collector.sample();
-        snapshot.claude = ClaudeUsage::new().sample();
-        println!("{}", serde_json::to_string(&snapshot).unwrap());
-        return ExitCode::SUCCESS;
-    }
-
     let stt = match args.stt.as_deref().map(|m| stt_config(m, args.stt_language)) {
         None => None,
         Some(Ok(config)) => Some(warm(Stt::new(config).with_fallback(stt::local_fallback()).kept_warm(!args.no_keep_warm), Stt::rewarm)),
@@ -485,52 +422,48 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // Lets `dualeye mcp` and `dualeye call` use the board while this streams.
+    // Lets `yoru mcp` and `yoru call` use the board while this runs.
+    let timers = Arc::new(Timers::open(timers::default_file()));
+    let the_assistant = Arc::new(Assistant::open(assistant::default_dir(), timers.clone()));
+    let _connectors = start_connectors(&the_assistant, None);
     let hub = Hub::start().inspect_err(|e| eprintln!("not sharing the board with other processes: {e}")).ok();
     let config = BridgeConfig {
         port: args.port,
         transport: args.transport,
         interval: Duration::from_millis(args.interval_ms),
-        faces: Arc::new(Mutex::new(Faces {
-            cpu: args.cpu_face.unwrap_or_default(),
-            gpu: args.gpu_face.unwrap_or_default(),
-            src: Sources { cpu: args.cpu_source.unwrap_or(Source::Cpu), gpu: args.gpu_source.unwrap_or(Source::Gpu) },
-        })),
-        rotation: Arc::new(Mutex::new(Rotations {
-            cpu: args.cpu_rotation.unwrap_or_default(),
-            gpu: args.gpu_rotation.unwrap_or_default(),
-        })),
         hub,
-        adopt_board_settings: args.cpu_face.is_none()
-            && args.gpu_face.is_none()
-            && args.cpu_source.is_none()
-            && args.gpu_source.is_none()
-            && args.cpu_rotation.is_none()
-            && args.gpu_rotation.is_none(),
         voice: Arc::new(Mutex::new(VoiceConfig {
             dump_dir: args.voice_dump.map(|d| if d.as_os_str().is_empty() { voice::default_dump_dir().unwrap_or(d) } else { d }),
             stt,
             tts,
             agent,
             follow_up: !args.no_follow_up,
-            pause_music: !args.no_pause_music,
         })),
         // The alerts need the hooks in Claude Code's settings (the app's Display tab adds them).
         claude_alerts: Arc::default(),
         agents: Arc::default(),
-        timers: Arc::new(Timers::open(timers::default_file())),
-        music: Arc::default(),
+        timers: timers.clone(),
         follow_pointer: Arc::new(AtomicBool::new(!args.no_follow_pointer)),
-        quips: Arc::new(Mutex::new(match args.quips.as_str() {
-            "off" => QuipLevel::Off,
-            "often" => QuipLevel::Often,
-            _ => QuipLevel::Rare,
-        })),
-        diary: diary::default_file(),
         primary: Arc::default(),
-        board_settings: Arc::default(),
+        assistant: Some(the_assistant.clone()),
     };
     let stop = Arc::new(AtomicBool::new(false));
+    if !the_assistant.is_ready() {
+        eprintln!("no brain: Yoru can't think or watch anything yet (yoru cloud key groq, free, or yoru cloud key anthropic)");
+    }
+    // The watchers and the morning recap, on their own thread.
+    let scheduler = {
+        let (assistant, watchers, stop) = (the_assistant.clone(), Arc::new(Watchers::open(watchers_file())), stop.clone());
+        thread::spawn(move || {
+            watchers::run_scheduler(&assistant, &watchers, &TaskHost, &stop, &|e| match e {
+                watchers::ScheduleEvent::Watched { id, told, error: None } if told > 0 => println!("watcher {id}: {told} new"),
+                watchers::ScheduleEvent::Watched { id, error: Some(e), .. } => eprintln!("watcher {id}: {e}"),
+                watchers::ScheduleEvent::Recap { error: None } => println!("recap given"),
+                watchers::ScheduleEvent::Recap { error: Some(e) } => eprintln!("recap: {e}"),
+                _ => {}
+            })
+        })
+    };
     // Ctrl-C ends the loop, so the whisper-server sidecar is stopped too.
     {
         let stop = stop.clone();
@@ -548,7 +481,7 @@ fn main() -> ExitCode {
                 BridgeEvent::Waiting { reason } => eprintln!("{tag}{reason}, retrying (or pass --port)"),
                 BridgeEvent::Connected { port } => println!("{tag}streaming to {port}"),
                 BridgeEvent::Snapshot { snapshot, sent } if !quiet => {
-                    println!("{tag}{}{}", summary(&snapshot), if sent { "" } else { "  (no temperature, not sent)" })
+                    println!("{tag}{}{}", summary(&snapshot), if sent { "" } else { "  (not sent)" })
                 }
                 BridgeEvent::Snapshot { .. } => {}
                 BridgeEvent::BoardLog { line } => eprintln!("{tag}board: {line}"),
@@ -595,23 +528,21 @@ fn main() -> ExitCode {
                 BridgeEvent::Agents { .. } => {}
                 BridgeEvent::TimerFired { text, error: None, .. } => println!("{tag}timer: {text}"),
                 BridgeEvent::TimerFired { text, error: Some(e), .. } => println!("{tag}timer: {text} (not said: {e})"),
-                BridgeEvent::Quip { quip, text, error: None } => println!("{tag}pet ({}): {text}", quip.topic.name()),
-                BridgeEvent::Quip { quip, text, error: Some(e) } => println!("{tag}pet ({}): {text} (not said: {e})", quip.topic.name()),
+                BridgeEvent::Notified { id, error: None } => println!("{tag}notification {id} on the board"),
+                BridgeEvent::Notified { id, error: Some(e) } => eprintln!("{tag}notification {id}: {e}"),
+                BridgeEvent::NotificationOpened { url, .. } => {
+                    if let Some(url) = url {
+                        open_url(&url);
+                    }
+                }
                 BridgeEvent::ClaudeAlert { text, error: None, .. } => println!("{tag}claude: {text}"),
                 BridgeEvent::ClaudeAlert { text, error: Some(e), .. } => eprintln!("{tag}claude: {text} (not given: {e})"),
-                BridgeEvent::Settings { faces, rotation } => println!(
-                    "board settings: faces {}/{}, rotation {}/{}",
-                    faces.cpu.name(),
-                    faces.gpu.name(),
-                    rotation.cpu.degrees(),
-                    rotation.gpu.degrees()
-                ),
                 BridgeEvent::Firmware { firmware } => match firmware {
                     BoardFirmware::Version { kind, version, protocol: 1, .. } => {
                         println!("{tag}board runs {kind} firmware {version}, which this version can't drive: reflash it from the app")
                     }
                     BoardFirmware::Version { kind, version, .. } => println!("{tag}board runs {kind} firmware {version}"),
-                    BoardFirmware::Legacy => println!("{tag}board runs DualEye firmware from before 0.2.0: reflash it from the app"),
+                    BoardFirmware::Legacy => println!("{tag}this board runs Yoru firmware: Yoru's host doesn't drive it"),
                     BoardFirmware::Missing => eprintln!("{tag}board has no firmware: flash it from the app"),
                 },
                 BridgeEvent::Disconnected { port, reason, permission_denied } => {
@@ -632,10 +563,12 @@ fn main() -> ExitCode {
     voice.stt.iter().for_each(|s| s.shutdown());
     voice.tts.iter().for_each(|t| t.shutdown());
     voice.agent.iter().for_each(|a| a.llm().shutdown());
+    drop(voice);
+    let _ = scheduler.join();
     if fatal.load(Ordering::Relaxed) { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }
 
-/// `--llm qwen3.5-4b` (a model from `dualeye models`) or `--llm path/to/model.gguf`.
+/// `--llm qwen3.5-4b` (a model from `yoru models`) or `--llm path/to/model.gguf`.
 fn llm_config(args: &LlmArgs) -> Result<LlmConfig, String> {
     let model = args.llm.as_deref().unwrap_or(models::DEFAULT_LLM);
     if cloud::is_cloud_id(model) {
@@ -644,7 +577,7 @@ fn llm_config(args: &LlmArgs) -> Result<LlmConfig, String> {
     let server = llm::find_server().ok_or("llama-server not found: install llama.cpp (brew install llama.cpp)")?;
     let path = match Model::by_id(model) {
         Some(m) if m.kind == Kind::Llm && m.is_installed() => m.path().ok_or("no data folder for the models")?,
-        Some(m) if m.kind == Kind::Llm => return Err(format!("the {model} model isn't downloaded: dualeye models download {model}")),
+        Some(m) if m.kind == Kind::Llm => return Err(format!("the {model} model isn't downloaded: yoru models download {model}")),
         _ if std::path::Path::new(model).is_file() => model.into(),
         _ => {
             let ids: Vec<&str> = Model::of_kind(Kind::Llm).map(|m| m.id).collect();
@@ -671,11 +604,11 @@ fn agent(args: &LlmArgs, fallback: bool, keep_warm: bool) -> Result<Arc<Agent>, 
 /// while it's [kept warm](Stt::kept_warm).
 fn warm<T: Send + Sync + 'static, E: 'static>(sidecar: T, rewarm: fn(&T) -> Result<(), E>) -> Arc<T> {
     let sidecar = Arc::new(sidecar);
-    companion_core::keep_warm(&sidecar, move |s| drop(rewarm(s)));
+    yoru_core::keep_warm(&sidecar, move |s| drop(rewarm(s)));
     sidecar
 }
 
-/// The board's tools for `dualeye ask`, through a running bridge or the port.
+/// The board's tools for `yoru ask`, through a running bridge or the port.
 struct BoardTools {
     board: Board,
     language: String,
@@ -687,23 +620,8 @@ impl Toolbox for BoardTools {
     }
 
     fn call(&self, name: &str, arguments: &Value) -> Result<String, String> {
-        if name == "get_metrics" {
-            let snapshot = match self.board.bridge_snapshot() {
-                Some((s, _)) => s,
-                None => {
-                    let mut collector = Collector::new();
-                    collector.sample();
-                    thread::sleep(Duration::from_millis(500));
-                    collector.sample()
-                }
-            };
-            return Ok(snapshot.metrics_json().to_string());
-        }
         if Timers::tools().iter().any(|t| t.name == name) {
             return self.board.timer_tool(name, arguments, &self.language);
-        }
-        if let Some(result) = companion_core::apps::call_tool(name, arguments) {
-            return result;
         }
         let result = self.board.call_tool(name, arguments.clone()).map_err(|e| e.to_string())?;
         match (result.is_error, name, &result.structured_content) {
@@ -738,37 +656,8 @@ fn parse_span(s: &str) -> Option<u64> {
     (num.is_empty() && total > 0).then_some(total)
 }
 
-fn music(action: Option<&str>) -> ExitCode {
-    if let Some(action) = action {
-        let result = action.parse().and_then(|a| companion_core::music::control(a, companion_core::music::now_playing().as_ref()));
-        match result {
-            Ok(player) => println!("{player}: {action}"),
-            Err(e) => {
-                eprintln!("{e}");
-                return ExitCode::FAILURE;
-            }
-        }
-        // The player takes a moment to move on.
-        thread::sleep(Duration::from_millis(600));
-    }
-    match companion_core::music::now_playing() {
-        Some(n) => {
-            let clock = |s: f64| format!("{}:{:02}", s as u64 / 60, s as u64 % 60);
-            let at = match (n.position_now(), n.duration_s) {
-                (Some(p), Some(d)) => format!("  {} / {}", clock(p), clock(d)),
-                (Some(p), None) => format!("  {}", clock(p)),
-                _ => String::new(),
-            };
-            let by = if n.artist.is_empty() { String::new() } else { format!(" - {}", n.artist) };
-            println!("{} {}{by}{at}  ({})", if n.playing { "▶" } else { "⏸" }, n.title, n.player);
-        }
-        None => println!("nothing playing"),
-    }
-    ExitCode::SUCCESS
-}
-
 fn timer(language: Option<&str>, args: &[String]) -> ExitCode {
-    let language = language.unwrap_or(companion_core::claude::alerts::system_language());
+    let language = language.unwrap_or(yoru_core::claude::alerts::system_language());
     let rest = |from: usize| args.get(from..).unwrap_or_default().join(" ");
     let first = args.first().map(String::as_str);
     let (tool, arguments) = match first {
@@ -785,7 +674,7 @@ fn timer(language: Option<&str>, args: &[String]) -> ExitCode {
                 (Some(at), _) => ("set_reminder", json!({"text": text, "at": timers::clock_text(at)})),
                 (None, Some(secs)) => ("set_reminder", json!({"text": text, "in_minutes": secs as f64 / 60.0})),
                 (None, None) => {
-                    eprintln!("usage: dualeye timer remind 17:30|20m <text>");
+                    eprintln!("usage: yoru timer remind 17:30|20m <text>");
                     return ExitCode::FAILURE;
                 }
             }
@@ -803,7 +692,7 @@ fn timer(language: Option<&str>, args: &[String]) -> ExitCode {
                 ("set_timer", if label.is_empty() { json!({"seconds": secs}) } else { json!({"seconds": secs, "label": label}) })
             }
             None => {
-                eprintln!("unknown timer command `{span}`: see dualeye timer --help");
+                eprintln!("unknown timer command `{span}`: see yoru timer --help");
                 return ExitCode::FAILURE;
             }
         },
@@ -822,15 +711,15 @@ fn timer(language: Option<&str>, args: &[String]) -> ExitCode {
                 let ends = t["ends_at"].as_str().map(|e| format!(", ends {e}")).unwrap_or_default();
                 println!("{}{name}: {}:{:02}:{:02} left of {} s ({}{ends})", t["kind"].as_str().unwrap_or(""), left / 3600, left % 3600 / 60, left % 60, t["total_s"], t["state"].as_str().unwrap_or(""));
             }
-            if board.last_route() != Some(companion_core::Route::Hub) {
-                eprintln!("(the app isn't running: these ring once it, or `dualeye`, runs)");
+            if board.last_route() != Some(yoru_core::Route::Hub) {
+                eprintln!("(the app isn't running: these ring once it, or `yoru`, runs)");
             }
             ExitCode::SUCCESS
         }
         Ok(text) => {
             println!("{text}");
-            if board.last_route() != Some(companion_core::Route::Hub) {
-                eprintln!("(the app isn't running: it rings once the app, or `dualeye`, runs)");
+            if board.last_route() != Some(yoru_core::Route::Hub) {
+                eprintln!("(the app isn't running: it rings once the app, or `yoru`, runs)");
             }
             ExitCode::SUCCESS
         }
@@ -842,6 +731,268 @@ fn timer(language: Option<&str>, args: &[String]) -> ExitCode {
 }
 
 fn ask(text: &str, language: Option<&str>, port: Option<String>, args: &LlmArgs) -> ExitCode {
+    if args.llm.is_some() {
+        return ask_local(text, language, port, args);
+    }
+    let assistant = open_assistant();
+    let _connectors = start_connectors(&assistant, Some(Duration::from_secs(10)));
+    let language = language.unwrap_or_else(|| intents::guess_language(text));
+    let host = CliHost { board: board(port) };
+    match assistant.respond(text, Some(language), Channel::Text, &host) {
+        Ok(reply) => {
+            for a in &reply.actions {
+                eprintln!("{}{}: {}", a.tool, if a.ok { "" } else { " failed" }, a.summary);
+            }
+            println!("{}", reply.text);
+            eprintln!("{} in {:.1} s", reply.model, reply.elapsed_ms as f64 / 1000.0);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// What the assistant does from the command line: the board through a
+/// running app or `yoru`, or the port; Allow or Deny asked on the terminal.
+struct CliHost {
+    board: Board,
+}
+
+impl assistant::Host for CliHost {
+    fn board_tools(&self) -> Vec<Tool> {
+        self.board.list_tools().unwrap_or_default().into_iter().filter(|t| !yoru_core::BoardKind::hub_only(&t.name) && t.name != "set_mic").collect()
+    }
+
+    fn call_board(&self, name: &str, arguments: &Value) -> Result<String, String> {
+        let result = self.board.call_tool(name, arguments.clone()).map_err(|e| e.to_string())?;
+        if result.is_error { Err(result.text()) } else { Ok(result.text()) }
+    }
+
+    fn confirm(&self, title: &str, _text: &str, detail: &str) -> Option<bool> {
+        eprintln!("Yoru wants to {title}:\n{detail}\nAllow? [y/N] ");
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer).ok()?;
+        Some(matches!(answer.trim(), "y" | "Y" | "yes" | "s" | "si" | "sì"))
+    }
+}
+
+fn open_assistant() -> Assistant {
+    Assistant::open(assistant::default_dir(), Arc::new(Timers::open(timers::default_file())))
+}
+
+/// Start the connectors and hand their tools to `assistant`; with `wait`,
+/// give each one that long to connect first (for a single question).
+fn start_connectors(assistant: &Assistant, wait: Option<Duration>) -> Option<Arc<yoru_core::connectors::Connectors>> {
+    let dir = assistant::default_dir()?;
+    let connectors = match yoru_core::connectors::Connectors::open(dir, |_| {}) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            eprintln!("connectors: {e}");
+            return None;
+        }
+    };
+    if let Some(wait) = wait {
+        for c in connectors.list().iter().filter(|c| c.enabled) {
+            connectors.wait_ready(&c.id, wait);
+        }
+    }
+    assistant.set_external(Some(connectors.clone()));
+    Some(connectors)
+}
+
+fn watchers_file() -> Option<std::path::PathBuf> {
+    assistant::default_dir().map(|d| d.join("watchers.json"))
+}
+
+fn open_url(url: &str) {
+    let program = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
+    let _ = std::process::Command::new(program).arg(url).spawn();
+}
+
+fn inbox_command(args: &[String]) -> ExitCode {
+    let assistant = open_assistant();
+    let inbox = &assistant.inbox;
+    let done = |ok: bool, what: &str| {
+        if ok {
+            ExitCode::SUCCESS
+        } else {
+            eprintln!("{what}");
+            ExitCode::FAILURE
+        }
+    };
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        [] => {
+            for n in inbox.list() {
+                let mark = if n.read { " " } else { "*" };
+                println!("{mark} {:<14} [{:<6}] {}: {}", n.id, n.urgency.name(), n.source, n.title);
+                if !n.text.is_empty() {
+                    println!("{:<26}{}", "", n.text);
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        ["read", id] => done(inbox.mark_read(id), "no unread notification with that id"),
+        ["read"] => done(inbox.mark_all_read() || true, ""),
+        ["dismiss", id] => done(inbox.dismiss(id), "no notification with that id"),
+        ["clear"] => done(inbox.clear() || true, ""),
+        _ => done(false, "usage: inbox [read [ID] | dismiss ID | clear]"),
+    }
+}
+
+fn memory_command(args: &[String]) -> ExitCode {
+    let assistant = open_assistant();
+    let memory = &assistant.memory;
+    let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        [] => {
+            print!("{}", memory.text());
+            return ExitCode::SUCCESS;
+        }
+        ["edit"] => {
+            let Some(file) = assistant.dir().map(|d| d.join("memory.md")) else { return ExitCode::FAILURE };
+            if !file.exists() {
+                let _ = memory.set_text(&memory.text());
+            }
+            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
+            return match std::process::Command::new(editor).arg(&file).status() {
+                Ok(s) if s.success() => ExitCode::SUCCESS,
+                _ => ExitCode::FAILURE,
+            };
+        }
+        ["forget", rest @ ..] => memory.forget(&rest.join(" ")),
+        ["remember", section, rest @ ..] => memory.remember(section, &rest.join(" ")),
+        _ => Err("usage: memory [edit | forget TEXT | remember SECTION TEXT]".into()),
+    };
+    match result {
+        Ok(m) => {
+            println!("{m}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn watch_command(args: &[String]) -> ExitCode {
+    let watchers = Watchers::open(watchers_file());
+    let fail = |e: &str| {
+        eprintln!("{e}");
+        ExitCode::FAILURE
+    };
+    let new = |name: &str, minutes: &str, kind: WatchKind| -> Result<Watcher, String> {
+        let every_min = minutes.parse().map_err(|_| format!("{minutes}: not a number of minutes"))?;
+        Ok(Watcher { id: String::new(), name: name.into(), kind, every_min, enabled: true, instructions: String::new(), max_urgency: assistant::Urgency::High })
+    };
+    let result: Result<String, String> = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        [] => {
+            for e in watchers.list() {
+                let what = match &e.watcher.kind {
+                    WatchKind::Tool { tool, arguments } => format!("tool {tool} {arguments}"),
+                    WatchKind::Task { task } => format!("task: {task}"),
+                };
+                let state = if e.watcher.enabled { "on " } else { "off" };
+                println!("{state} {:<20} every {:>4} min  told {:>3}  {what}", e.watcher.id, e.watcher.every_min, e.state.told);
+                if let Some(err) = &e.state.last_error {
+                    println!("{:<30}last error: {err}", "");
+                }
+            }
+            return ExitCode::SUCCESS;
+        }
+        ["add-task", name, minutes, task @ ..] if !task.is_empty() => {
+            new(name, minutes, WatchKind::Task { task: task.join(" ") }).and_then(|w| watchers.put(w)).map(|()| "added".into())
+        }
+        ["add-tool", name, minutes, tool, rest @ ..] => {
+            let arguments = if rest.is_empty() { Ok(json!({})) } else { serde_json::from_str(&rest.join(" ")).map_err(|e| e.to_string()) };
+            arguments
+                .and_then(|arguments| new(name, minutes, WatchKind::Tool { tool: tool.to_string(), arguments }))
+                .and_then(|w| watchers.put(w))
+                .map(|()| "added (it runs inside the app or a running yoru, which has the connectors)".into())
+        }
+        [on @ ("on" | "off"), id] => match watchers.list().into_iter().find(|e| e.watcher.id == *id) {
+            Some(mut e) => {
+                e.watcher.enabled = *on == "on";
+                watchers.put(e.watcher).map(|()| "done".into())
+            }
+            None => Err(format!("no watcher {id}")),
+        },
+        ["remove", id] => if watchers.remove(id) { Ok("removed".into()) } else { Err(format!("no watcher {id}")) },
+        ["run", id] => match watchers.list().into_iter().find(|e| e.watcher.id == *id) {
+            Some(e) => {
+                let assistant = open_assistant();
+                let _connectors = start_connectors(&assistant, Some(Duration::from_secs(10)));
+                watchers::run_one(&assistant, &watchers, &e.watcher, &TaskHost).map(|n| format!("{n} new notification(s)"))
+            }
+            None => Err(format!("no watcher {id}")),
+        },
+        _ => Err("usage: watch [add-task NAME MINUTES TASK | add-tool NAME MINUTES TOOL [JSON] | on|off|run|remove ID]".into()),
+    };
+    match result {
+        Ok(m) => {
+            println!("{m}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(&e),
+    }
+}
+
+fn recap() -> ExitCode {
+    let assistant = open_assistant();
+    let _connectors = start_connectors(&assistant, Some(Duration::from_secs(10)));
+    let task = assistant.settings().routines.recap_task().to_string();
+    match assistant.run_task(&task, &TaskHost) {
+        Ok(reply) => {
+            if let Some(n) = assistant.inbox.list().first() {
+                println!("{}: {}\n{}", n.source, n.title, n.text);
+            }
+            eprintln!("{}", reply.text);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn settings_command(key: Option<&str>, value: Option<&str>) -> ExitCode {
+    let assistant = open_assistant();
+    let mut settings = serde_json::to_value(assistant.settings()).unwrap_or_default();
+    let (Some(key), Some(value)) = (key, value) else {
+        println!("{}", serde_json::to_string_pretty(&settings).unwrap_or_default());
+        let s = assistant.settings();
+        match s.brain() {
+            Some(b) => eprintln!("thinking with {} ({}){}", b.name(), s.model_of(b), if b.has_key() { "" } else { ", which has no key yet" }),
+            None => eprintln!("no brain: add a key with yoru cloud key groq (free) or yoru cloud key anthropic"),
+        }
+        return ExitCode::SUCCESS;
+    };
+    if key == "groq_model" && !assistant::groq::models().iter().any(|(id, _)| *id == value) {
+        let known: Vec<&str> = assistant::groq::models().into_iter().map(|(id, _)| id).collect();
+        eprintln!("unknown Groq model {value}: one of {}", known.join(", "));
+        return ExitCode::FAILURE;
+    }
+    // `auto`: the brain that has a key, Claude first.
+    let value: Value = if key == "provider" && value == "auto" { Value::Null } else { serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.into())) };
+    let slot = if settings.get(key).is_some() { settings.get_mut(key) } else { settings["routines"].get_mut(key) };
+    let Some(slot) = slot else {
+        eprintln!("no setting {key}");
+        return ExitCode::FAILURE;
+    };
+    *slot = value;
+    match serde_json::from_value(settings).map_err(|e| e.to_string()).and_then(|s| assistant.set_settings(s).map_err(|e| e.to_string())) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `yoru ask --llm`: the local language model, with the board's tools only.
+fn ask_local(text: &str, language: Option<&str>, port: Option<String>, args: &LlmArgs) -> ExitCode {
     let agent = match agent(args, true, false) {
         Ok(a) => a,
         Err(why) => {
@@ -878,94 +1029,7 @@ fn ask(text: &str, language: Option<&str>, port: Option<String>, args: &LlmArgs)
     }
 }
 
-fn eval(args: &LlmArgs, rules: bool, set: &str, language: Option<&str>, verbose: bool, json: bool) -> ExitCode {
-    let set = match EvalSet::named(set) {
-        Ok(s) => s,
-        Err(why) => {
-            eprintln!("{why}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let agent = if rules {
-        None
-    } else {
-        match agent(args, false, false) {
-            Ok(a) => Some(a),
-            Err(why) => {
-                eprintln!("{why}");
-                return ExitCode::FAILURE;
-            }
-        }
-    };
-    if let Some(agent) = &agent {
-        eprintln!("loading {}", agent.llm().config().label());
-        if let Err(e) = agent.llm().warm_up() {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    }
-    let responder = match &agent {
-        Some(a) => Responder::Llm(a),
-        None => Responder::Rules,
-    };
-    if let Err(e) = eval::prime(&set, &responder) {
-        eprintln!("{e}");
-        return ExitCode::FAILURE;
-    }
-    let cases: Vec<_> = set.cases.iter().filter(|c| language.is_none_or(|l| c.lang == l)).collect();
-    let mut results = Vec::new();
-    for (i, case) in cases.iter().enumerate() {
-        let result = match eval::run_case(&set, case, &responder) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("{e}");
-                return ExitCode::FAILURE;
-            }
-        };
-        if !json && (verbose || !result.pass) {
-            let mark = if result.pass { "ok  " } else { "FAIL" };
-            println!("{mark} {:>2} [{}] {}", i + 1, result.lang, result.say.join(" / "));
-            for a in &result.actions {
-                println!("          {}({}){}", a.tool, a.arguments, if a.ok { String::new() } else { format!(" -> {}", a.result) });
-            }
-            println!("          \"{}\" ({} ms{})", result.reply, result.reply_ms, if result.wrong_language { ", wrong language" } else { "" });
-            if let Some(why) = &result.why {
-                println!("          {why}");
-            }
-        } else if !json {
-            eprint!(".");
-        }
-        results.push(result);
-    }
-    if let Some(agent) = &agent {
-        agent.llm().shutdown();
-    }
-    let s = eval::summarize(&results);
-    if json {
-        println!("{}", serde_json::to_string_pretty(&json!({"summary": s, "results": results})).unwrap_or_default());
-    } else {
-        eprintln!();
-        let pct = |(p, n): (usize, usize)| if n == 0 { 0.0 } else { 100.0 * p as f64 / n as f64 };
-        println!(
-            "{} of {} right ({:.0} %): Italian {}/{}, English {}/{}; {} replies in the wrong language",
-            s.passed,
-            s.cases,
-            pct((s.passed, s.cases)),
-            s.passed_it.0,
-            s.passed_it.1,
-            s.passed_en.0,
-            s.passed_en.1,
-            s.wrong_language
-        );
-        println!(
-            "first action (or answer): median {} ms, 90th percentile {} ms; reply: median {} ms, 90th percentile {} ms",
-            s.first_ms_median, s.first_ms_p90, s.reply_ms_median, s.reply_ms_p90
-        );
-    }
-    ExitCode::SUCCESS
-}
-
-/// `--stt small` (a model from `dualeye models`) or `--stt path/to/ggml-model.bin`.
+/// `--stt small` (a model from `yoru models`) or `--stt path/to/ggml-model.bin`.
 fn stt_config(model: &str, language: SttLanguage) -> Result<SttConfig, String> {
     if cloud::is_cloud_id(model) {
         return Ok(SttConfig { engine: SttEngine::Cloud(cloud::Client::new(model, Kind::Whisper)?), language });
@@ -977,7 +1041,7 @@ fn stt_config(model: &str, language: SttLanguage) -> Result<SttConfig, String> {
     } else {
         let known = Model::by_id(model).ok_or_else(|| format!("{model}: no such file, and not one of {}", model_ids()))?;
         if !known.is_installed() {
-            return Err(format!("the {model} model isn't downloaded: dualeye models download {model}"));
+            return Err(format!("the {model} model isn't downloaded: yoru models download {model}"));
         }
         known.path().ok_or("no data folder for the models")?
     };
@@ -995,18 +1059,18 @@ fn tts_config(voices: &[String]) -> Result<TtsConfig, String> {
             }
             continue;
         }
-        let m = Model::by_id(id).filter(|m| m.kind == Kind::Voice).ok_or_else(|| format!("{id}: not a voice; see dualeye models"))?;
+        let m = Model::by_id(id).filter(|m| m.kind == Kind::Voice).ok_or_else(|| format!("{id}: not a voice; see yoru models"))?;
         if !m.is_installed() {
-            return Err(format!("the {id} voice isn't downloaded: dualeye models download {id}"));
+            return Err(format!("the {id} voice isn't downloaded: yoru models download {id}"));
         }
         config.voices.insert(m.language.unwrap_or("en").to_string(), id.clone());
     }
     if config.voices.is_empty() {
         let defaults: Vec<&str> = ["it", "en"].into_iter().filter_map(models::default_voice).collect();
-        return Err(format!("no voice downloaded: dualeye models download {}", defaults.join(" (and) ")));
+        return Err(format!("no voice downloaded: yoru models download {}", defaults.join(" (and) ")));
     }
     if let Some(e) = config.engines().find(|e| !config.pythons.contains_key(e)) {
-        return Err(format!("{} isn't installed: dualeye {} install", e.name(), e.key()));
+        return Err(format!("{} isn't installed: yoru {} install", e.name(), e.key()));
     }
     TtsConfig::new(config.pythons, config.voices)
 }
@@ -1018,7 +1082,7 @@ fn cloud_command(action: Option<CloudAction>) -> ExitCode {
                 let key = match p.key_source() {
                     Some((_, cloud::KeySource::Env)) => format!("key from {}", p.key_env),
                     Some((_, cloud::KeySource::Saved)) => "key saved".to_string(),
-                    None => format!("no key: get one at {}, then dualeye cloud key {}", p.keys_url, p.id),
+                    None => format!("no key: get one at {}, then yoru cloud key {}", p.keys_url, p.id),
                 };
                 println!("{:<8} {}. {key}", p.id, p.note);
                 if p.api == cloud::Api::ElevenLabs {
@@ -1078,7 +1142,7 @@ fn engine_command(engine: tts::Engine, action: Option<EngineAction>) -> ExitCode
         None => match engine.python() {
             Some(python) => println!("{name} installed: {}", python.display()),
             None => {
-                println!("{name} isn't installed: dualeye {} install", engine.key());
+                println!("{name} isn't installed: yoru {} install", engine.key());
                 return ExitCode::FAILURE;
             }
         },
@@ -1169,8 +1233,8 @@ fn wifi_command(port: Option<String>, action: Option<WifiAction>) -> ExitCode {
     let board = board(port);
     let wifi_call = |method: &str, params: Value, timeout: Duration| {
         board.session(|call| call(method, params.clone(), timeout)).map_err(|e| match e {
-            companion_core::CallError::Rpc { code: -32001, .. } => "that takes USB: plug the board in, and stream over USB meanwhile".to_string(),
-            companion_core::CallError::Rpc { code: -32601, .. } => "the board's firmware has no WiFi: update it to 1.4.3 or newer".to_string(),
+            yoru_core::CallError::Rpc { code: -32001, .. } => "that takes USB: plug the board in, and stream over USB meanwhile".to_string(),
+            yoru_core::CallError::Rpc { code: -32601, .. } => "the board's firmware has no WiFi: update it to 1.4.3 or newer".to_string(),
             other => other.to_string(),
         })
     };
@@ -1189,9 +1253,9 @@ fn wifi_command(port: Option<String>, action: Option<WifiAction>) -> ExitCode {
             print_wifi(&status);
             let paired = wifi::load_paired();
             let here = status["id"].as_str().is_some_and(|id| paired.iter().any(|p| p.id == id));
-            println!("this computer: {}", if here { "paired" } else { "not paired (dualeye wifi pair, over USB)" });
+            println!("this computer: {}", if here { "paired" } else { "not paired (yoru wifi pair, over USB)" });
         }),
-        Some(WifiAction::Scan) => wifi_call("wifi/scan", serde_json::json!({}), companion_core::hub::SCAN_TIMEOUT).map(|r| {
+        Some(WifiAction::Scan) => wifi_call("wifi/scan", serde_json::json!({}), yoru_core::hub::SCAN_TIMEOUT).map(|r| {
             for n in r["networks"].as_array().into_iter().flatten() {
                 let lock = if n["secure"].as_bool() == Some(false) { "open" } else { "" };
                 println!("{:>4} dBm  {} {lock}", n["rssi"], n["ssid"].as_str().unwrap_or(""));
@@ -1373,30 +1437,9 @@ fn parse_tool_args(raw: &[String]) -> Result<Value, String> {
 }
 
 fn summary(s: &Snapshot) -> String {
-    fn opt<T: std::fmt::Display>(v: Option<T>) -> String {
-        v.map_or_else(|| "—".into(), |v| v.to_string())
-    }
-    let fan = |id| opt(s.fan_rpm(id));
-    let mem = |m: Option<Memory>| m.map_or_else(|| "—".into(), |m| format!("{:.1}/{:.0}G", gib(m.used_mb), gib(m.total_mb)));
-    format!(
-        "cpu {}C {}% {}MHz {}W fan {} ram {} | gpu {}C {}% {}MHz {}W fan {} vram {}",
-        opt(s.cpu.temp_c),
-        opt(s.cpu.load_pct),
-        opt(s.cpu.clock_mhz),
-        opt(s.cpu.power_w),
-        fan("cpu"),
-        mem(s.cpu.mem),
-        opt(s.gpu.temp_c),
-        opt(s.gpu.load_pct),
-        opt(s.gpu.clock_mhz),
-        opt(s.gpu.power_w),
-        fan("gpu"),
-        mem(s.gpu.mem),
-    )
-}
-
-fn gib(mb: u32) -> f64 {
-    f64::from(mb) / 1024.0
+    let claude = s.claude.as_ref().map(|c| format!(", Claude 5 h {}%", c.s_pct.map_or("—".into(), |p| format!("{p:.0}")))).unwrap_or_default();
+    let timer = s.timer.as_ref().map(|_| ", a timer running").unwrap_or_default();
+    format!("snapshot {}{claude}{timer}", s.ts)
 }
 
 fn permission_hint(port: &str) -> String {
@@ -1431,35 +1474,3 @@ mod tests {
     }
 }
 
-fn image(port: Option<String>, file: Option<&std::path::Path>, screen: &str, clear: bool) -> ExitCode {
-    let board = board(port);
-    let result = match file {
-        _ if clear => media::clear(&board, screen).map(|()| format!("{screen}: picture removed")),
-        Some(path) => std::fs::read(path).map_err(|e| format!("{}: {e}", path.display())).and_then(|bytes| {
-            let mut shown = -1;
-            let sent = media::send(&board, screen, &bytes, |p| {
-                let pct = (p * 100.0) as i32;
-                if pct / 10 != shown / 10 {
-                    shown = pct;
-                    eprint!("\rsending {pct}%");
-                }
-            });
-            eprintln!();
-            sent.map(|p| match p.frames {
-                1 => format!("{screen}: picture, {} KB", p.bytes / 1024),
-                n => format!("{screen}: {n} frames ({} of the original), {:.1} s, {} KB", p.source_frames, f64::from(p.duration_ms) / 1000.0, p.bytes / 1024),
-            })
-        }),
-        None => Err("give a file, or --clear".into()),
-    };
-    match result {
-        Ok(line) => {
-            println!("{line}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("{e}");
-            ExitCode::FAILURE
-        }
-    }
-}

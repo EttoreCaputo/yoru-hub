@@ -231,6 +231,52 @@ impl Agents {
         answer
     }
 
+    /// Ask the user to allow something Yoru's assistant is about to do (send
+    /// a mail, create an event): the same card as Claude Code's requests, on
+    /// the board and in the app. `None` when nobody answered within `wait`.
+    pub fn confirm(&self, tool: &str, text: &str, detail: Option<&str>, wait: Duration) -> Option<Decision> {
+        let now = SystemTime::now();
+        let id = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.next += 1;
+            let id = format!("y{}", inner.next);
+            inner.pending.push(Pending {
+                approval: Approval {
+                    id: id.clone(),
+                    session: "yoru".into(),
+                    project: Some("Yoru".into()),
+                    tool: clip(tool, 40),
+                    kind: StepKind::Other,
+                    text: clip(text, TEXT),
+                    detail: detail.map(|d| clip(d, 2000)),
+                    asked: unix_ms(now),
+                    expires: unix_ms(now + wait),
+                },
+                answer: None,
+            });
+            id
+        };
+        self.changed();
+        let until = Instant::now() + wait;
+        let mut inner = self.inner.lock().unwrap();
+        let answer = loop {
+            let Some(at) = inner.pending.iter().position(|p| p.approval.id == id) else { break None };
+            if let Some(answer) = inner.pending[at].answer {
+                inner.pending.remove(at);
+                break answer;
+            }
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                inner.pending.remove(at);
+                break None;
+            }
+            inner = self.answered.wait_timeout(inner, left).unwrap().0;
+        };
+        drop(inner);
+        self.changed();
+        answer
+    }
+
     /// Answer approval `id`; false when it's no longer waiting.
     pub fn answer(&self, id: &str, decision: Decision) -> bool {
         let found = {

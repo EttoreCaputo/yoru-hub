@@ -2,7 +2,7 @@
 // what flashing the bundled one changes, from FIRMWARE_CHANGELOG.md.
 
 import { BUNDLED_CHANGELOG } from "./bundled";
-import type { BoardFirmware, BoardKind } from "./monitor.svelte";
+import type { BoardFirmware } from "./types";
 
 export type Release = { version: string; notes: string[] };
 export type Update = {
@@ -35,13 +35,11 @@ export function parseChangelog(text: string): Release[] {
   return releases;
 }
 
-const CHANGELOGS: Partial<Record<BoardKind, Release[]>> = Object.fromEntries(
-  Object.entries(BUNDLED_CHANGELOG).map(([kind, text]) => [kind, parseChangelog(text)]),
-);
+const CHANGELOG = parseChangelog(BUNDLED_CHANGELOG);
 
-/** The releases in a kind's bundled changelog. */
-export function changelogFor(kind: BoardKind): Release[] {
-  return CHANGELOGS[kind] ?? [];
+/** The releases in the bundled changelog. */
+export function changelog(): Release[] {
+  return CHANGELOG;
 }
 /** Firmware that can't report its version predates 0.2.0, the first that could. */
 const LEGACY = "0.1.0";

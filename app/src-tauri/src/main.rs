@@ -1,8 +1,8 @@
 // No console window next to the app in Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use companion_core::claude::{hooks, statusline};
-use companion_core::mcp;
+use yoru_core::claude::{hooks, statusline};
+use yoru_core::mcp;
 
 fn main() {
     // Claude Code runs us as its status line command, as a hook and as an MCP server;
@@ -19,12 +19,12 @@ fn main() {
         }
         Some(mcp::FLAG) => {
             if let Err(e) = mcp::serve_stdio(None) {
-                eprintln!("dualeye mcp: {e}");
+                eprintln!("yoru mcp: {e}");
                 std::process::exit(1);
             }
             return;
         }
         _ => {}
     }
-    companion_app_lib::run();
+    yoru_app_lib::run();
 }

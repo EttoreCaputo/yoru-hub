@@ -216,7 +216,7 @@ fn system_prompt(personality: &str, tools: &[Value], kind: BoardKind) -> String 
 pub trait Toolbox {
     /// The kind of board the tools are on: the body the prompt describes.
     fn kind(&self) -> BoardKind {
-        BoardKind::DualEye
+        BoardKind::Yoru
     }
     /// The tools the model may call, besides `get_time`.
     fn tools(&self) -> Vec<Tool>;
@@ -273,7 +273,7 @@ impl std::fmt::Debug for Agent {
 
 /// Read-only tools: calling one isn't an action for [`Turn::first_action_ms`].
 pub fn is_read_only(tool: &str) -> bool {
-    tool.starts_with("get_") || tool == "now_playing" || tool == "list_boards"
+    tool.starts_with("get_") || tool == "list_boards"
 }
 
 impl Agent {
@@ -373,14 +373,6 @@ impl Agent {
         if intents::asks_time(text) {
             messages.push(json!({"role": "assistant", "content": "", "tool_calls": [{"id": "clock", "type": "function", "function": {"name": "get_time", "arguments": "{}"}}]}));
             messages.push(json!({"role": "tool", "tool_call_id": "clock", "content": now()}));
-        }
-        // Likewise "is the CPU hot?": with more tools to pick from they'd
-        // rather ask back than call get_metrics.
-        if intents::asks_metrics(text)
-            && let Ok(metrics) = toolbox.call("get_metrics", &json!({}))
-        {
-            messages.push(json!({"role": "assistant", "content": "", "tool_calls": [{"id": "sensors", "type": "function", "function": {"name": "get_metrics", "arguments": "{}"}}]}));
-            messages.push(json!({"role": "tool", "tool_call_id": "sensors", "content": metrics}));
         }
         let first = messages.len();
         messages.push(json!({"role": "user", "content": text}));
@@ -584,10 +576,9 @@ mod tests {
     #[test]
     fn personality_goes_in_the_prompt() {
         let tools = [time_tool()];
-        let prompt = system_prompt(&personality_prompt("butler", ""), &tools, BoardKind::DualEye);
+        let prompt = system_prompt(&personality_prompt("butler", ""), &tools, BoardKind::Yoru);
         assert!(prompt.contains("Ambrogio") && !prompt.contains("{character}") && !prompt.contains("{companion}"));
-        assert!(!prompt.contains("DualEye") && !prompt.contains("{body}"));
-        assert!(prompt.contains("two round displays"));
+        assert!(!prompt.contains("{body}"));
         assert!(prompt.contains("- get_time: The current local time") && !prompt.contains("{tools}"));
         assert!(personality_prompt("unknown", "").contains("Mochi"));
         assert!(personality_prompt("custom", "  ").contains("Mochi"));
@@ -596,25 +587,9 @@ mod tests {
     }
 
     #[test]
-    fn faces_go_in_the_prompt() {
-        let set_face = Tool {
-            name: "set_face".into(),
-            description: "Switch the watch face".into(),
-            input_schema: json!({"type": "object", "properties": {"face": {"type": "string", "enum": ["classic", "music", "eyes"],
-                "description": "classic: temperature, clock, power, load ring and fan; music: what's playing on the computer, with its cover"}}}),
-        };
-        let prompt = system_prompt(&personality_prompt("", ""), &[function(&set_face)], BoardKind::DualEye);
-        assert!(prompt.contains("- classic: temperature, clock, power, load ring and fan\n"));
-        assert!(prompt.contains("- music: what's playing on the computer, with its cover\n"));
-        assert!(prompt.contains("- eyes\n") && !prompt.contains("{faces}"));
-        let prompt = system_prompt(&personality_prompt("", ""), &[time_tool()], BoardKind::DualEye);
-        assert!(!prompt.contains("watch faces") && !prompt.contains("{faces}"));
-    }
-
-    #[test]
     fn the_body_follows_the_board() {
         let prompt = system_prompt(&personality_prompt("", ""), &[time_tool()], BoardKind::Yoru);
-        assert!(prompt.contains("matte sphere") && !prompt.contains("two round displays") && !prompt.contains("{body}"));
+        assert!(prompt.contains("matte sphere") && !prompt.contains("{body}"));
         assert!(!QUIP_PROMPT.replace("{body}", BoardKind::Yoru.profile().agent_body).contains("{body}"));
     }
 

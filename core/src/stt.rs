@@ -30,7 +30,6 @@ use serde_json::Value;
 
 use crate::cloud::{self, CloudError};
 use crate::sidecar::{self, Process};
-use crate::snapshot::Face;
 use crate::voice;
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
@@ -109,7 +108,7 @@ pub enum SttEngine {
     Cloud(cloud::Client),
 }
 
-/// Where Whisper models are kept: `models/` in DualEye's data folder.
+/// Where Whisper models are kept: `models/` in the data folder.
 pub fn models_dir() -> Option<PathBuf> {
     crate::claude::data_dir().map(|d| d.join("models"))
 }
@@ -319,7 +318,7 @@ fn start(server: &Path, model: &Path) -> Result<Process, SttError> {
 
 /// A multipart form with the fields and the WAV as `file`.
 pub(crate) fn multipart(wav: &[u8], fields: &[(&str, &str)]) -> io::Result<(String, Vec<u8>)> {
-    let boundary = "dualeye-7b3f9c2e";
+    let boundary = "yoru-7b3f9c2e";
     let mut body = Vec::with_capacity(wav.len() + 1024);
     for (name, value) in fields {
         write!(body, "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")?;
@@ -334,11 +333,10 @@ pub(crate) fn multipart(wav: &[u8], fields: &[(&str, &str)]) -> io::Result<(Stri
 /// the language decoded: a prompt in the other one drags the text into it,
 /// so while detecting only the names, which belong to neither.
 fn vocabulary_prompt(lang: &str) -> String {
-    let faces = Face::ALL.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ");
     match lang {
-        "it" => format!("DualEye. Facce: {faces}. Schermo sinistro, destro. Luminosità, rotazione."),
-        "en" => format!("DualEye. Faces: {faces}. Left screen, right screen. Brightness, rotation."),
-        _ => format!("DualEye: {faces}."),
+        "it" => "Yoru. Email, calendario, promemoria, timer, Claude Code.".into(),
+        "en" => "Yoru. Email, calendar, reminders, timers, Claude Code.".into(),
+        _ => "Yoru, Claude Code.".into(),
     }
 }
 

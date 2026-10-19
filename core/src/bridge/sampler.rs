@@ -1,8 +1,8 @@
 //! The computer's side of the bridge, once for every board: each interval it
-//! reads the sensors and Claude Code's usage, ticks the timers, notes what's
-//! playing and how present you are, keeps the pet's diary, and publishes the
-//! snapshot for the sessions to send. Timers fire here, once, however many
-//! boards there are; what's up goes to the alerts thread to be said.
+//! reads Claude Code's usage, ticks the timers, notes the time and how present
+//! you are, and publishes the snapshot for the sessions to send. Timers fire
+//! here, once, however many boards there are; what's up goes to the alerts
+//! thread to be said.
 //!
 //! It samples only while a session is open, as the bridge always did: with no
 //! board there is nobody to show the data to, and a timer that ends meanwhile
@@ -13,14 +13,8 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::Local;
-
-use crate::claude::{ClaudeState, ClaudeUsage};
-use crate::diary::{Diary, Seen};
-use crate::quips::{Quip, QuipLevel, Quips};
-use crate::sensors::Collector;
+use crate::claude::ClaudeUsage;
 use crate::snapshot::Snapshot;
-use crate::timers::Fired;
 
 use super::alerts::{AlertInput, Targets};
 use super::{BridgeConfig, sleep_unless_stopped};
@@ -35,7 +29,7 @@ pub(super) struct Latest {
     fresh: Condvar,
     /// Sessions open now: the sampler samples while there is one.
     sessions: AtomicUsize,
-    /// The latest one as the voice reads it ("how hot is the CPU").
+    /// The latest one as the voice reads it.
     pub voice: Arc<Mutex<Option<Snapshot>>>,
 }
 
@@ -85,22 +79,16 @@ impl Drop for SessionOpen<'_> {
 
 /// What the sampler keeps from one snapshot to the next.
 pub(super) struct Sampler {
-    collector: Mutex<Collector>,
     claude: Mutex<ClaudeUsage>,
-    pet: Mutex<Pet>,
 }
 
 impl Sampler {
-    pub fn new(config: &BridgeConfig) -> Self {
-        Self {
-            collector: Mutex::new(Collector::new()),
-            claude: Mutex::new(ClaudeUsage::new()),
-            pet: Mutex::new(Pet { diary: Diary::open(config.diary.clone()), quips: Quips::default(), observed: None }),
-        }
+    pub fn new(_config: &BridgeConfig) -> Self {
+        Self { claude: Mutex::new(ClaudeUsage::new()) }
     }
 
     /// Sample every `config.interval` while a session is open, until `stop`.
-    pub fn run(&self, config: &BridgeConfig, stop: &AtomicBool, latest: &Latest, alert_tx: &Sender<AlertInput>, targets: &Targets) {
+    pub fn run(&self, config: &BridgeConfig, stop: &AtomicBool, latest: &Latest, alert_tx: &Sender<AlertInput>, _targets: &Targets) {
         let mut next = Instant::now();
         while !stop.load(Ordering::Relaxed) {
             if !latest.any_session() {
@@ -108,7 +96,7 @@ impl Sampler {
                 next = Instant::now();
                 continue;
             }
-            latest.publish(self.sample(config, alert_tx, targets));
+            latest.publish(self.sample(config, alert_tx));
             next += config.interval;
             let now = Instant::now();
             if next < now {
@@ -118,65 +106,22 @@ impl Sampler {
         }
     }
 
-    /// One snapshot of the computer, with what it set off: alerts, timers, a quip.
-    fn sample(&self, config: &BridgeConfig, alert_tx: &Sender<AlertInput>, targets: &Targets) -> Snapshot {
-        let mut snapshot = self.collector.lock().unwrap().sample();
+    /// One snapshot of the computer, with what it set off: alerts and timers.
+    fn sample(&self, config: &BridgeConfig, alert_tx: &Sender<AlertInput>) -> Snapshot {
+        let mut snapshot = Snapshot::now();
         snapshot.claude = self.claude.lock().unwrap().sample();
         if let Some(metrics) = &snapshot.claude {
             let _ = alert_tx.send(AlertInput::Metrics(metrics.clone()));
         }
-        let fired = config.timers.tick();
-        for fired in &fired {
-            let _ = alert_tx.send(AlertInput::Timer(fired.clone()));
+        for fired in config.timers.tick() {
+            let _ = alert_tx.send(AlertInput::Timer(fired));
         }
         snapshot.timer = config.timers.board_view();
-        // The pet dances to it; a DualEye's music face asks for it too.
-        let primary = config.primary.lock().unwrap().clone();
-        let board = targets.speaker(None, primary.as_deref());
-        if board.is_some() {
-            config.music.want();
-        }
-        snapshot.music = config.music.board_view();
         snapshot.pet = Some(crate::presence::sample());
         if let Some(hub) = &config.hub {
             hub.set_snapshot(&snapshot);
         }
-        // Only with a voice to say it, and every board out of any conversation.
-        let can_speak = board.is_some() && config.voice.lock().unwrap().tts.is_some();
-        let busy = !can_speak || targets.in_conversation();
-        let level = *config.quips.lock().unwrap();
-        if let Some(quip) = self.pet.lock().unwrap().observe(&snapshot, &fired, level, busy) {
-            let _ = alert_tx.send(AlertInput::Quip(quip));
-        }
         snapshot
-    }
-}
-
-/// What the pet remembers of your days, and when it last spoke up about them.
-struct Pet {
-    diary: Diary,
-    quips: Quips,
-    observed: Option<Instant>,
-}
-
-impl Pet {
-    /// Note `snapshot` in the diary, and whether there's something to say.
-    fn observe(&mut self, snapshot: &Snapshot, fired: &[Fired], level: QuipLevel, busy: bool) -> Option<Quip> {
-        let dt = self.observed.map_or(1, |t| t.elapsed().as_secs_f32().round().clamp(1.0, 5.0) as u32);
-        self.observed = Some(Instant::now());
-        let hottest = [snapshot.cpu.temp_c, snapshot.gpu.temp_c].into_iter().flatten().reduce(f32::max);
-        let seen = Seen {
-            idle_s: snapshot.pet.and_then(|p| p.idle),
-            claude: snapshot.claude.as_ref().is_some_and(|c| c.state == ClaudeState::Work),
-            music: snapshot.music.as_ref().is_some_and(|m| m.state == "play"),
-            hottest_c: hottest,
-        };
-        let now = Local::now().naive_local();
-        self.diary.observe(now, &seen, dt);
-        for fired in fired {
-            self.diary.fired(fired);
-        }
-        self.quips.consider(&self.diary, now, level, busy || seen.music)
     }
 }
 
@@ -194,7 +139,7 @@ mod tests {
             let latest = latest.clone();
             thread::spawn(move || {
                 thread::sleep(Duration::from_millis(30));
-                latest.publish(serde_json::from_value(serde_json::json!({"v": 2, "ts": 5})).unwrap());
+                latest.publish(Snapshot::now());
             })
         };
         let (n, _) = latest.newer(seen, Duration::from_secs(2)).expect("a snapshot");

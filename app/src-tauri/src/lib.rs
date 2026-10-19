@@ -1,11 +1,14 @@
-//! Tauri shell around `companion-core`: the bridge (a [`BoardManager`], one session
-//! per board found) runs on its own thread for the whole life of the process,
-//! and every event it raises is kept here, per board (so a freshly loaded
-//! webview can catch up), and forwarded to the UI: all of them as `manager`,
-//! and as `bridge` the host's own and those of the board the UI shows (the
-//! primary one, else the first connected), for a UI that knows one board.
-//! Commands about a board take an optional `board` (an id, or a kind), the
-//! board the UI shows without one.
+//! Tauri shell around `yoru-core`: Yoru, the personal assistant with a body
+//! on the desk. The bridge (a [`BoardManager`]) keeps the board connected on
+//! its own thread for the whole life of the process; every event it raises
+//! is kept here (so a freshly loaded webview can catch up) and forwarded to
+//! the UI as `bridge` (and `manager`).
+//!
+//! The assistant ([`Assistant`]) answers what the board hears and what is
+//! typed in the window, and keeps the inbox (sent to the UI as `inbox`), the
+//! conversation (`chat`) and the memory; the scheduler runs the watchers and
+//! the morning recap on a thread of its own (`schedule` events). The
+//! connectors (the user's services, over MCP with OAuth) give it tools.
 //!
 //! Closing the window only hides it; the tray icon brings it back or quits, and
 //! launching the app again shows the running instance, unless a newer build
@@ -13,39 +16,23 @@
 //!
 //! Identifying and flashing the board go through esptool, which the app sets
 //! up by itself on first use (Python + virtualenv in its data folder); the
-//! session on that port is paused meanwhile so esptool can own it, while the
-//! other boards carry on.
+//! session on that port is paused meanwhile so esptool can own it.
 //!
-//! For the Claude faces the app can also point Claude Code's status line at
-//! itself (`main.rs` handles that invocation); see `companion_core::claude`.
-//! Likewise Claude Code's hooks, for the alerts: Claude needs you, it's done,
-//! the limits are running out (`companion_core::claude::alerts`).
+//! The app can also point Claude Code's status line and hooks at itself
+//! (`main.rs` handles those invocations): Claude Code's sessions and
+//! permission requests reach the board, and its alerts are said.
 //!
-//! Voice (opt-in, off by default): with it on, what the board hears after its
-//! wake word is transcribed by a whisper.cpp `whisper-server` sidecar with a
-//! model the app downloads (`companion_core::models`), understood by a small
-//! language model in a llama.cpp `llama-server` sidecar that calls the
-//! board's tools (`companion_core::agent`; without one, a few fixed phrases,
-//! `companion_core::intents`) and answered out loud by a Piper sidecar
-//! through the board's speaker. The app installs Piper itself, into a
-//! virtualenv made with esptool's Python. Turning voice on, or picking
-//! another model, language or voice, swaps the bridge's shared voice config:
-//! no reconnect.
+//! Voice (opt-in): what the board hears after its wake word is transcribed
+//! by a whisper.cpp `whisper-server` sidecar (or a cloud model), answered by
+//! the assistant (or, without an Anthropic key, a local language model) and
+//! said through the board's speaker by Piper (or a cloud voice).
 //!
 //! The same binary with `--mcp` is an MCP server for Claude Code and Claude
-//! Desktop (`companion_core::mcp`). It reaches the board through this app's
+//! Desktop (`yoru_core::mcp`). It reaches the board through this app's
 //! [`Hub`], which lives as long as the app, across bridge restarts.
-//!
-//! Timers, reminders and a pomodoro (`companion_core::timers`) live here too,
-//! in `timers.json` next to the hub file: the bridge ticks them and the board
-//! counts the first one down and rings; the Timers tab, the voice and MCP
-//! clients set them.
-//!
-//! On macOS the app can install a root helper that reads the exact CPU power,
-//! which macOS 27 hides from ordinary apps (`power_helper`).
 
+mod assistant;
 mod instances;
-mod power_helper;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
@@ -55,28 +42,28 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use companion_core::agent;
-use companion_core::claude::agents::{Agents, AgentsView, Decision};
-use companion_core::claude::alerts::AlertSettings;
-use companion_core::quips::QuipLevel;
-use companion_core::claude::hooks::{self, HooksStatus};
-use companion_core::claude::mcpconfig;
-use companion_core::claude::statusline::{self, LinkStatus};
-use companion_core::flasher::setup;
-use companion_core::hardware::{self, Hardware, Recommendation};
-use companion_core::cloud::elevenlabs::{self, AccountVoice};
-use companion_core::cloud::{self, CloudError, CloudRef, KeySource, Provider};
-use companion_core::llm::{self, Llm, LlmConfig, LocalLlm};
-use companion_core::models::{self, Kind, Model};
-use companion_core::music::{self, Music};
-use companion_core::pointer;
-use companion_core::stt::{self, Stt, SttConfig, SttEngine, SttLanguage, Transcript};
-use companion_core::tts::{self, Engine, Tts, TtsConfig};
-use companion_core::timers::{self, Pomodoro, ShowOn, TimerInfo, Timers};
-use companion_core::voice::{self, Spoken, VoiceConfig};
-use companion_core::{
-    Agent, Board, BoardFirmware, BoardKind, BridgeConfig, BridgeEvent, Manager as BoardManager, ManagerEvent, ScreenSettings, ChipInfo, Collector, Esptool, Faces, FlashEvent, Hub, HubStatus, ImageInfo, PortInfo, Reading, Rotations, Snapshot, firmware,
-    Transport, keep_warm, mcp, media, serial, wifi,
+use yoru_core::agent;
+use yoru_core::claude::agents::{Agents, AgentsView, Decision};
+use yoru_core::claude::alerts::AlertSettings;
+use yoru_core::claude::hooks::{self, HooksStatus};
+use yoru_core::claude::mcpconfig;
+use yoru_core::claude::statusline::{self, LinkStatus};
+use yoru_core::flasher::setup;
+use yoru_core::hardware::{self, Hardware, Recommendation};
+use yoru_core::cloud::elevenlabs::{self, AccountVoice};
+use yoru_core::cloud::{self, CloudError, CloudRef, KeySource, Provider};
+use yoru_core::llm::{self, Llm, LlmConfig, LocalLlm};
+use yoru_core::models::{self, Kind, Model};
+use yoru_core::pointer;
+use yoru_core::stt::{self, Stt, SttConfig, SttEngine, SttLanguage, Transcript};
+use yoru_core::tts::{self, Engine, Tts, TtsConfig};
+use yoru_core::timers::{self, Pomodoro, ShowOn, TimerInfo, Timers};
+use yoru_core::voice::{self, Spoken, VoiceConfig};
+use yoru_core::assistant::watchers::Watchers;
+use yoru_core::assistant::{self as assistant_mod, Assistant};
+use yoru_core::{
+    Agent, Board, BoardFirmware, BoardKind, BridgeConfig, BridgeEvent, ChipInfo, Esptool, FlashEvent, Hub, HubStatus, ImageInfo, Manager as BoardManager, ManagerEvent, PortInfo, Snapshot,
+    Transport, firmware, keep_warm, mcp, serial, wifi,
 };
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
@@ -88,13 +75,11 @@ const TRANSCRIPTS: usize = 50;
 const TRAY_ID: &str = "main";
 /// Each board's merged firmware image, shipped inside the app: copied into
 /// `firmware/<kind>/` from the board's own repository (`tools/fetch_firmware.sh`).
-const FIRMWARE_DUALEYE: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../firmware/dualeye/merged-binary.bin"));
 const FIRMWARE_YORU: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../firmware/yoru/merged-binary.bin"));
 
 /// The firmware image the app flashes on a `kind` board.
 fn firmware_for(kind: BoardKind) -> &'static [u8] {
     match kind {
-        BoardKind::DualEye => FIRMWARE_DUALEYE,
         BoardKind::Yoru => FIRMWARE_YORU,
     }
 }
@@ -106,28 +91,17 @@ struct Settings {
     /// USB, WiFi, or USB when plugged in and WiFi otherwise.
     #[serde(default)]
     transport: Transport,
-    #[serde(default)]
-    faces: Faces,
-    #[serde(default)]
-    rotation: Rotations,
-    /// Each DualEye's own faces and rotation, by id; `faces` and `rotation`
-    /// are for one without.
-    #[serde(default)]
-    boards: BTreeMap<String, ScreenSettings>,
-    /// The id of the board that says alerts and quips, and that the UI and
-    /// hub clients reach when several could.
+    /// The id of the board that says alerts, and that the UI and hub
+    /// clients reach when several could.
     #[serde(default)]
     primary: Option<String>,
     #[serde(default)]
     voice: VoiceSettings,
     #[serde(default)]
     claude_alerts: AlertSettings,
-    /// The eyes face looks about on its own instead of at the mouse pointer.
+    /// Yoru's eyes look about on their own instead of at the mouse pointer.
     #[serde(default)]
     ignore_pointer: bool,
-    /// How often the pet comments on your day out loud.
-    #[serde(default)]
-    quips: QuipLevel,
     /// The app's language (`en`, `it`); `None` follows the system's.
     #[serde(default)]
     ui_language: Option<String>,
@@ -152,14 +126,12 @@ struct VoiceSettings {
     /// A `models::MODELS` id, or a cloud model's (`groq:whisper-large-v3`).
     model: String,
     language: SttLanguage,
-    /// Keep each utterance as a WAV file (`voice/` in DualEye's data folder).
+    /// Keep each utterance as a WAV file (`voice/` in the data folder).
     keep_recordings: bool,
     /// Answer out loud through the board's speaker.
     speak: bool,
     /// After a spoken answer, listen a few seconds more without the wake word.
     follow_up: bool,
-    /// Pause the music playing on this computer while the board listens.
-    pause_music: bool,
     /// Keep the downloaded models loaded, those standing in for cloud ones
     /// too, and start again any that stops: the first answer doesn't wait.
     keep_warm: bool,
@@ -189,7 +161,7 @@ static CHECKED: OnceLock<Hardware> = OnceLock::new();
 /// Ask llama-server for its devices in the background: the first time on a
 /// Mac it takes seconds.
 fn check_hardware() {
-    let _ = thread::Builder::new().name("dualeye-hardware".into()).spawn(|| {
+    let _ = thread::Builder::new().name("yoru-hardware".into()).spawn(|| {
         let _ = CHECKED.set(Hardware::detect());
     });
 }
@@ -205,7 +177,6 @@ impl Default for VoiceSettings {
             keep_recordings: false,
             speak: true,
             follow_up: true,
-            pause_music: true,
             keep_warm: true,
             voices,
             llm: rec.llm.is_some(),
@@ -257,8 +228,6 @@ struct Link {
     logs: VecDeque<String>,
     /// The latest Claude alert: what it said, why it didn't reach the board, when (Unix ms).
     last_alert: Option<(String, Option<String>, u64)>,
-    /// The pet's latest comment on your day, likewise.
-    last_quip: Option<QuipEntry>,
     /// What the board's voice overlay shows (`idle` until it says otherwise).
     voice: Option<String>,
     transcripts: VecDeque<TranscriptEntry>,
@@ -294,8 +263,8 @@ impl Link {
                 self.logs.push_back(line.clone());
             }
             BridgeEvent::Firmware { firmware } => self.firmware = Some(firmware.clone()),
-            // `AppState` keeps faces and rotation, and the timers.
-            BridgeEvent::Settings { .. } | BridgeEvent::Wake { .. } | BridgeEvent::TimerFired { .. } => {}
+            // `AppState` keeps the timers; the assistant, the inbox.
+            BridgeEvent::Wake { .. } | BridgeEvent::TimerFired { .. } | BridgeEvent::Notified { .. } | BridgeEvent::NotificationOpened { .. } => {}
             // `AppState::agents` keeps the feed.
             BridgeEvent::Agents { .. } => {}
             BridgeEvent::Transcript { id, transcript } => {
@@ -322,10 +291,6 @@ impl Link {
                 let at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
                 self.last_alert = Some((text.clone(), error.clone(), at));
             }
-            BridgeEvent::Quip { quip, text, error } => {
-                let at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-                self.last_quip = Some(QuipEntry { topic: quip.topic.name(), text: text.clone(), error: error.clone(), at });
-            }
             BridgeEvent::Disconnected { reason, .. } => {
                 self.kind = "offline";
                 self.message = Some(reason.clone());
@@ -339,7 +304,7 @@ impl Link {
 struct Devices {
     /// By the session's target.
     boards: BTreeMap<String, Link>,
-    /// The host's own events: no board found, alerts, quips.
+    /// The host's own events: no board found, alerts.
     host: Link,
     /// The target of the board picked in the UI's switcher, while it's there.
     shown: Option<String>,
@@ -418,51 +383,38 @@ struct DeviceInfo {
     current: bool,
 }
 
-/// What the pet said about your day, and when (Unix ms).
-#[derive(Clone, Serialize)]
-struct QuipEntry {
-    topic: &'static str,
-    text: String,
-    error: Option<String>,
-    at: u64,
-}
-
 struct AppState {
     devices: Mutex<Devices>,
     manager: Mutex<Option<BoardManager>>,
     settings: Mutex<Settings>,
     settings_path: Option<PathBuf>,
-    /// Handed to every bridge, so a face change reaches the running one.
-    faces: Arc<Mutex<Faces>>,
-    /// Likewise for the rotation of each screen.
-    rotation: Arc<Mutex<Rotations>>,
-    /// Each DualEye's own faces and rotation, handed to the bridge like `faces`.
-    board_settings: Arc<Mutex<BTreeMap<String, ScreenSettings>>>,
-    /// The primary board's id, handed to the bridge like `faces`.
+    /// The primary board's id, handed to every bridge.
     primary: Arc<Mutex<Option<String>>>,
     /// Shares the bridge's connection with MCP servers; `None` if it couldn't listen.
     hub: Option<Arc<Hub>>,
     hub_error: Option<String>,
-    /// Separate from the bridge's own collector, for the sensor list.
-    collector: Mutex<Option<Collector>>,
     /// esptool holds the port (identify or flash in progress).
     device_busy: AtomicBool,
     /// Where esptool's Python and virtualenv live.
     esptool_dir: PathBuf,
     /// Handed to every bridge; `apply_voice` swaps what's in it.
     voice: Arc<Mutex<VoiceConfig>>,
-    /// Handed to every bridge, like `faces`.
+    /// Handed to every bridge.
     claude_alerts: Arc<Mutex<AlertSettings>>,
     /// Handed to every bridge; kept in their own file.
     timers: Arc<Timers>,
     /// Handed to every bridge: Claude Code's sessions and permission requests.
     agents: Arc<Agents>,
-    /// Handed to every bridge: what's playing, and its cover for the mirror.
-    music: Arc<Music>,
-    /// Handed to every bridge, like `faces`.
+    /// Handed to every bridge.
     follow_pointer: Arc<AtomicBool>,
-    /// Handed to every bridge, like `faces`.
-    quips: Arc<Mutex<QuipLevel>>,
+    /// Yoru the assistant: handed to every bridge.
+    assistant: Arc<Assistant>,
+    /// What it watches for the user, run by the scheduler.
+    watchers: Arc<Watchers>,
+    /// The connectors and the scheduler.
+    services: assistant::Services,
+    /// The tray menu's words, kept to rebuild it when "do not disturb" changes.
+    tray_labels: Mutex<TrayLabels>,
     /// Speech-to-text: `off`, `starting`, `ready` or `error`, and why.
     stt_state: Arc<Mutex<(&'static str, Option<String>)>>,
     /// Text-to-speech, likewise.
@@ -489,29 +441,6 @@ impl AppState {
         let by_target = |b: &str| self.devices.lock().unwrap().boards.get(b).and_then(|l| l.id.clone());
         let board = board.map(|b| by_target(&b).unwrap_or(b));
         self::board().on(board.or_else(|| self.current_id()))
-    }
-
-    /// What DualEye `id` shows: its own faces and rotation, else the shared ones.
-    fn screens(&self, id: Option<&str>) -> ScreenSettings {
-        id.and_then(|id| self.board_settings.lock().unwrap().get(id).copied())
-            .unwrap_or_else(|| ScreenSettings { faces: *self.faces.lock().unwrap(), rotation: *self.rotation.lock().unwrap() })
-    }
-
-    fn set_screens(&self, id: Option<&str>, screens: ScreenSettings) {
-        match id {
-            Some(id) => {
-                self.board_settings.lock().unwrap().insert(id.to_string(), screens);
-                self.settings.lock().unwrap().boards.insert(id.to_string(), screens);
-            }
-            None => {
-                *self.faces.lock().unwrap() = screens.faces;
-                *self.rotation.lock().unwrap() = screens.rotation;
-                let mut settings = self.settings.lock().unwrap();
-                settings.faces = screens.faces;
-                settings.rotation = screens.rotation;
-            }
-        }
-        self.save_settings();
     }
 
     fn save_settings(&self) {
@@ -564,7 +493,7 @@ fn apply_voice(state: &AppState) {
         agent.set_personality(&agent::personality_prompt(&settings.personality, &settings.personality_custom));
     }
     let dump_dir = settings.keep_recordings.then(voice::default_dump_dir).flatten();
-    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up, pause_music: settings.pause_music };
+    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up };
 }
 
 /// `sidecar` shared, with its servers started again whenever they stop
@@ -917,19 +846,15 @@ async fn install_engine(app: AppHandle, engine: Engine) -> Result<(), String> {
 }
 
 fn board() -> Board {
-    Board::new(None, &format!("companion-hub/{}", env!("CARGO_PKG_VERSION")))
+    Board::new(None, &format!("yoru-app/{}", env!("CARGO_PKG_VERSION")))
 }
 
 /// The board's own voice settings (it keeps them in NVS); `None` where it
-/// doesn't say (`eyes`: a firmware before 1.0.1; `idle_eyes`: before 1.0.2;
-/// `wake_sound`: before 1.3.3; `pet_sounds`: before 1.4.0).
+/// doesn't say.
 #[derive(serde::Serialize)]
 struct BoardVoice {
     volume: Option<u8>,
-    eyes: Option<bool>,
-    idle_eyes: Option<bool>,
     wake_sound: Option<bool>,
-    pet_sounds: Option<bool>,
 }
 
 #[tauri::command]
@@ -940,10 +865,7 @@ async fn board_voice(state: State<'_, AppState>, board: Option<String>) -> Resul
         let s = state.structured_content.unwrap_or_default();
         Ok(BoardVoice {
             volume: s.pointer("/audio/volume").and_then(|v| v.as_u64()).map(|v| v as u8),
-            eyes: s.pointer("/voice/eyes").and_then(|v| v.as_bool()),
-            idle_eyes: s.pointer("/voice/idle_eyes").and_then(|v| v.as_bool()),
             wake_sound: s.pointer("/voice/wake_sound").and_then(|v| v.as_bool()),
-            pet_sounds: s.pointer("/voice/pet_sounds").and_then(|v| v.as_bool()),
         })
     })
     .await
@@ -966,78 +888,10 @@ async fn set_board_volume(state: State<'_, AppState>, board: Option<String>, per
     call_board_on(state, board, "set_volume", serde_json::json!({"percent": percent})).await
 }
 
-/// Animated eyes (or the ring) while the board talks with you.
-#[tauri::command]
-async fn set_board_eyes(state: State<'_, AppState>, board: Option<String>, on: bool) -> Result<(), String> {
-    call_board_on(state, board, "set_eyes", serde_json::json!({"on": on})).await
-}
-
-/// The eyes' short scenes, now and then while nobody is talking.
-#[tauri::command]
-async fn set_board_idle_eyes(state: State<'_, AppState>, board: Option<String>, on: bool) -> Result<(), String> {
-    call_board_on(state, board, "set_eyes", serde_json::json!({"idle": on})).await
-}
-
 /// A chime when the board hears the wake word.
 #[tauri::command]
 async fn set_board_wake_sound(state: State<'_, AppState>, board: Option<String>, on: bool) -> Result<(), String> {
     call_board_on(state, board, "set_mic", serde_json::json!({"wake_sound": on})).await
-}
-
-/// The board as a pet: its little sounds, its reactions to the computer.
-#[tauri::command]
-async fn set_board_pet(state: State<'_, AppState>, board: Option<String>, sounds: Option<bool>, react: Option<bool>, hear: Option<bool>) -> Result<(), String> {
-    let mut args = serde_json::Map::new();
-    if let Some(on) = sounds {
-        args.insert("sounds".into(), on.into());
-    }
-    if let Some(on) = react {
-        args.insert("react".into(), on.into());
-    }
-    if let Some(on) = hear {
-        args.insert("hear".into(), on.into());
-    }
-    call_board_on(state, board, "set_pet", args.into()).await
-}
-
-/// The pet's mood, what's moving it and its last reactions (`get_pet`,
-/// firmware 1.4); `None` on an older firmware, which doesn't have the tool.
-#[tauri::command]
-async fn board_pet(state: State<'_, AppState>, board: Option<String>) -> Result<Option<serde_json::Value>, String> {
-    let board = state.board(board);
-    tauri::async_runtime::spawn_blocking(move || match board.call_tool("get_pet", serde_json::json!({})) {
-        Ok(result) if !result.is_error => Ok(result.structured_content),
-        Ok(_) | Err(companion_core::CallError::Rpc { .. }) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// How often the pet comments on your day, and what it said last.
-#[derive(Serialize)]
-struct QuipsInfo {
-    level: QuipLevel,
-    last: Option<QuipEntry>,
-}
-
-#[tauri::command]
-fn quips_info(state: State<AppState>) -> QuipsInfo {
-    QuipsInfo { level: *state.quips.lock().unwrap(), last: state.devices.lock().unwrap().host.last_quip.clone() }
-}
-
-#[tauri::command]
-fn set_quips(state: State<AppState>, level: QuipLevel) -> QuipsInfo {
-    *state.quips.lock().unwrap() = level;
-    state.settings.lock().unwrap().quips = level;
-    state.save_settings();
-    quips_info(state)
-}
-
-/// One of the eyes' scenes, now.
-#[tauri::command]
-async fn play_board_scene(state: State<'_, AppState>, board: Option<String>, name: String) -> Result<(), String> {
-    call_board_on(state, board, "play_eyes", serde_json::json!({"name": name})).await
 }
 
 /// One of the board's own sounds, now.
@@ -1074,13 +928,6 @@ async fn yoru_react(state: State<'_, AppState>, board: Option<String>, name: Str
     call_board_on(state, board, "react", serde_json::json!({"name": name})).await
 }
 
-/// A firefly drifts in for a Yoru to eat (firmware 0.6.0); the board's
-/// words come back as the error while it sleeps or is busy.
-#[tauri::command]
-async fn yoru_feed(state: State<'_, AppState>, board: Option<String>) -> Result<(), String> {
-    call_board_on(state, board, "feed", serde_json::json!({})).await
-}
-
 /// Open a Yoru's settings menu, on `page` if given, or close it.
 #[tauri::command]
 async fn yoru_show_menu(state: State<'_, AppState>, board: Option<String>, open: bool, page: Option<String>) -> Result<(), String> {
@@ -1089,47 +936,6 @@ async fn yoru_show_menu(state: State<'_, AppState>, board: Option<String>, open:
         args["page"] = page.into();
     }
     call_board_on(state, board, "show_menu", args).await
-}
-
-fn side(side: &str) -> Result<&'static str, String> {
-    match side {
-        "left" => Ok("left"),
-        "right" => Ok("right"),
-        other => Err(format!("unknown screen {other}")),
-    }
-}
-
-/// Put a picture or a GIF on `side`'s image face, emitting `image`
-/// `{side, progress}` as it goes.
-#[tauri::command]
-async fn send_image(app: AppHandle, state: State<'_, AppState>, board: Option<String>, side: String, bytes: Vec<u8>) -> Result<media::Prepared, String> {
-    let side = self::side(&side)?;
-    let board = state.board(board);
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut last = -1.0f32;
-        media::send(&board, side, &bytes, |p| {
-            if p - last >= 0.02 || p >= 1.0 {
-                last = p;
-                let _ = app.emit("image", serde_json::json!({"side": side, "progress": p}));
-            }
-        })
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn clear_image(state: State<'_, AppState>, board: Option<String>, side: String) -> Result<(), String> {
-    let side = self::side(&side)?;
-    let board = state.board(board);
-    tauri::async_runtime::spawn_blocking(move || media::clear(&board, side)).await.map_err(|e| e.to_string())?
-}
-
-/// What was last sent to `side`, as a data URL for the mirror.
-#[tauri::command]
-async fn image_preview(side: String) -> Result<Option<String>, String> {
-    let side = self::side(&side)?;
-    tauri::async_runtime::spawn_blocking(move || media::copy_data_url(side)).await.map_err(|e| e.to_string())
 }
 
 /// Say a test sentence through the board, with the voice of `language`.
@@ -1162,8 +968,6 @@ struct Status {
     voice: Option<String>,
     transcripts: Vec<TranscriptEntry>,
     port_setting: Option<String>,
-    faces: Faces,
-    rotation: Rotations,
     follow_pointer: bool,
 }
 
@@ -1173,7 +977,6 @@ fn status(state: State<AppState>, board: Option<String>) -> Status {
     let primary = state.primary.lock().unwrap().clone();
     let devices = state.devices.lock().unwrap();
     let link = board.as_deref().and_then(|b| devices.find(b)).or_else(|| devices.current(primary.as_deref())).unwrap_or(&devices.host);
-    let screens = state.screens(link.id.as_deref());
     let age = |t: Option<Instant>| t.map(|t| t.elapsed().as_millis() as u64);
     Status {
         board: link.id.clone(),
@@ -1192,8 +995,6 @@ fn status(state: State<AppState>, board: Option<String>) -> Status {
         voice: link.voice.clone(),
         transcripts: link.transcripts.iter().cloned().collect(),
         port_setting: state.settings.lock().unwrap().port.clone(),
-        faces: screens.faces,
-        rotation: screens.rotation,
         follow_pointer: state.follow_pointer.load(Ordering::Relaxed),
     }
 }
@@ -1253,7 +1054,7 @@ async fn set_transport(app: AppHandle, transport: Transport) -> Result<(), Strin
 #[derive(Serialize)]
 struct PairedBoard {
     id: String,
-    kind: companion_core::BoardKind,
+    kind: yoru_core::BoardKind,
     ssid: Option<String>,
 }
 
@@ -1270,8 +1071,8 @@ struct WifiInfo {
 /// One `wifi/...` request to the board: through the bridge, or over USB.
 fn wifi_call(board: &Board, method: &str, params: serde_json::Value, timeout: std::time::Duration) -> Result<serde_json::Value, String> {
     board.session(|call| call(method, params.clone(), timeout)).map_err(|e| match e {
-        companion_core::CallError::Rpc { code: -32001, .. } => "plug the board in with the USB cable to change its WiFi".to_string(),
-        companion_core::CallError::Rpc { code: -32601, .. } => "the board's firmware has no WiFi: update it to 1.4.3 or newer".to_string(),
+        yoru_core::CallError::Rpc { code: -32001, .. } => "plug the board in with the USB cable to change its WiFi".to_string(),
+        yoru_core::CallError::Rpc { code: -32601, .. } => "the board's firmware has no WiFi: update it to 1.4.3 or newer".to_string(),
         other => other.to_string(),
     })
 }
@@ -1298,7 +1099,7 @@ async fn wifi_info(app: AppHandle, board: Option<String>) -> Result<WifiInfo, St
 #[tauri::command]
 async fn wifi_scan(state: State<'_, AppState>, board: Option<String>) -> Result<serde_json::Value, String> {
     let board = state.board(board);
-    tauri::async_runtime::spawn_blocking(move || wifi_call(&board, "wifi/scan", serde_json::json!({}), companion_core::hub::SCAN_TIMEOUT))
+    tauri::async_runtime::spawn_blocking(move || wifi_call(&board, "wifi/scan", serde_json::json!({}), yoru_core::hub::SCAN_TIMEOUT))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1365,21 +1166,6 @@ async fn wifi_pair(state: State<'_, AppState>, board: Option<String>) -> Result<
     .map_err(|e| e.to_string())?
 }
 
-/// The faces of DualEye `board` (an id), or of the one the UI shows.
-#[tauri::command]
-fn set_faces(state: State<AppState>, faces: Faces, board: Option<String>) {
-    let id = board.or_else(|| state.current_id());
-    let screens = state.screens(id.as_deref());
-    state.set_screens(id.as_deref(), ScreenSettings { faces, ..screens });
-}
-
-#[tauri::command]
-fn set_rotation(state: State<AppState>, rotation: Rotations, board: Option<String>) {
-    let id = board.or_else(|| state.current_id());
-    let screens = state.screens(id.as_deref());
-    state.set_screens(id.as_deref(), ScreenSettings { rotation, ..screens });
-}
-
 /// The boards found, for the device switcher.
 #[tauri::command]
 fn boards(state: State<AppState>) -> Vec<DeviceInfo> {
@@ -1387,32 +1173,7 @@ fn boards(state: State<AppState>) -> Vec<DeviceInfo> {
     state.devices.lock().unwrap().infos(primary.as_deref())
 }
 
-/// Show `board` (a target or an id) in the UI: the `bridge` events and the
-/// commands without `board` follow it. `None` goes back to the primary one.
-#[tauri::command]
-fn show_board(app: AppHandle, state: State<AppState>, board: Option<String>) -> Vec<DeviceInfo> {
-    {
-        let mut devices = state.devices.lock().unwrap();
-        let target = board.and_then(|b| devices.find(&b).and_then(|l| l.target.clone()));
-        devices.shown = target;
-    }
-    let infos = boards(state);
-    let _ = app.emit("boards", &infos);
-    infos
-}
-
-/// Make `board` (an id) the primary one; `None` leaves it to the order they connected in.
-#[tauri::command]
-fn set_primary(app: AppHandle, state: State<AppState>, board: Option<String>) -> Vec<DeviceInfo> {
-    *state.primary.lock().unwrap() = board.clone();
-    state.settings.lock().unwrap().primary = board;
-    state.save_settings();
-    let infos = boards(state);
-    let _ = app.emit("boards", &infos);
-    infos
-}
-
-/// The eyes face looks at the mouse pointer, or about on its own.
+/// Yoru's eyes look at the mouse pointer, or about on their own.
 #[tauri::command]
 fn set_follow_pointer(state: State<AppState>, on: bool) {
     state.follow_pointer.store(on, Ordering::Relaxed);
@@ -1427,10 +1188,28 @@ fn ui_language(state: State<AppState>) -> Option<String> {
 }
 
 /// The tray menu's items, in the app's language.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct TrayLabels {
     show: String,
+    /// "Do not disturb for 1 hour", and what ends it.
+    quiet: String,
+    resume: String,
     quit: String,
+    /// The tooltip's "{n} unread".
+    unread: String,
+}
+
+impl Default for TrayLabels {
+    /// English until the window loads and sends the app's language.
+    fn default() -> Self {
+        Self {
+            show: "Show Yoru".into(),
+            quiet: "Do not disturb for 1 hour".into(),
+            resume: "Turn off do not disturb".into(),
+            quit: "Quit".into(),
+            unread: "{n} unread".into(),
+        }
+    }
 }
 
 /// Keep the app's language and put the tray menu in it.
@@ -1445,9 +1224,8 @@ fn set_ui_language(app: AppHandle, state: State<AppState>, language: Option<Stri
     if changed {
         state.save_settings();
     }
-    if let Some(icon) = app.tray_by_id(TRAY_ID) {
-        icon.set_menu(Some(tray_menu(&app, &tray).map_err(|e| e.to_string())?)).map_err(|e| e.to_string())?;
-    }
+    *state.tray_labels.lock().unwrap() = tray;
+    update_tray(&app);
     Ok(())
 }
 
@@ -1483,50 +1261,6 @@ fn set_onboarding(state: State<AppState>, done: Option<bool>, tour_version: Opti
 #[tauri::command]
 fn pointer_gaze() -> Option<(f32, f32)> {
     pointer::gaze()
-}
-
-/// The cover the snapshots name `id`, as a data URL, once the bridge has it.
-#[tauri::command]
-fn music_cover(state: State<AppState>, id: u32) -> Option<String> {
-    state.music.cover().filter(|c| c.id == id).map(|c| c.data_url.to_string())
-}
-
-/// Play, pause or skip the music playing on this computer.
-#[tauri::command]
-async fn music_control(state: State<'_, AppState>, action: String) -> Result<String, String> {
-    let music = state.music.clone();
-    let action: music::Control = action.parse()?;
-    tauri::async_runtime::spawn_blocking(move || music.control(action)).await.map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn readings(app: AppHandle) -> Result<Vec<Reading>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let mut slot = state.collector.lock().unwrap();
-        let collector = slot.get_or_insert_with(Collector::new);
-        collector.readings()
-    })
-    .await
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn power_helper_status() -> power_helper::HelperStatus {
-    tauri::async_runtime::spawn_blocking(power_helper::status).await.unwrap_or(power_helper::HelperStatus {
-        state: power_helper::HelperState::Unavailable,
-        error: None,
-    })
-}
-
-#[tauri::command]
-async fn set_power_helper(on: bool) -> Result<power_helper::HelperStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || power_helper::set(on)).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn open_power_helper_settings() {
-    power_helper::open_settings();
 }
 
 /// One bundled firmware image.
@@ -1567,7 +1301,8 @@ async fn identify_board(app: AppHandle, port: Option<String>) -> Result<ChipInfo
 /// another kind, or when the bundled image isn't that kind's: either would
 /// leave the board with another board's display and pins.
 #[tauri::command]
-async fn flash_board(app: AppHandle, port: Option<String>, kind: BoardKind) -> Result<(), String> {
+async fn flash_board(app: AppHandle, port: Option<String>, kind: Option<BoardKind>) -> Result<(), String> {
+    let kind = kind.unwrap_or_default();
     let image = firmware_for(kind);
     firmware::check_image(kind, image)?;
     {
@@ -1583,7 +1318,7 @@ async fn flash_board(app: AppHandle, port: Option<String>, kind: BoardKind) -> R
         }
     }
     with_device(app, port, move |app, tool, port| {
-        let path = std::env::temp_dir().join(format!("companion-firmware-{}.bin", kind.profile().slug));
+        let path = std::env::temp_dir().join(format!("yoru-firmware-{}.bin", kind.profile().slug));
         fs::write(&path, image)?;
         let result = tool.flash(port, &path, |e| emit_flash(app, e));
         let _ = fs::remove_file(&path);
@@ -1711,8 +1446,8 @@ async fn test_claude_alert() -> Result<(), String> {
         let event = serde_json::json!({
             "hook_event_name": "Notification",
             "notification_type": "permission_prompt",
-            "session_id": format!("dualeye-test-{now}"),
-            "cwd": "/DualEye",
+            "session_id": format!("yoru-test-{now}"),
+            "cwd": "/Yoru",
         });
         board().claude_hook(event).map(drop).map_err(|e| e.to_string())
     })
@@ -1720,7 +1455,7 @@ async fn test_claude_alert() -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Claude Code's sessions and the permission requests waiting, for Yoru's home.
+/// Claude Code's sessions and the permission requests waiting (Yoru's own too).
 #[tauri::command]
 fn claude_agents(state: State<AppState>) -> AgentsView {
     state.agents.view()
@@ -1843,26 +1578,17 @@ async fn with_device<T: Send + 'static>(
 fn start_bridge(app: &AppHandle, port: Option<String>) -> BoardManager {
     let handle = app.clone();
     let state = app.state::<AppState>();
-    let (faces, rotation, hub, voice) = (state.faces.clone(), state.rotation.clone(), state.hub.clone(), state.voice.clone());
-    let (claude_alerts, timers, agents) = (state.claude_alerts.clone(), state.timers.clone(), state.agents.clone());
-    let (music, follow_pointer) = (state.music.clone(), state.follow_pointer.clone());
-    let (quips, board_settings, primary) = (state.quips.clone(), state.board_settings.clone(), state.primary.clone());
-    let transport = state.settings.lock().unwrap().transport;
     let config = BridgeConfig {
         port,
-        transport,
-        faces,
-        rotation,
-        board_settings,
-        primary,
-        hub,
-        voice,
-        claude_alerts,
-        agents,
-        timers,
-        music,
-        follow_pointer,
-        quips,
+        transport: state.settings.lock().unwrap().transport,
+        primary: state.primary.clone(),
+        hub: state.hub.clone(),
+        voice: state.voice.clone(),
+        claude_alerts: state.claude_alerts.clone(),
+        agents: state.agents.clone(),
+        timers: state.timers.clone(),
+        follow_pointer: state.follow_pointer.clone(),
+        assistant: Some(state.assistant.clone()),
         ..Default::default()
     };
     // Every board found; a port in the settings pins one.
@@ -1894,30 +1620,13 @@ fn on_bridge_event(app: &AppHandle, event: &ManagerEvent) {
             };
             *status.lock().unwrap() = ("error", Some(message.clone()));
         }
-        // Faces and rotation came from a board (at connect, or an MCP client
-        // changed them): keep them for the next launch too. The bridge has
-        // them already.
-        if let BridgeEvent::Settings { faces, rotation } = &event.event {
-            let screens = ScreenSettings { faces: *faces, rotation: *rotation };
-            let mut settings = state.settings.lock().unwrap();
-            match &event.board {
-                Some(id) => {
-                    settings.boards.insert(id.clone(), screens);
-                }
-                None => {
-                    settings.faces = *faces;
-                    settings.rotation = *rotation;
-                }
-            }
-            drop(settings);
-            state.save_settings();
+        // Touched on the board's inbox: what it's about opens here.
+        if let BridgeEvent::NotificationOpened { url: Some(url), .. } = &event.event {
+            let _ = assistant::open_link(url);
         }
         if matches!(event.event, BridgeEvent::Connected { .. } | BridgeEvent::Firmware { .. } | BridgeEvent::Disconnected { .. }) {
             let _ = app.emit("boards", state.devices.lock().unwrap().infos(primary.as_deref()));
         }
-    }
-    if shown && let BridgeEvent::Snapshot { snapshot, .. } = &event.event {
-        update_tray(app, snapshot);
     }
     if shown {
         let _ = app.emit("bridge", event);
@@ -1925,13 +1634,19 @@ fn on_bridge_event(app: &AppHandle, event: &ManagerEvent) {
     let _ = app.emit("manager", event);
 }
 
-fn update_tray(app: &AppHandle, s: &Snapshot) {
+/// The tray's tooltip (Yoru, and what's unread) and its menu (whose "do not
+/// disturb" says whether it's on).
+pub(crate) fn update_tray(app: &AppHandle) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
-    let temp = |t: Option<f32>| t.map_or_else(|| "—".to_string(), |t| format!("{t:.0}°"));
-    let text = format!("CPU {} · GPU {}", temp(s.cpu.temp_c), temp(s.gpu.temp_c));
-    let boards = app.try_state::<AppState>().map_or(0, |state| state.devices.lock().unwrap().boards.len());
-    let boards = if boards > 1 { format!(" · {boards} boards") } else { String::new() };
-    let _ = tray.set_tooltip(Some(format!("Companion Hub — {text}{boards}")));
+    let Some(state) = app.try_state::<AppState>() else { return };
+    let labels = state.tray_labels.lock().unwrap().clone();
+    let unread = state.assistant.inbox.unread();
+    let tooltip = if unread == 0 { "Yoru".to_string() } else { format!("Yoru — {}", labels.unread.replace("{n}", &unread.to_string())) };
+    let _ = tray.set_tooltip(Some(tooltip));
+    let quiet = state.assistant.quiet_until().is_some();
+    if let Ok(menu) = tray_menu(app, &labels, quiet) {
+        let _ = tray.set_menu(Some(menu));
+    }
 }
 
 fn show_main(app: &AppHandle) {
@@ -1942,21 +1657,22 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-fn tray_menu(app: &AppHandle, labels: &TrayLabels) -> tauri::Result<Menu<tauri::Wry>> {
+fn tray_menu(app: &AppHandle, labels: &TrayLabels, quiet: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let show = MenuItem::with_id(app, "show", &labels.show, true, None::<&str>)?;
+    let dnd = MenuItem::with_id(app, "dnd", if quiet { &labels.resume } else { &labels.quiet }, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", &labels.quit, true, None::<&str>)?;
-    Menu::with_items(app, &[&show, &quit])
+    Menu::with_items(app, &[&show, &dnd, &quit])
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    // English until the window loads and sends the app's language.
-    let menu = tray_menu(app, &TrayLabels { show: "Show DualEye".into(), quit: "Quit".into() })?;
+    let menu = tray_menu(app, &TrayLabels::default(), false)?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip("Companion Hub")
+        .tooltip("Yoru")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main(app),
+            "dnd" => assistant::toggle_dnd(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -1969,6 +1685,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    update_tray(app);
     Ok(())
 }
 
@@ -2004,13 +1721,13 @@ pub fn run() {
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_default();
             let port = settings.port.clone();
-            let faces = Arc::new(Mutex::new(settings.faces));
-            let rotation = Arc::new(Mutex::new(settings.rotation));
-            let board_settings = Arc::new(Mutex::new(settings.boards.clone()));
             let primary = Arc::new(Mutex::new(settings.primary.clone()));
             let claude_alerts = Arc::new(Mutex::new(settings.claude_alerts.clone()));
             let follow_pointer = Arc::new(AtomicBool::new(!settings.ignore_pointer));
-            let quips = Arc::new(Mutex::new(settings.quips));
+            let timers = Arc::new(Timers::open(timers::default_file()));
+            let dir = assistant_mod::default_dir();
+            let the_assistant = Arc::new(Assistant::open(dir.clone(), timers.clone()));
+            let watchers = Arc::new(Watchers::open(dir.map(|d| d.join("watchers.json"))));
             let (hub, hub_error) = match Hub::start() {
                 Ok(hub) => (Some(hub), None),
                 Err(e) => (None, Some(e.to_string())),
@@ -2020,22 +1737,20 @@ pub fn run() {
                 manager: Mutex::new(None),
                 settings: Mutex::new(settings),
                 settings_path,
-                faces,
-                rotation,
-                board_settings,
                 primary,
                 hub,
                 hub_error,
-                collector: Mutex::new(None),
                 device_busy: AtomicBool::new(false),
                 esptool_dir,
                 voice: Arc::default(),
                 claude_alerts,
-                timers: Arc::new(Timers::open(timers::default_file())),
+                timers,
                 agents: Arc::default(),
-                music: Arc::default(),
                 follow_pointer,
-                quips,
+                assistant: the_assistant,
+                watchers,
+                services: assistant::Services::default(),
+                tray_labels: Mutex::new(TrayLabels::default()),
                 stt_state: Arc::new(Mutex::new(("off", None))),
                 tts_state: Arc::new(Mutex::new(("off", None))),
                 llm_state: Arc::new(Mutex::new(("off", None))),
@@ -2051,6 +1766,7 @@ pub fn run() {
             let _ = ctrlc::set_handler(move || quitter.exit(0));
             let manager = start_bridge(handle, port);
             *app.state::<AppState>().manager.lock().unwrap() = Some(manager);
+            assistant::start(handle);
             build_tray(handle)?;
             Ok(())
         })
@@ -2063,13 +1779,30 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![status, list_ports, set_port, set_transport, wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair, set_faces, set_rotation, readings, firmware_info, identify_board, flash_board, claude_link, claude_connect, claude_disconnect, claude_alerts_info, set_claude_alerts, claude_hooks, test_claude_alert, claude_agents, claude_approve, mcp_info, claude_mcp, voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine, board_voice, set_board_volume, set_board_eyes, set_board_idle_eyes, set_board_wake_sound, set_board_pet, board_pet, quips_info, set_quips, play_board_scene, play_board_sound, test_voice, send_image, clear_image, image_preview, power_helper_status, set_power_helper, open_power_helper_settings, timers_info, timer_tool, set_timer_screen, dismiss_timers, set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze, music_cover, music_control, boards, show_board, set_primary, yoru_settings, yoru_set_setting, yoru_react, yoru_feed, yoru_show_menu])
+        .invoke_handler(tauri::generate_handler![
+            status, list_ports, set_port, set_transport, boards,
+            wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair,
+            firmware_info, identify_board, flash_board,
+            claude_link, claude_connect, claude_disconnect, claude_alerts_info, set_claude_alerts, claude_hooks, test_claude_alert, claude_agents, claude_approve, mcp_info, claude_mcp,
+            voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine,
+            board_voice, set_board_volume, set_board_wake_sound, play_board_sound, test_voice,
+            yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu,
+            timers_info, timer_tool, set_timer_screen, dismiss_timers,
+            set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze,
+            assistant::assistant_info, assistant::set_assistant_settings, assistant::set_do_not_disturb, assistant::ask, assistant::chat, assistant::forget_conversation,
+            assistant::inbox, assistant::inbox_read, assistant::inbox_read_all, assistant::inbox_dismiss, assistant::inbox_clear, assistant::open_notification, assistant::open_web,
+            assistant::memory, assistant::set_memory,
+            assistant::watchers, assistant::put_watcher, assistant::remove_watcher, assistant::run_watcher, assistant::recap_now,
+            assistant::connectors, assistant::connector_presets, assistant::add_connector, assistant::remove_connector, assistant::set_connector_enabled,
+            assistant::set_tool_policy, assistant::login_connector, assistant::cancel_login, assistant::logout_connector, assistant::set_connector_secret,
+        ])
         .build(tauri::generate_context!())
-        .expect("failed to build the DualEye app")
+        .expect("failed to build the Yoru app")
         .run(|app, event| match event {
             tauri::RunEvent::Exit => {
                 // Release the serial port before the process goes away.
                 if let Some(state) = app.try_state::<AppState>() {
+                    state.services.shutdown();
                     state.manager.lock().unwrap().take();
                     // Stops the whisper-server, Piper and llama-server sidecars,
                     // even if a reply being spoken still holds them.
@@ -2080,7 +1813,7 @@ pub fn run() {
                     drop(voice);
                     state.cancel_download.store(true, Ordering::SeqCst);
                     if let Some(hub) = &state.hub {
-                        hub.set_unavailable("the DualEye app is quitting");
+                        hub.set_unavailable("the Yoru app is quitting");
                     }
                 }
             }
@@ -2104,7 +1837,6 @@ mod tests {
     #[test]
     fn bundled_firmware_reports_its_version() {
         let versions = [
-            (BoardKind::DualEye, include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../firmware/dualeye/version.txt"))),
             (BoardKind::Yoru, include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../firmware/yoru/version.txt"))),
         ];
         for (kind, want) in versions {
@@ -2155,4 +1887,9 @@ mod tests {
         assert!(old.onboarding_done);
         assert_eq!(old.tour_version, 0);
     }
+}
+
+/// Unix time in ms.
+pub(crate) fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }

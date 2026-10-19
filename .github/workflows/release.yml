@@ -1,5 +1,5 @@
-# On every push to main: build both boards' firmware from their own
-# repositories, then the desktop app for Linux, macOS (Apple Silicon and Intel)
+# On every push to main: build Yoru's firmware from its own repository,
+# then the desktop app for Linux, macOS (Apple Silicon and Intel)
 # and Windows with that firmware inside, and with whisper.cpp's and llama.cpp's
 # servers for voice (tools/build_sidecars.sh), and publish them all on the
 # GitHub release `v<app version>`.
@@ -13,9 +13,9 @@
 # `v<app version>-develop`, recreated on that commit every time, so it never
 # touches the stable release.
 #
-# The firmware repositories are checked out at their default branch, or at
-# DUALEYE_REF / YORU_REF (repository variables). A private one needs a
-# FIRMWARE_TOKEN secret that can read it.
+# The firmware repository is checked out at its default branch, or at
+# YORU_REF (a repository variable). A private one needs a FIRMWARE_TOKEN
+# secret that can read it.
 
 name: Release
 
@@ -41,9 +41,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - board: dualeye
-            repository: EttoreCaputo/esp32s3-dualeye-pcmonitor
-            ref_var: DUALEYE_REF
           - board: yoru
             repository: EttoreCaputo/Yoru
             ref_var: YORU_REF
@@ -123,33 +120,29 @@ jobs:
           for d in firmware/firmware-*; do mv "$d" "firmware/${d#firmware/firmware-}"; done
           app="$(jq -r .version app/src-tauri/tauri.conf.json)"
           tag="v$app"
-          title="Companion Hub $app"
+          title="Yoru $app"
           if [ "$GITHUB_REF_NAME" = develop ]; then
             tag="v$app-develop"
-            title="Companion Hub $app (develop)"
+            title="Yoru $app (develop)"
           fi
-          dualeye="$(tr -d '[:space:]' < firmware/dualeye/version.txt)"
           yoru="$(tr -d '[:space:]' < firmware/yoru/version.txt)"
           {
             if [ "$GITHUB_REF_NAME" = develop ]; then
               echo "> Development build from \`develop\`, rebuilt on every push. For the stable app, use the latest release."
               echo
             fi
-            echo "Desktop app $app for DualEye and Yoru, with DualEye firmware **$dualeye** and Yoru firmware **$yoru** inside. Plug a board in, open the app, and it offers to flash the firmware when the board runs an older one."
-            echo
-            echo "### DualEye firmware $dualeye"
-            awk -v v="$dualeye" '/^## /{p = ($2 == v || $2 == "v" v); next} p' firmware/dualeye/FIRMWARE_CHANGELOG.md
+            echo "Yoru $app, the personal assistant with a body on the desk, with Yoru firmware **$yoru** inside. Plug the board in, open the app, and it offers to flash the firmware when the board runs an older one."
             echo
             echo "### Yoru firmware $yoru"
             awk -v v="$yoru" '/^## /{p = ($2 == v || $2 == "v" v); next} p' firmware/yoru/FIRMWARE_CHANGELOG.md
             echo
             echo "### Downloads"
-            echo "- **Windows**: \`Companion.Hub_${app}_windows-x64-setup.exe\` or \`.msi\`."
-            echo "- **macOS Apple Silicon** (M1 and later): \`Companion.Hub_${app}_macos-apple-silicon.dmg\`."
-            echo "- **macOS Intel**: \`Companion.Hub_${app}_macos-intel.dmg\`."
-            echo "  The app isn't notarized: the first time, open it, then allow it in System Settings → Privacy & Security (Open Anyway), or run \`xattr -cr \"/Applications/Companion Hub.app\"\`."
-            echo "- **Linux**: \`Companion.Hub_${app}_linux-x64\` as \`.AppImage\`, \`.deb\` or \`.rpm\`."
-            echo "- \`dualeye-firmware-$dualeye.bin\` and \`yoru-firmware-$yoru.bin\`: the merged images alone, to flash at 0x0 with esptool."
+            echo "- **Windows**: \`Yoru_${app}_windows-x64-setup.exe\` or \`.msi\`."
+            echo "- **macOS Apple Silicon** (M1 and later): \`Yoru_${app}_macos-apple-silicon.dmg\`."
+            echo "- **macOS Intel**: \`Yoru_${app}_macos-intel.dmg\`."
+            echo "  The app isn't notarized: the first time, open it, then allow it in System Settings → Privacy & Security (Open Anyway), or run \`xattr -cr \"/Applications/Yoru.app\"\`."
+            echo "- **Linux**: \`Yoru_${app}_linux-x64\` as \`.AppImage\`, \`.deb\` or \`.rpm\`."
+            echo "- \`yoru-firmware-$yoru.bin\`: the merged image alone, to flash at 0x0 with esptool."
             echo
             echo "Voice: the app ships whisper.cpp and llama.cpp (MIT); it downloads the models, and installs Piper (GPL-3.0) when you ask."
             echo
@@ -164,9 +157,8 @@ jobs:
           else
             gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --notes-file notes.md
           fi
-          cp firmware/dualeye/merged-binary.bin "dualeye-firmware-$dualeye.bin"
           cp firmware/yoru/merged-binary.bin "yoru-firmware-$yoru.bin"
-          gh release upload "$tag" "dualeye-firmware-$dualeye.bin" "yoru-firmware-$yoru.bin" --clobber
+          gh release upload "$tag" "yoru-firmware-$yoru.bin" --clobber
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)" >> "$GITHUB_OUTPUT"
 
@@ -190,15 +182,28 @@ jobs:
             platform: macos-apple-silicon
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-            # Adds the root helper that reads the CPU power (tools/build_power_helper.sh).
-            sidecars: tauri.sidecars.macos.conf.json
           - name: macOS Intel
             os: macos-latest
             platform: macos-intel
             target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
-            sidecars: tauri.sidecars.macos.conf.json
     runs-on: ${{ matrix.os }}
+    # The app's own OAuth clients (docs/oauth-clients.md), compiled in: with
+    # them Google, GitHub, Slack, Box, Asana and HubSpot sign in with one
+    # click. Unset secrets build an app where those need the user's client.
+    env:
+      YORU_GOOGLE_CLIENT_ID: ${{ secrets.YORU_GOOGLE_CLIENT_ID }}
+      YORU_GOOGLE_CLIENT_SECRET: ${{ secrets.YORU_GOOGLE_CLIENT_SECRET }}
+      YORU_GITHUB_CLIENT_ID: ${{ secrets.YORU_GITHUB_CLIENT_ID }}
+      YORU_GITHUB_CLIENT_SECRET: ${{ secrets.YORU_GITHUB_CLIENT_SECRET }}
+      YORU_SLACK_CLIENT_ID: ${{ secrets.YORU_SLACK_CLIENT_ID }}
+      YORU_SLACK_CLIENT_SECRET: ${{ secrets.YORU_SLACK_CLIENT_SECRET }}
+      YORU_BOX_CLIENT_ID: ${{ secrets.YORU_BOX_CLIENT_ID }}
+      YORU_BOX_CLIENT_SECRET: ${{ secrets.YORU_BOX_CLIENT_SECRET }}
+      YORU_ASANA_CLIENT_ID: ${{ secrets.YORU_ASANA_CLIENT_ID }}
+      YORU_ASANA_CLIENT_SECRET: ${{ secrets.YORU_ASANA_CLIENT_SECRET }}
+      YORU_HUBSPOT_CLIENT_ID: ${{ secrets.YORU_HUBSPOT_CLIENT_ID }}
+      YORU_HUBSPOT_CLIENT_SECRET: ${{ secrets.YORU_HUBSPOT_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -268,9 +273,9 @@ jobs:
         with:
           projectPath: app
           releaseId: ${{ needs.release.outputs.id }}
-          # e.g. Companion.Hub_0.1.0_macos-apple-silicon.dmg, Companion.Hub_0.1.0_windows-x64-setup.exe
+          # e.g. Yoru_0.1.0_macos-apple-silicon.dmg, Yoru_0.1.0_windows-x64-setup.exe
           assetNamePattern: "[name]_[version]_${{ matrix.platform }}[setup][ext]"
-          args: ${{ matrix.args }} --config src-tauri/${{ matrix.sidecars || 'tauri.sidecars.conf.json' }}
+          args: ${{ matrix.args }} --config src-tauri/tauri.sidecars.conf.json
 
       # One more try when the first fails, usually a download that timed out
       # or was reset (linuxdeploy, WiX, NSIS). The compile is cached by then.
@@ -283,7 +288,7 @@ jobs:
           projectPath: app
           releaseId: ${{ needs.release.outputs.id }}
           assetNamePattern: "[name]_[version]_${{ matrix.platform }}[setup][ext]"
-          args: ${{ matrix.args }} --config src-tauri/${{ matrix.sidecars || 'tauri.sidecars.conf.json' }}
+          args: ${{ matrix.args }} --config src-tauri/tauri.sidecars.conf.json
 
       # tauri-action always uploads the macOS .app as .app.tar.gz too; the
       # .dmg is the only download macOS needs.

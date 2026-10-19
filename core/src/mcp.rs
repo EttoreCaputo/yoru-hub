@@ -1,12 +1,12 @@
 //! MCP server over stdio, for Claude Code, Claude Desktop and other MCP
-//! clients (`companion mcp`, or `companion-hub --mcp`).
+//! clients (`yoru mcp`, or the app with `--mcp`).
 //!
 //! The board's tools are passed through as the firmware describes them in
 //! `tools/list`, so a new firmware tool shows up without a host change. The
-//! board is reached through [`Board`]: the running app or `companion` bridge,
-//! or the port opened for each call. Two host tools read this computer,
-//! `get_metrics` and `get_claude_usage`, and `speak` talks through the
-//! board's speaker with the bridge's text-to-speech. What the client is told
+//! board is reached through [`Board`]: the running app or `yoru` bridge,
+//! or the port opened for each call. `get_claude_usage` reads Claude Code's
+//! usage on this computer, `speak` talks through the board's speaker with
+//! the bridge's text-to-speech, and the timers run on the host. What the client is told
 //! about the board comes from its kind's [`BoardProfile`](crate::BoardProfile).
 //!
 //! With several boards attached to the bridge, the tools are every board's,
@@ -36,27 +36,25 @@ use serde_json::{Value, json};
 
 use crate::claude::ClaudeUsage;
 use crate::claude::alerts;
-use crate::music::Music;
 use crate::timers::Timers;
 use crate::hub::{Board, BoardInfo};
 use crate::link::{self, CallError, Tool, ToolResult};
 use crate::profile::BoardKind;
-use crate::sensors::Collector;
-use crate::snapshot::{Snapshot, short_floats};
+use crate::snapshot::short_floats;
 
 /// The argument that turns the app binary into the MCP server.
 pub const FLAG: &str = "--mcp";
 
 /// What the client is told before it knows which board this is.
-const ABOUT_ANY_BOARD: &str = "The board is a small desk companion connected to this computer: \
-a DualEye (two round screens with watch faces) or a Yoru (a desk pet on one round screen). Its tools say what it can do.";
+const ABOUT_ANY_BOARD: &str = "The board is Yoru, the user's personal assistant with a body on the desk: a round screen \
+connected to this computer. Its tools say what it can do.";
 
 /// What the client is told about the host's own tools, whatever the board.
-const HOST_INSTRUCTIONS: &str = "get_metrics and get_claude_usage read this computer, and work without the board. \
+const HOST_INSTRUCTIONS: &str = "get_claude_usage reads Claude Code's usage on this computer, and works without the board. \
+notify puts a notification in the user's inbox (the Yoru app and the board): use it when a long task finishes or needs the user. \
 speak says a short sentence out loud through the board's speaker, in Italian or English. \
-set_timer, set_reminder, pomodoro, control_timer, update_timer and get_timers run timers on the host: the board rings when one is up, \
-and a DualEye counts the first one down on a screen (they need the Companion Hub app or `companion` running to ring). \
-media_control and now_playing play, pause or skip the music on this computer and say what's playing.";
+set_timer, set_reminder, pomodoro, control_timer, update_timer and get_timers run timers on the host: the board rings when one is up \
+(they need the Yoru app or `yoru` running to ring).";
 
 /// What the client is told when several boards are connected.
 const SEVERAL_BOARDS: &str = "Several boards are connected: list_boards names them. \
@@ -72,7 +70,7 @@ const WATCH: Duration = Duration::from_secs(10);
 pub fn serve_stdio(port: Option<String>) -> io::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async {
-        let server = CompanionMcp::new(Board::new(port, &format!("companion-mcp/{}", env!("CARGO_PKG_VERSION"))), crate::claude::data_dir());
+        let server = CompanionMcp::new(Board::new(port, &format!("yoru-mcp/{}", env!("CARGO_PKG_VERSION"))), crate::claude::data_dir());
         // The instructions name the board: learn its kind before the client asks.
         let probe = server.clone();
         let _ = tokio::task::spawn_blocking(move || probe.refresh_kind()).await;
@@ -100,7 +98,6 @@ struct Inner {
     listed: Mutex<Option<(Vec<Tool>, bool)>>,
     /// The boards attached to the bridge, as last asked.
     boards: Mutex<Vec<BoardInfo>>,
-    collector: Mutex<Option<Collector>>,
     claude: Mutex<Option<ClaudeUsage>>,
 }
 
@@ -113,7 +110,6 @@ impl CompanionMcp {
                 kind: Mutex::default(),
                 listed: Mutex::default(),
                 boards: Mutex::default(),
-                collector: Mutex::default(),
                 claude: Mutex::default(),
             }),
         }
@@ -248,7 +244,6 @@ impl CompanionMcp {
         let on = arguments.as_object_mut().and_then(|a| a.remove("board")).and_then(|b| b.as_str().map(str::to_string));
         let on = on.as_deref();
         match name {
-            "get_metrics" => Ok(json_result(self.metrics().metrics_json())),
             "list_boards" => Ok(match self.inner.board.boards() {
                 Ok(boards) => json_result(json!({"boards": boards})),
                 Err(e) => text_result(&format!("No board can be reached: {e}."), true),
@@ -267,11 +262,9 @@ impl CompanionMcp {
                     Err(e) => text_result(&format!("The {} can't speak: {e}.", self.board_name()), true),
                 })
             }
-            name if Music::tools().iter().any(|t| t.name == name) => Ok(match Music::default().call_tool(name, &arguments) {
-                Some(Ok(text)) if name == "now_playing" => json_result(serde_json::from_str(&text).unwrap_or(Value::String(text))),
-                Some(Ok(text)) => text_result(&text, false),
-                Some(Err(e)) => text_result(&e, true),
-                None => text_result(&format!("unknown tool {name}"), true),
+            "notify" => Ok(match self.inner.board.notify(arguments) {
+                Ok(id) => text_result(&format!("notified ({id})"), false),
+                Err(e) => text_result(&format!("Yoru couldn't take the notification: {e}."), true),
             }),
             name if Timers::tools().iter().any(|t| t.name == name) => {
                 let language = arguments.get("language").and_then(Value::as_str).unwrap_or(alerts::system_language()).to_string();
@@ -288,25 +281,6 @@ impl CompanionMcp {
                 Err(e) => Ok(text_result(&format!("The {} can't run {name}: {e}.", self.board_name()), true)),
             },
         }
-    }
-
-    /// The bridge's sample while it is fresh, else one taken here.
-    fn metrics(&self) -> Snapshot {
-        if let Some((snapshot, _)) = self.inner.board.bridge_snapshot().filter(|(_, age)| *age < FRESH) {
-            return snapshot;
-        }
-        let mut slot = self.inner.collector.lock().unwrap();
-        let collector = match slot.as_mut() {
-            Some(c) => c,
-            None => {
-                // CPU load is the change between two samples.
-                let c = slot.insert(Collector::new());
-                c.sample();
-                std::thread::sleep(Duration::from_millis(500));
-                c
-            }
-        };
-        collector.sample()
     }
 
     fn claude_usage(&self) -> Option<Value> {
@@ -353,23 +327,7 @@ fn host_tools() -> Vec<Value> {
             "annotations": {"readOnlyHint": read_only, "destructiveHint": false, "openWorldHint": false},
         })
     });
-    let music = Music::tools().into_iter().map(|t| {
-        let read_only = t.name == "now_playing";
-        json!({
-            "name": t.name,
-            "description": t.description,
-            "inputSchema": t.input_schema,
-            "annotations": {"readOnlyHint": read_only, "destructiveHint": false, "openWorldHint": false},
-        })
-    });
     let mut tools = vec![
-        json!({
-            "name": "get_metrics",
-            "title": "Computer metrics",
-            "description": "Current CPU and GPU temperature, load, clock, power and memory of this computer, and its fan speeds.",
-            "inputSchema": no_args,
-            "annotations": {"readOnlyHint": true, "openWorldHint": false},
-        }),
         json!({
             "name": "get_claude_usage",
             "title": "Claude Code usage",
@@ -380,9 +338,28 @@ fn host_tools() -> Vec<Value> {
             "annotations": {"readOnlyHint": true, "openWorldHint": false},
         }),
         json!({
+            "name": "notify",
+            "title": "Notify the user through Yoru",
+            "description": "Put a notification in the user's inbox in the Yoru app and on Yoru's board: something finished, \
+                            something needs the user. Use sparingly. urgency: low (inbox only), normal (a banner), high (Yoru knocks), \
+                            urgent (also said aloud). Needs the Yoru app running.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "A few words: what happened"},
+                    "text": {"type": "string", "description": "One or two sentences"},
+                    "urgency": {"type": "string", "enum": ["low", "normal", "high", "urgent"]},
+                    "source": {"type": "string", "description": "Default: Claude Code"},
+                    "url": {"type": "string"},
+                },
+                "required": ["title"],
+            },
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "openWorldHint": false},
+        }),
+        json!({
             "name": "list_boards",
             "title": "Connected boards",
-            "description": "The boards connected to this computer: each one's id, kind (dualeye or yoru), port, firmware, and whether it is the primary one.",
+            "description": "The boards connected to this computer: each one's id, kind (yoru), port, firmware, and whether it is the primary one.",
             "inputSchema": no_args,
             "annotations": {"readOnlyHint": true, "openWorldHint": false},
         }),
@@ -390,7 +367,7 @@ fn host_tools() -> Vec<Value> {
             "name": "speak",
             "title": "Speak through the board",
             "description": "Say a short text out loud through the board's speaker. Returns once it has been played. \
-                            Needs the Companion Hub app with spoken replies on (or `companion --tts`) running.",
+                            Needs the Yoru app with spoken replies on (or `yoru --tts`) running.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -404,7 +381,6 @@ fn host_tools() -> Vec<Value> {
         }),
     ];
     tools.extend(timers);
-    tools.extend(music);
     tools
 }
 
@@ -425,8 +401,8 @@ fn text_result(text: &str, is_error: bool) -> CallToolResult {
 
 impl ServerHandler for CompanionMcp {
     fn get_info(&self) -> ServerConfig {
-        let mut info = Implementation::new("companion-hub", env!("CARGO_PKG_VERSION"));
-        info.title = Some("Companion Hub".into());
+        let mut info = Implementation::new("yoru", env!("CARGO_PKG_VERSION"));
+        info.title = Some("Yoru".into());
         ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_tool_list_changed().build())
             .with_server_info(info)
             .with_instructions(self.instructions())
@@ -473,7 +449,7 @@ mod tests {
     fn host_tools_convert_to_mcp() {
         for tool in host_tools() {
             let t: McpTool = serde_json::from_value(tool).expect("valid MCP tool");
-            // Only speak, the timers and media_control do something.
+            // Only speak and the timers do something.
             let reads = crate::agent::is_read_only(&t.name);
             assert_eq!(t.annotations.and_then(|a| a.read_only_hint), Some(reads), "{}", t.name);
         }
@@ -483,11 +459,11 @@ mod tests {
     fn several_boards_add_a_board_argument() {
         let boards = [
             BoardInfo { id: Some("aa".into()), kind: BoardKind::Yoru, port: String::new(), firmware: "1".into(), primary: false },
-            BoardInfo { id: Some("bb".into()), kind: BoardKind::DualEye, port: String::new(), firmware: "1".into(), primary: false },
+            BoardInfo { id: Some("bb".into()), kind: BoardKind::Yoru, port: String::new(), firmware: "1".into(), primary: false },
         ];
         let mut schema = json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]});
         add_board_argument(&mut schema, &boards);
-        assert_eq!(schema["properties"]["board"]["enum"], json!(["aa", "bb", "yoru", "dualeye"]));
+        assert_eq!(schema["properties"]["board"]["enum"], json!(["aa", "bb", "yoru"]));
         assert_eq!(schema["required"], json!(["name"]));
         let mut empty = Value::Null;
         add_board_argument(&mut empty, &boards);
@@ -509,15 +485,15 @@ mod tests {
     #[test]
     fn board_tools_come_from_the_cache_when_the_board_is_away() {
         let dir = tempfile::tempdir().unwrap();
-        let tools = json!([{"name": "set_face", "description": "Switch the watch face", "inputSchema": {"type": "object"}}]);
-        fs::write(link::tools_cache_in(dir.path(), BoardKind::DualEye), tools.to_string()).unwrap();
+        let tools = json!([{"name": "react", "description": "React", "inputSchema": {"type": "object"}}]);
+        fs::write(link::tools_cache_in(dir.path(), BoardKind::Yoru), tools.to_string()).unwrap();
         // A port that isn't there, and no hub: the board can't be reached.
         let board = Board::with_hub_file(Some("/dev/does-not-exist".into()), "test", None);
         let server = CompanionMcp::new(board, Some(dir.path().to_path_buf()));
         let (listed, live) = server.board_tools();
         assert!(!live);
-        assert_eq!(listed[0].name, "set_face");
-        assert!(server.instructions().starts_with("DualEye is"));
+        assert_eq!(listed[0].name, "react");
+        assert!(server.instructions().starts_with("Yoru is"));
     }
 
     #[test]

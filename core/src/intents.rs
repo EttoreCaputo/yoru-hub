@@ -1,35 +1,27 @@
-//! Rule-based commands in Italian and English, so the whole voice loop
-//! (wake word → transcript → board tools → spoken reply) works before the
-//! local LLM of M6, and without one.
+//! Rule-based commands in Italian and English, so timers, reminders, the
+//! volume and the time work by voice without a language model, and "stop"
+//! silences a ringing alarm at once.
 //!
-//! [`understand`] looks for a few keywords in what Whisper wrote: a face
-//! name, a screen, "luminosità"/"brightness", "volume", "ruota"/"rotate",
-//! "scrivi"/"write", "temperatura"/"temperature", "che ore"/"what time",
-//! "timer", "ricordami"/"remind me", "pomodoro", "pausa la musica"/"next song",
-//! "cosa sta suonando"/"what's playing", "apri Spotify"/"open Safari".
-//! It returns the board tools to call and what to answer; anything else is
-//! answered with "Non ho capito" / "Sorry, I didn't get that".
+//! [`understand`] looks for a few keywords in what was heard: "che
+//! ore"/"what time", "luminosità"/"brightness", "volume", "timer",
+//! "ricordami"/"remind me", "pomodoro". It returns the tools to call and
+//! what to answer; anything else is answered with "Non ho capito" /
+//! "Sorry, I didn't get that".
 
 use chrono::{Local, NaiveTime, Timelike};
 use serde_json::{Value, json};
 
-use crate::music::NowPlaying;
-use crate::snapshot::{Face, Snapshot};
 use crate::timers::{self, TimerInfo};
 
 /// What the host knows besides the words.
 #[derive(Debug, Clone, Default)]
 pub struct Context {
-    /// The latest sensor sample, for "how hot is the CPU".
-    pub snapshot: Option<Snapshot>,
     /// The speaker's volume, for "louder" (`get_state` has it).
     pub volume: Option<u8>,
     /// The timers running, for "how long is left".
     pub timers: Vec<TimerInfo>,
     /// A timer rings, or rang until the wake word a moment ago: "stop" is for it.
     pub alarm: bool,
-    /// What's playing, when the words are about music ([`asks_music`]).
-    pub music: Option<NowPlaying>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,64 +74,6 @@ fn number(words: &[String]) -> Option<u32> {
     words.iter().find_map(|w| w.parse::<u32>().ok().or_else(|| NUMBER_WORDS.iter().find(|(n, _)| w == n).map(|&(_, v)| v)))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Screen {
-    Left,
-    Right,
-    Both,
-}
-
-impl Screen {
-    fn of(words: &[String]) -> Screen {
-        let left = has(words, &["sinistr*", "left", "cpu", "processore"]);
-        let right = has(words, &["destr*", "right", "gpu"]);
-        match (left, right) {
-            (true, false) if !has(words, &["entramb*", "both", "tutti", "tutte", "all"]) => Screen::Left,
-            (false, true) if !has(words, &["entramb*", "both", "tutti", "tutte", "all"]) => Screen::Right,
-            _ => Screen::Both,
-        }
-    }
-
-    fn arg(self) -> &'static str {
-        match self {
-            Screen::Left => "left",
-            Screen::Right => "right",
-            Screen::Both => "both",
-        }
-    }
-
-    fn said(self, it: bool) -> &'static str {
-        match (self, it) {
-            (Screen::Left, true) => "sullo schermo sinistro",
-            (Screen::Right, true) => "sullo schermo destro",
-            (Screen::Both, true) => "su entrambi gli schermi",
-            (Screen::Left, false) => "on the left screen",
-            (Screen::Right, false) => "on the right screen",
-            (Screen::Both, false) => "on both screens",
-        }
-    }
-}
-
-/// Face names as Whisper tends to write them.
-fn face(words: &[String]) -> Option<Face> {
-    let table: &[(&[&str], Face)] = &[
-        (&["classic", "classico", "classica", "classici"], Face::Classic),
-        // "Rings a sinistra" comes out as "rinza sinistra", "rinusa"...
-        (&["ring*", "rink*", "rinz*", "rins*", "rinu*", "anelli"], Face::Rings),
-        (&["plus"], Face::Plus),
-        (&["bar", "bars", "barra"], Face::Bar),
-        (&["clawd", "clawed", "clod", "mascotte", "mascot", "granchio", "crab"], Face::Clawd),
-        (&["claude", "cloud", "clode"], Face::Claude),
-        (&["net", "network", "rete", "internet"], Face::Net),
-        (&["disk", "disco", "dischi"], Face::Disk),
-        (&["battery", "batteria"], Face::Battery),
-        (&["image", "immagine", "foto", "picture", "photo", "gif"], Face::Image),
-        (&["music*", "musica", "canzon*", "song*"], Face::Music),
-        (&["occhi", "occhio", "eyes", "eye"], Face::Eyes),
-    ];
-    table.iter().find(|(names, _)| has(words, names)).map(|&(_, f)| f)
-}
-
 fn plan(calls: Vec<(String, Value)>, it: bool, reply: String) -> Plan {
     let failure = if it { "Non ci sono riuscito." } else { "That didn't work." }.to_string();
     Plan { calls, reply, failure, understood: true }
@@ -153,24 +87,9 @@ fn tool(name: &str, arguments: Value) -> (String, Value) {
 pub fn understand(text: &str, language: &str, ctx: &Context) -> Plan {
     let it = language == "it";
     let w = words(text);
-    let screen = Screen::of(&w);
 
     if let Some(plan) = timer_plan(text, &w, it, ctx) {
         return plan;
-    }
-
-    if let Some(plan) = app_plan(&w, it) {
-        return plan;
-    }
-
-    if let Some(plan) = music_plan(&w, it, ctx) {
-        return plan;
-    }
-
-    // "Scrivi ciao" / "write hello": the rest of the sentence goes on screen.
-    if let Some(rest) = after_verb(text, &["scrivi", "write", "mostra la scritta", "show the text"]) {
-        let args = json!({"text": rest, "screen": screen.arg()});
-        return plan(vec![tool("show_text", args)], it, if it { "Ecco.".into() } else { "Here it is.".into() });
     }
 
     if has_pair(&w, &[("che", "or"), ("what", "time")]) || has(&w, &["orario"]) {
@@ -184,28 +103,11 @@ pub fn understand(text: &str, language: &str, ctx: &Context) -> Plan {
         return plan(vec![], it, reply);
     }
 
-    if has(&w, &["temperatur*", "caldo", "calda", "hot", "warm", "gradi", "degrees"]) && !has(&w, &["ruota", "gira", "rotate", "turn"]) {
-        return plan(vec![], it, temperatures(ctx.snapshot.as_ref(), screen, it));
-    }
-
-    let off = has_pair(&w, &[("turn", "off"), ("switch", "off")]) || has(&w, &["spegni"]);
-    let on = has_pair(&w, &[("turn", "on"), ("switch", "on")]) || has(&w, &["accendi"]);
-    if (off || on) && has(&w, &["schermo", "schermi", "screen", "screens", "display", "luce", "light"]) {
-        let pct = if off { 0 } else { 100 };
-        let reply = match (it, off) {
-            (true, true) => format!("Spento {}.", screen.said(true).replace("sullo", "lo").replace("su entrambi gli", "entrambi gli")),
-            (true, false) => "Acceso.".to_string(),
-            (false, true) => "Screen off.".to_string(),
-            (false, false) => "Screen on.".to_string(),
-        };
-        return plan(vec![tool("set_brightness", json!({"percent": pct, "screen": screen.arg()}))], it, reply);
-    }
-
     if has(&w, &["luminosit*", "brightness", "bright", "luce"]) {
         let pct = if has(&w, &["massima", "massimo", "max", "maximum", "full", "piena"]) {
             Some(100)
         } else if has(&w, &["minima", "minimo", "min", "minimum"]) {
-            Some(10)
+            Some(5)
         } else if has(&w, &["meta", "half"]) {
             Some(50)
         } else {
@@ -213,22 +115,7 @@ pub fn understand(text: &str, language: &str, ctx: &Context) -> Plan {
         };
         if let Some(pct) = pct.filter(|p| *p <= 100) {
             let reply = if it { format!("Luminosità al {pct} per cento.") } else { format!("Brightness {pct} percent.") };
-            return plan(vec![tool("set_brightness", json!({"percent": pct, "screen": screen.arg()}))], it, reply);
-        }
-    }
-
-    if has(&w, &["ruota", "gira", "girare", "ruotare", "rotate", "turn", "rotation", "rotazione", "sottosopra"]) || has_pair(&w, &[("upside", "down")]) {
-        let degrees = if has(&w, &["sottosopra"]) || has_pair(&w, &[("upside", "down")]) {
-            Some(180)
-        } else if has(&w, &["dritto", "dritti", "normale", "upright", "normal", "reset"]) {
-            Some(0)
-        } else {
-            number(&w).filter(|d| [0, 90, 180, 270].contains(d))
-        };
-        // "Turn it up" is the volume.
-        if let Some(d) = degrees {
-            let reply = if it { format!("Ruotato di {d} gradi.") } else { format!("Turned {d} degrees.") };
-            return plan(vec![tool("set_rotation", json!({"degrees": d, "screen": screen.arg()}))], it, reply);
+            return plan(vec![tool("set_brightness", json!({"percent": pct}))], it, reply);
         }
     }
 
@@ -253,19 +140,13 @@ pub fn understand(text: &str, language: &str, ctx: &Context) -> Plan {
         }
     }
 
-    if let Some(f) = face(&w) {
-        let name = f.name();
-        let reply = if it { format!("Fatto: faccia {name} {}.", screen.said(true)) } else { format!("Done: {name} {}.", screen.said(false)) };
-        return plan(vec![tool("set_face", json!({"face": name, "screen": screen.arg()}))], it, reply);
-    }
-
     if has_pair(&w, &[("cosa", "sai"), ("what", "can")]) || has(&w, &["aiuto", "help"]) {
         let reply = if it {
-            "Posso cambiare faccia, luminosità, rotazione e volume, scrivere un messaggio, dirti le temperature e l'ora, \
-             impostare timer, promemoria e un pomodoro, mettere in pausa o cambiare la musica e aprire le app."
+            "Senza un modello posso dirti l'ora, cambiare luminosità e volume, \
+             impostare timer, promemoria e un pomodoro."
         } else {
-            "I can change the face, brightness, rotation and volume, write a message, tell you the temperatures and the time, \
-             set timers, reminders and a pomodoro, pause or skip the music and open apps."
+            "Without a model I can tell you the time, change the brightness and the volume, \
+             and set timers, reminders and a pomodoro."
         };
         return plan(vec![], it, reply.into());
     }
@@ -692,101 +573,9 @@ fn timer_plan(text: &str, w: &[String], it: bool, ctx: &Context) -> Option<Plan>
     Some(plan(vec![tool("set_timer", args)], it, reply))
 }
 
-/// "Apri Spotify", "puoi aprire la calcolatrice", "open Safari", "launch
-/// Visual Studio Code": open_app with the name. "Avvia la musica" stays the
-/// music's, and "start a timer" was the timer's already.
-fn app_plan(w: &[String], it: bool) -> Option<Plan> {
-    const OPEN: &[&str] = &["apri", "aprimi", "aprire", "open"];
-    const START: &[&str] = &["avvia", "avviare", "lancia", "lanciare", "esegui", "launch", "start", "run"];
-    // Near the start: "Alexa, apri...", "can you open...", "potresti aprire...".
-    let verb = w.iter().take(4).position(|x| OPEN.contains(&x.as_str()) || START.contains(&x.as_str()))?;
-    const FILLER: &[&str] = &[
-        "l", "la", "il", "lo", "le", "un", "una", "mi", "me", "my", "the", "up", "app", "applicazione", "programma", "application",
-        "program", "di", "per", "favore", "please",
-    ];
-    let mut name: Vec<&str> = w[verb + 1..].iter().map(String::as_str).skip_while(|x| FILLER.contains(x)).collect();
-    while name.last().is_some_and(|x| matches!(*x, "please" | "grazie" | "favore" | "per" | "thanks" | "app" | "application" | "applicazione" | "program" | "programma")) {
-        name.pop();
-    }
-    let started = START.contains(&w[verb].as_str());
-    let generic = |x: &str| has(&[x.to_string()], MUSIC_WORDS) && x != "spotify" || has(&[x.to_string()], &["timer*", "pomodor*", "countdown*", "cronometro"]);
-    if started && (name.is_empty() || name.iter().any(|x| generic(x))) {
-        return None;
-    }
-    if name.is_empty() {
-        return Some(plan(vec![], it, if it { "Quale app apro?" } else { "Which app should I open?" }.into()));
-    }
-    let said = name.join(" ");
-    let shown = said.split(' ').map(capitalize).collect::<Vec<_>>().join(" ");
-    let mut p = plan(vec![tool("open_app", json!({"app": said}))], it, if it { format!("Apro {shown}.") } else { format!("Opening {shown}.") });
-    p.failure = if it { format!("Non trovo l'app {shown}.") } else { format!("I can't find the app {shown}.") };
-    Some(p)
-}
-
-const MUSIC_WORDS: &[&str] = &["music*", "musica", "canzon*", "brano", "brani", "song*", "track*", "traccia", "spotify", "pezzo"];
-
-/// Words about the music playing, so the voice looks at what plays first.
-pub fn asks_music(text: &str) -> bool {
-    let w = words(text);
-    has(&w, MUSIC_WORDS) || has(&w, &["suonando", "playing", "ascoltando", "listening", "pausa", "pause", "skip", "salta"])
-}
-
-/// "Metti in pausa la musica", "prossima canzone", "next song", "cosa sta
-/// suonando": media_control, or the answer from what plays.
-fn music_plan(w: &[String], it: bool, ctx: &Context) -> Option<Plan> {
-    // A face: "metti la faccia musica".
-    if has(w, &["faccia", "face", "watchface*", "quadrante"]) {
-        return None;
-    }
-    let about = has(w, MUSIC_WORDS);
-    let asks = has(w, &["suonando", "playing", "ascoltando", "listening", "canta", "sings", "singing"])
-        && (has(w, &["cosa", "che", "what", "chi", "who", "quale", "which"]) || about);
-    if asks {
-        let reply = match (&ctx.music, it) {
-            (Some(n), true) if !n.artist.is_empty() => format!("{} di {}.", n.title, n.artist),
-            (Some(n), false) if !n.artist.is_empty() => format!("{} by {}.", n.title, n.artist),
-            (Some(n), _) => format!("{}.", n.title),
-            (None, true) => "Non sta suonando niente.".into(),
-            (None, false) => "Nothing is playing.".into(),
-        };
-        return Some(plan(vec![], it, reply));
-    }
-    // Without a word about music, "pausa" alone is for it only while it plays.
-    let playing = ctx.music.as_ref().is_some_and(|m| m.playing);
-    if !about && !(playing && w.len() <= 3) && !has(w, &["skip", "salta"]) {
-        return None;
-    }
-    let (action, reply) = if has(w, &["prossim*", "successiv*", "next", "skip", "salta", "avanti"]) {
-        ("next", if it { "Prossima canzone." } else { "Next song." })
-    } else if has(w, &["precedent*", "previous", "indietro", "back", "prima"]) {
-        ("previous", if it { "Canzone precedente." } else { "Previous song." })
-    } else if has(w, &["pausa", "pause", "ferma", "fermala", "stop", "stoppa", "basta"]) {
-        ("pause", if it { "In pausa." } else { "Paused." })
-    } else if has(w, &["riprendi", "play", "resume", "continua", "suona", "riproduci", "fai", "metti", "avvia", "start"]) {
-        ("play", if it { "Ecco la musica." } else { "Playing." })
-    } else {
-        return None;
-    };
-    let mut p = plan(vec![tool("media_control", json!({"action": action}))], it, reply.into());
-    p.failure = if it { "Non trovo nessun lettore musicale aperto.".into() } else { "I can't find a music player open.".into() };
-    Some(p)
-}
-
 fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
-}
-
-/// Whether `text` asks about the sensors ("is the CPU hot?", "quanto lavora
-/// la GPU?") rather than to change something.
-pub fn asks_metrics(text: &str) -> bool {
-    let w = words(text);
-    let about = has(&w, &[
-        "temperatur*", "caldo", "calda", "caldi", "gradi", "hot", "warm", "busy", "load", "carico", "carica", "lavora*", "working", "fan", "fans",
-        "ventol*", "rpm", "watt", "consum*", "power", "clock", "frequenz*", "memoria", "ram", "vram",
-    ]);
-    let command = has(&w, &["metti", "mostra", "imposta", "cambia", "put", "show", "set", "switch", "faccia", "face", "ruota", "rotate", "scrivi", "write", "timer*"]);
-    about && !command
 }
 
 /// Whether `text` asks the time, the day or the date.
@@ -814,52 +603,6 @@ pub fn guess_language(text: &str) -> &'static str {
     if count(IT) > count(EN) || w.iter().any(|x| x.ends_with("zione") || x.ends_with("mente")) && count(EN) == 0 { "it" } else { "en" }
 }
 
-/// The original text after one of `verbs`, without the punctuation Whisper
-/// adds at the end; ASCII letters only, which the board's font has.
-fn after_verb(text: &str, verbs: &[&str]) -> Option<String> {
-    let lower = text.to_lowercase();
-    let (start, verb) = verbs.iter().filter_map(|v| lower.find(v).map(|i| (i, v))).min()?;
-    // A whole word: not "riscrivi", not "writer".
-    let before = lower[..start].chars().last();
-    if before.is_some_and(char::is_alphanumeric) {
-        return None;
-    }
-    let rest = text.get(start + verb.len()..)?;
-    if rest.chars().next().is_some_and(char::is_alphanumeric) {
-        return None;
-    }
-    let rest = rest.trim_start_matches([' ', ':', ',']).trim().trim_end_matches(['.', '!', '?']).trim_matches(['"', '\'', '«', '»']);
-    let ascii: String = rest
-        .chars()
-        .map(|c| match words(&c.to_string()).first().and_then(|w| w.chars().next()) {
-            Some(plain) if !c.is_ascii() => plain,
-            _ => c,
-        })
-        .filter(char::is_ascii)
-        .collect();
-    let ascii = ascii.trim().chars().take(120).collect::<String>();
-    (!ascii.is_empty()).then_some(ascii)
-}
-
-fn temperatures(snapshot: Option<&Snapshot>, screen: Screen, it: bool) -> String {
-    let cpu = snapshot.and_then(|s| s.cpu.temp_c).map(|t| t.round() as i32);
-    let gpu = snapshot.and_then(|s| s.gpu.temp_c).map(|t| t.round() as i32);
-    let one = |name: &str, t: Option<i32>| match (it, t) {
-        (true, Some(t)) => format!("La {name} è a {t} gradi."),
-        (true, None) => format!("Non ho la temperatura della {name}."),
-        (false, Some(t)) => format!("The {name} is at {t} degrees."),
-        (false, None) => format!("I don't have the {name} temperature."),
-    };
-    match (screen, cpu, gpu) {
-        (Screen::Left, ..) => one("CPU", cpu),
-        (Screen::Right, ..) => one("GPU", gpu),
-        (Screen::Both, Some(c), Some(g)) if it => format!("La CPU è a {c} gradi, la GPU a {g}."),
-        (Screen::Both, Some(c), Some(g)) => format!("The CPU is at {c} degrees, the GPU at {g}."),
-        (Screen::Both, _, None) => one("CPU", cpu),
-        (Screen::Both, None, _) => one("GPU", gpu),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -869,34 +612,13 @@ mod tests {
     }
 
     #[test]
-    fn faces_and_screens() {
-        assert_eq!(calls("Metti la faccia rings a sinistra.", "it"), [tool("set_face", json!({"face": "rings", "screen": "left"}))]);
-        assert_eq!(calls("Put rings on the right screen", "en"), [tool("set_face", json!({"face": "rings", "screen": "right"}))]);
-        assert_eq!(calls("Faccia classica su tutti e due gli schermi", "it"), [tool("set_face", json!({"face": "classic", "screen": "both"}))]);
-        assert_eq!(calls("Metti la faccia rinza sinistra.", "it"), [tool("set_face", json!({"face": "rings", "screen": "left"}))]);
-        assert_eq!(calls("Show Claude on the left", "en"), [tool("set_face", json!({"face": "claude", "screen": "left"}))]);
-        let p = understand("Metti la faccia rings a sinistra", "it", &Context::default());
-        assert_eq!(p.reply, "Fatto: faccia rings sullo schermo sinistro.");
-    }
-
-    #[test]
-    fn brightness_volume_rotation() {
-        assert_eq!(calls("Luminosità al 40%", "it"), [tool("set_brightness", json!({"percent": 40, "screen": "both"}))]);
-        assert_eq!(calls("Set the brightness of the left screen to fifty", "en"), [tool("set_brightness", json!({"percent": 50, "screen": "left"}))]);
-        assert_eq!(calls("Spegni lo schermo destro", "it"), [tool("set_brightness", json!({"percent": 0, "screen": "right"}))]);
+    fn brightness_and_volume() {
+        assert_eq!(calls("Luminosità al 40%", "it"), [tool("set_brightness", json!({"percent": 40}))]);
+        assert_eq!(calls("Set the brightness to fifty", "en"), [tool("set_brightness", json!({"percent": 50}))]);
         assert_eq!(calls("Volume al 30", "it"), [tool("set_volume", json!({"percent": 30}))]);
         let ctx = Context { volume: Some(50), ..Default::default() };
         assert_eq!(understand("Turn it up", "en", &ctx).calls, [tool("set_volume", json!({"percent": 70}))]);
         assert_eq!(understand("Parla più piano", "it", &ctx).calls, [tool("set_volume", json!({"percent": 30}))]);
-        assert_eq!(calls("Ruota lo schermo sinistro di 180 gradi", "it"), [tool("set_rotation", json!({"degrees": 180, "screen": "left"}))]);
-        assert_eq!(calls("Turn the screens upside down", "en"), [tool("set_rotation", json!({"degrees": 180, "screen": "both"}))]);
-    }
-
-    #[test]
-    fn text_on_screen() {
-        assert_eq!(calls("Scrivi: ciao a tutti!", "it"), [tool("show_text", json!({"text": "ciao a tutti", "screen": "both"}))]);
-        assert_eq!(calls("Write hello world.", "en"), [tool("show_text", json!({"text": "hello world", "screen": "both"}))]);
-        assert_eq!(calls("Scrivi perché sì", "it")[0].1["text"], "perche si");
     }
 
     #[test]
@@ -904,7 +626,7 @@ mod tests {
         for q in ["Che ore sono?", "Che giorno è oggi?", "What time is it?", "What's the date today?", "Tell me the time"] {
             assert!(asks_time(q), "{q}");
         }
-        for q in ["Ora metti rings a sinistra", "Put rings on the left", "Quanto è calda la CPU?"] {
+        for q in ["Ora metti un timer", "Put a timer on", "Quanto è calda la CPU?"] {
             assert!(!asks_time(q), "{q}");
         }
     }
@@ -988,76 +710,10 @@ mod tests {
     }
 
     #[test]
-    fn music_by_rules() {
-        let media = |a: &str| vec![tool("media_control", json!({"action": a}))];
-        assert_eq!(calls("Metti in pausa la musica", "it"), media("pause"));
-        assert_eq!(calls("Prossima canzone", "it"), media("next"));
-        assert_eq!(calls("Next song please", "en"), media("next"));
-        assert_eq!(calls("Play the previous track", "en"), media("previous"));
-        assert_eq!(calls("Riprendi la musica", "it"), media("play"));
-        assert_eq!(calls("Skip", "en"), media("next"));
-        // The timer's pause stays the timer's; a face stays a face.
-        assert_eq!(calls("Metti in pausa il timer", "it"), [tool("control_timer", json!({"action": "pause"}))]);
-        assert_eq!(calls("Metti la faccia musica a destra", "it"), [tool("set_face", json!({"face": "music", "screen": "right"}))]);
-        assert_eq!(calls("Metti la watchface della musica a destra", "it"), [tool("set_face", json!({"face": "music", "screen": "right"}))]);
-        assert_eq!(calls("Show the eyes on both screens", "en"), [tool("set_face", json!({"face": "eyes", "screen": "both"}))]);
-        // "Pausa" alone is the music's only while it plays.
-        assert!(!understand("Pausa", "it", &Context::default()).understood);
-        let track = crate::music::tests_track();
-        let playing = Context { music: Some(track), ..Context::default() };
-        assert_eq!(understand("Pausa", "it", &playing).calls, media("pause"));
-        let asked = understand("Cosa sta suonando?", "it", &playing);
-        assert!(asked.calls.is_empty());
-        assert_eq!(asked.reply, "Zitti e buoni di Måneskin.");
-        assert_eq!(understand("What's playing?", "en", &Context::default()).reply, "Nothing is playing.");
-        assert!(asks_music("che canzone è questa"));
-    }
-
-    #[test]
-    fn apps_by_rules() {
-        let open = |n: &str| vec![tool("open_app", json!({"app": n}))];
-        assert_eq!(calls("Apri Spotify", "it"), open("spotify"));
-        assert_eq!(calls("Alexa, apri la calcolatrice per favore", "it"), open("calcolatrice"));
-        assert_eq!(calls("Puoi aprire Visual Studio Code?", "it"), open("visual studio code"));
-        assert_eq!(calls("Open the Safari app", "en"), open("safari"));
-        assert_eq!(calls("Launch Google Chrome please", "en"), open("google chrome"));
-        assert_eq!(calls("Avvia Spotify", "it"), open("spotify"));
-        assert_eq!(understand("Apri Spotify", "it", &Context::default()).reply, "Apro Spotify.");
-        // The music's and the timers' own starts stay theirs.
-        assert_eq!(calls("Avvia la musica", "it"), [tool("media_control", json!({"action": "play"}))]);
-        assert_eq!(calls("Start a timer for five minutes", "en"), [tool("set_timer", json!({"seconds": 300}))]);
-        assert_eq!(calls("Avvia un pomodoro", "it")[0].0, "pomodoro");
-        let p = understand("Apri", "it", &Context::default());
-        assert!(p.calls.is_empty() && p.understood);
-    }
-
-    #[test]
-    fn sensor_questions() {
-        for q in ["Is the CPU running hot?", "How busy is the graphics card?", "A quanti gradi è la GPU?", "Quanto stanno girando le ventole?"] {
-            assert!(asks_metrics(q), "{q}");
-        }
-        for q in ["Metti la faccia rings a sinistra", "Show the fans face", "Timer 10 minuti", "Che ore sono?"] {
-            assert!(!asks_metrics(q), "{q}");
-        }
-    }
-
-    #[test]
     fn guesses_the_language_of_typed_text() {
-        assert_eq!(guess_language("Ciao, sono la tua DualEye"), "it");
-        assert_eq!(guess_language("Hello, this is your DualEye"), "en");
+        assert_eq!(guess_language("Ciao, sono il tuo Yoru"), "it");
+        assert_eq!(guess_language("Hello, this is your Yoru"), "en");
     }
 
-    #[test]
-    fn answers_without_tools() {
-        let snap: Snapshot = serde_json::from_value(json!({"v": 2, "ts": 0, "cpu": {"temp_c": 45.4}, "gpu": {"temp_c": 38.0}})).unwrap();
-        let ctx = Context { snapshot: Some(snap), ..Default::default() };
-        let p = understand("Quanto è calda la CPU?", "it", &ctx);
-        assert!(p.calls.is_empty() && p.understood);
-        assert_eq!(p.reply, "La CPU è a 45 gradi.");
-        assert_eq!(understand("What's the temperature?", "en", &ctx).reply, "The CPU is at 45 degrees, the GPU at 38.");
-        assert!(understand("Che ore sono?", "it", &ctx).reply.starts_with("Sono le "));
-        let p = understand("Raccontami una barzelletta", "it", &ctx);
-        assert!(!p.understood && p.calls.is_empty());
-        assert_eq!(p.reply, "Non ho capito.");
-    }
+
 }

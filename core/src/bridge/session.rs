@@ -1,8 +1,6 @@
 //! One board's connection: the link and its reader, the protocol v2
 //! handshake (again after a reboot), the voice pipeline, the pointer for its
-//! eyes, and each snapshot the sampler publishes, made the board's by its
-//! [`BoardBehaviour`] and sent. What differs by kind of board is left to the
-//! behaviour, picked from the board's `hello`.
+//! eyes, and each snapshot the sampler publishes.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,7 +19,6 @@ use crate::protocol::Channel;
 use crate::voice::{self, Hearing, Receiving, Session, Speaker};
 
 use super::alerts::{AlertTarget, Targets};
-use super::behaviour::{self, BoardBehaviour, Ctx, GazeWanted};
 use super::manager::SessionInfo;
 use super::sampler::Latest;
 use super::{BridgeConfig, BridgeEvent, EventSink, TOOL_TIMEOUT};
@@ -67,7 +64,7 @@ pub(super) fn run(
         let config = config.voice.clone();
         let sink = on_event.clone();
         let (tx, rx) = std::sync::mpsc::channel::<Hearing>();
-        thread::Builder::new().name("companion-voice".into()).spawn(move || {
+        thread::Builder::new().name("yoru-voice".into()).spawn(move || {
             if let Ok(session) = link_slot_rx.recv() {
                 voice::run(&config, &session, &sink, rx);
             }
@@ -84,6 +81,7 @@ pub(super) fn run(
         let voice_state = voice_state.clone();
         let timers = config.timers.clone();
         let agents = config.agents.clone();
+        let assistant = config.assistant.clone();
         Link::open(port, move |event| match event {
             LinkEvent::Log(line) => sink(BridgeEvent::BoardLog { line }),
             LinkEvent::Text(line) => {
@@ -116,6 +114,11 @@ pub(super) fn run(
             LinkEvent::Notification { method, params } if method == "utterance_end" => receiving.lock().unwrap().end(&params),
             LinkEvent::Notification { method, params } if method == "playback_end" => speaker.playback_end(params),
             LinkEvent::Notification { method, params } if method == "approval" => super::agents::on_notification(&agents, &params),
+            LinkEvent::Notification { method, params } if method == "notification_action" => {
+                if let Some(assistant) = &assistant {
+                    on_notification_action(assistant, &params, &sink);
+                }
+            }
             LinkEvent::Audio(payload) => receiving.lock().unwrap().audio(&payload),
             LinkEvent::Notification { .. } | LinkEvent::Closed(_) => {}
         })?
@@ -126,14 +129,14 @@ pub(super) fn run(
     let _ = link_slot_tx.send(Session {
         link: Arc::downgrade(&link),
         speaker: speaker.clone(),
-        snapshot: latest.voice.clone(),
         settings_changed: voice_changed_settings.clone(),
         tools: Mutex::default(),
         kind: board_kind.clone(),
         board: board_id.clone(),
         conversation_over: Box::new(move || floor.release(number)),
         timers: config.timers.clone(),
-        music: config.music.clone(),
+        assistant: config.assistant.clone(),
+        agents: config.agents.clone(),
     });
     // The sampler samples while a session is open; this one waits for its next snapshot.
     let _open = latest.open_session();
@@ -153,20 +156,18 @@ pub(super) fn run(
     };
     let closed = |link: &Link| io::Error::new(io::ErrorKind::BrokenPipe, link.closed_reason().unwrap_or_else(|| "port closed".into()));
 
-    // The eyes follow the pointer: a thread of its own, at its own pace,
-    // asking the board's behaviour when (once there is one).
+    // The eyes follow the pointer: a thread of its own, at its own pace. The
+    // board decides when to look (not while a finger is on the screen, in a
+    // conversation or asleep).
     let board_ready = Arc::new(AtomicBool::new(false));
     let session_over = Arc::new(AtomicBool::new(false));
-    let gaze_wanted = Arc::new(Mutex::new(None::<GazeWanted>));
     let _gaze = {
         let (link, ready, over) = (Arc::downgrade(&link), board_ready.clone(), session_over.clone());
-        let (wanted, follow) = (gaze_wanted.clone(), config.follow_pointer.clone());
-        thread::Builder::new().name("companion-gaze".into()).spawn(move || gaze_loop(&link, &ready, &over, &wanted, &follow))?;
+        let follow = config.follow_pointer.clone();
+        thread::Builder::new().name("yoru-gaze".into()).spawn(move || gaze_loop(&link, &ready, &over, &follow))?;
         OnGone(session_over)
     };
 
-    let ctx = Ctx { link: &link, config, on_event };
-    let mut behaviour: Option<(BoardKind, Box<dyn BoardBehaviour>)> = None;
     let mut ready = false;
     let mut unanswered = 0u32;
     let mut next_hello = Instant::now();
@@ -181,9 +182,6 @@ pub(super) fn run(
             ready = false;
             info.ready.store(false, Ordering::Relaxed);
             board_ready.store(false, Ordering::Relaxed);
-            if let Some((_, b)) = behaviour.as_mut() {
-                b.on_reboot();
-            }
             next_hello = Instant::now();
         }
         if !ready && Instant::now() >= next_hello {
@@ -194,10 +192,6 @@ pub(super) fn run(
                     *board_kind.lock().unwrap() = kind;
                     *board_id.lock().unwrap() = hello.id.clone();
                     info.learn(&hello, kind);
-                    if behaviour.as_ref().is_none_or(|(k, _)| *k != kind) {
-                        behaviour = Some((kind, behaviour::for_kind(kind)));
-                    }
-                    let (_, b) = behaviour.as_mut().expect("just set");
                     ready = true;
                     info.ready.store(true, Ordering::Relaxed);
                     board_ready.store(true, Ordering::Relaxed);
@@ -213,8 +207,11 @@ pub(super) fn run(
                     if let Ok(tools) = link.list_tools(TOOL_TIMEOUT) {
                         crate::link::save_tools_cache(kind, &tools);
                     }
-                    *gaze_wanted.lock().unwrap() = Some(b.gaze(config));
-                    b.on_ready(&ctx, &hello)?;
+                    if let Some(assistant) = &config.assistant
+                        && hello.capabilities.iter().any(|c| c == "inbox")
+                    {
+                        resend_inbox(&link, assistant);
+                    }
                 }
                 Err(CallError::Io(e)) => return Err(e),
                 Err(CallError::Closed) => return Err(closed(&link)),
@@ -233,17 +230,13 @@ pub(super) fn run(
             }
         }
 
-        let changed = hub_changed_settings.swap(false, Ordering::Relaxed) | voice_changed_settings.swap(false, Ordering::Relaxed);
-        if ready && let Some((_, b)) = behaviour.as_mut() {
-            b.sync(&ctx, changed)?;
-        }
+        // Yoru keeps its settings itself: nothing to read back or push.
+        hub_changed_settings.store(false, Ordering::Relaxed);
+        voice_changed_settings.store(false, Ordering::Relaxed);
 
         let Some((number, shared)) = latest.newer(seen, WAKE) else { continue };
         seen = number;
-        let mut snapshot = (*shared).clone();
-        if let Some((_, b)) = behaviour.as_mut() {
-            b.tailor(&ctx, &mut snapshot, ready)?;
-        }
+        let snapshot = (*shared).clone();
         let sent = ready && snapshot.is_sendable();
         if sent {
             link.send(Channel::Metrics, &snapshot.to_payload())?;
@@ -251,6 +244,38 @@ pub(super) fn run(
         on_event(BridgeEvent::Snapshot { snapshot, sent });
     }
     Ok(())
+}
+
+/// How many unread notifications a board that (re)connects gets back.
+const RESEND: usize = 10;
+
+/// A board that just connected gets the unread notifications it may have
+/// missed, quietly: they were told when they came.
+fn resend_inbox(link: &Link, assistant: &crate::Assistant) {
+    let unread: Vec<_> = assistant.inbox.list().into_iter().filter(|n| !n.read).take(RESEND).collect();
+    // Oldest first, so the newest ends on top.
+    for n in unread.iter().rev() {
+        let _ = link.call_tool("show_notification", super::alerts::notification_args(n, crate::assistant::Urgency::Low), TOOL_TIMEOUT);
+    }
+}
+
+/// The board's `notification_action`: read, dismissed, opened, or one of its buttons.
+fn on_notification_action(assistant: &crate::Assistant, params: &serde_json::Value, sink: &EventSink) {
+    let (Some(id), Some(action)) = (params["id"].as_str(), params["action"].as_str()) else { return };
+    match action {
+        "dismiss" => {
+            assistant.inbox.dismiss(id);
+        }
+        "read" => {
+            assistant.inbox.mark_read(id);
+        }
+        // "open", or its one button, "Open".
+        _ => {
+            assistant.inbox.mark_read(id);
+            let url = assistant.inbox.list().into_iter().find(|n| n.id == id).and_then(|n| n.url);
+            sink(BridgeEvent::NotificationOpened { id: id.to_string(), url });
+        }
+    }
 }
 
 /// Sets its flag when dropped: the session is over, its threads stop.
@@ -268,14 +293,13 @@ const GAZE_IDLE: Duration = Duration::from_millis(400);
 /// Smaller moves than this (on the -1..1 scale) aren't sent.
 const GAZE_STEP: f32 = 0.004;
 
-/// While the board's eyes want the pointer ([`BoardBehaviour::gaze`]), send it
-/// each time it moves. The board takes a pointer that stands still for
-/// someone gone, and dozes off.
-fn gaze_loop(link: &Weak<Link>, ready: &AtomicBool, over: &AtomicBool, wanted: &Mutex<Option<GazeWanted>>, follow: &AtomicBool) {
+/// While the board is ready and the setting is on, send the pointer each
+/// time it moves. The board takes a pointer that stands still for someone
+/// gone, and dozes off.
+fn gaze_loop(link: &Weak<Link>, ready: &AtomicBool, over: &AtomicBool, follow: &AtomicBool) {
     let mut sent: Option<(f32, f32)> = None;
     while !over.load(Ordering::Relaxed) {
-        let eyes = wanted.lock().unwrap().as_ref().is_some_and(|w| w());
-        if !(ready.load(Ordering::Relaxed) && follow.load(Ordering::Relaxed) && eyes) {
+        if !(ready.load(Ordering::Relaxed) && follow.load(Ordering::Relaxed)) {
             sent = None;
             thread::sleep(GAZE_IDLE);
             continue;

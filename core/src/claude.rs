@@ -5,7 +5,7 @@
 //!   working. The format is internal to Claude Code, so it is read leniently
 //!   and anything unexpected is skipped.
 //! - The status line: once connected (see [`statusline`]), Claude Code pipes
-//!   its documented status JSON to `companion-hub --claude-statusline`, which
+//!   its documented status JSON to the app's `--claude-statusline`, which
 //!   keeps the latest copy in [`status_file`]. It carries the plan's 5-hour and
 //!   weekly usage, which the transcripts can't tell.
 //!
@@ -86,7 +86,7 @@ pub fn status_file() -> Option<PathBuf> {
     data_dir().map(|d| d.join("claude-status.json"))
 }
 
-/// DualEye's own folder for the status line files.
+/// Yoru's own folder: the status line files, the timers, the models, the connectors.
 pub(crate) fn data_dir() -> Option<PathBuf> {
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let base = if cfg!(target_os = "macos") {
@@ -96,7 +96,7 @@ pub(crate) fn data_dir() -> Option<PathBuf> {
     } else {
         env("XDG_CONFIG_HOME").or_else(|| home_dir().map(|h| h.join(".config")))
     };
-    base.map(|b| b.join("companion-hub"))
+    base.map(|b| b.join("yoru-hub"))
 }
 
 fn home_dir() -> Option<PathBuf> {

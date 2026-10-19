@@ -211,9 +211,9 @@ pub(super) fn write_settings(path: &Path, settings: &Map<String, Value>) -> io::
     write_atomic(path, text.as_bytes())
 }
 
-/// settings.json as it was before DualEye first touched it.
+/// settings.json as it was before Yoru first touched it.
 pub(super) fn backup(path: &Path) -> io::Result<()> {
-    let backup = path.with_extension("json.companion-hub-backup");
+    let backup = path.with_extension("json.yoru-backup");
     if path.exists() && !backup.exists() {
         fs::copy(path, backup)?;
     }
@@ -256,21 +256,21 @@ mod tests {
             .unwrap();
         let paths = Paths {
             settings: Some(settings.clone()),
-            previous: Some(dir.path().join("companion-hub/prev.json")),
-            status: Some(dir.path().join("companion-hub/status.json")),
+            previous: Some(dir.path().join("yoru-hub/prev.json")),
+            status: Some(dir.path().join("yoru-hub/status.json")),
         };
 
-        let link = paths.connect(Path::new("/opt/companion-hub/companion-hub")).unwrap();
+        let link = paths.connect(Path::new("/opt/yoru/yoru-app")).unwrap();
         assert!(link.connected);
         assert_eq!(link.chained.as_deref(), Some("~/bin/line.sh"));
         let now: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(now["model"], "opus");
-        assert_eq!(now["statusLine"]["command"], "\"/opt/companion-hub/companion-hub\" --claude-statusline");
+        assert_eq!(now["statusLine"]["command"], "\"/opt/yoru/yoru-app\" --claude-statusline");
         assert_eq!(now["statusLine"]["padding"], 1);
-        assert!(settings.with_extension("json.companion-hub-backup").exists());
+        assert!(settings.with_extension("json.yoru-backup").exists());
 
         // Connecting again (a moved app) must not chain to ourselves.
-        let link = paths.connect(Path::new("/Applications/Companion Hub.app/companion-hub")).unwrap();
+        let link = paths.connect(Path::new("/Applications/Yoru.app/yoru-app")).unwrap();
         assert_eq!(link.chained.as_deref(), Some("~/bin/line.sh"));
 
         let link = paths.disconnect().unwrap();
@@ -285,7 +285,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let settings = dir.path().join("settings.json");
         let paths = Paths { settings: Some(settings.clone()), previous: Some(dir.path().join("prev.json")), status: None };
-        assert!(paths.connect(Path::new("/x/companion-hub")).unwrap().connected);
+        assert!(paths.connect(Path::new("/x/yoru-app")).unwrap().connected);
         paths.disconnect().unwrap();
         let back: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         assert!(back.get("statusLine").is_none());
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn recognises_our_command() {
-        let ours = serde_json::json!({"type": "command", "command": "\"/Applications/Companion Hub.app/Contents/MacOS/companion-hub\" --claude-statusline"});
+        let ours = serde_json::json!({"type": "command", "command": "\"/Applications/Yoru.app/Contents/MacOS/yoru-app\" --claude-statusline"});
         let theirs = serde_json::json!({"type": "command", "command": "~/.claude/statusline.sh"});
         assert!(is_ours(Some(&ours)));
         assert!(!is_ours(Some(&theirs)));

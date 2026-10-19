@@ -200,7 +200,7 @@ pub fn run(mut input: impl Read) {
         let _ = write_atomic(&path, b"");
     }
     let Ok(event) = serde_json::from_slice::<Value>(&json) else { return };
-    let board = Board::new(None, &format!("companion-hook/{}", env!("CARGO_PKG_VERSION")));
+    let board = Board::new(None, &format!("yoru-hook/{}", env!("CARGO_PKG_VERSION")));
     if event.get("hook_event_name").and_then(Value::as_str) == Some("PermissionRequest") {
         if let Ok(Some(decision)) = board.claude_permission(event) {
             println!("{}", permission_output(decision));
@@ -214,7 +214,7 @@ pub fn run(mut input: impl Read) {
 fn permission_output(decision: Decision) -> Value {
     let decision = match decision {
         Decision::Allow => json!({"behavior": "allow"}),
-        Decision::Deny => json!({"behavior": "deny", "message": "The user said no from Companion Hub."}),
+        Decision::Deny => json!({"behavior": "deny", "message": "The user said no from Yoru."}),
     };
     json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
 }
@@ -234,7 +234,7 @@ mod tests {
         let theirs = json!({"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "say done"}]}]}});
         fs::write(p.settings.as_ref().unwrap(), theirs.to_string()).unwrap();
 
-        assert!(p.connect(Path::new("/opt/companion-hub/companion-hub")).unwrap().connected);
+        assert!(p.connect(Path::new("/opt/yoru/yoru-app")).unwrap().connected);
         let now: Value = serde_json::from_str(&fs::read_to_string(p.settings.as_ref().unwrap()).unwrap()).unwrap();
         assert_eq!(now["model"], "opus");
         assert_eq!(now["hooks"]["Stop"].as_array().unwrap().len(), 2);
@@ -244,13 +244,13 @@ mod tests {
         // The approvals wait: not async, with a long timeout.
         assert!(now["hooks"]["PermissionRequest"][0]["hooks"][0].get("async").is_none());
         assert_eq!(now["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], PERMISSION_TIMEOUT_S);
-        assert!(dir.path().join("settings.json.companion-hub-backup").exists());
+        assert!(dir.path().join("settings.json.yoru-backup").exists());
 
         // Connecting again from a moved app replaces ours.
-        p.connect(Path::new("/Applications/Companion Hub.app/companion-hub")).unwrap();
+        p.connect(Path::new("/Applications/Yoru.app/yoru-app")).unwrap();
         let now: Value = serde_json::from_str(&fs::read_to_string(p.settings.as_ref().unwrap()).unwrap()).unwrap();
         assert_eq!(now["hooks"]["Stop"].as_array().unwrap().len(), 2);
-        assert_eq!(now["hooks"]["Stop"][1]["hooks"][0]["command"], "\"/Applications/Companion Hub.app/companion-hub\" --claude-hook");
+        assert_eq!(now["hooks"]["Stop"][1]["hooks"][0]["command"], "\"/Applications/Yoru.app/yoru-app\" --claude-hook");
 
         assert!(!p.disconnect().unwrap().connected);
         let back: Value = serde_json::from_str(&fs::read_to_string(p.settings.as_ref().unwrap()).unwrap()).unwrap();
@@ -269,7 +269,7 @@ mod tests {
     fn disconnect_removes_hooks_it_emptied() {
         let dir = tempfile::tempdir().unwrap();
         let p = paths(&dir);
-        p.connect(Path::new("/x/companion-hub")).unwrap();
+        p.connect(Path::new("/x/yoru-app")).unwrap();
         p.disconnect().unwrap();
         let back: Value = serde_json::from_str(&fs::read_to_string(p.settings.as_ref().unwrap()).unwrap()).unwrap();
         assert!(back.get("hooks").is_none());

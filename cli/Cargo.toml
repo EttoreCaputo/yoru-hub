@@ -1,18 +1,18 @@
 [package]
-name = "companion-cli"
+name = "yoru-cli"
 version = "0.1.0"
 edition = "2024"
-description = "Command line for the DualEye and Yoru desk companions"
+description = "Command line for Yoru, the personal assistant with a body on the desk"
 authors = ["Ettore Caputo <ettore.caputo27@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/EttoreCaputo/companion-hub"
+repository = "https://github.com/EttoreCaputo/yoru-hub"
 
 [[bin]]
-name = "companion"
+name = "yoru"
 path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive", "env"] }
 ctrlc = { version = "3", features = ["termination"] }
-companion-core = { path = "../core", features = ["mcp", "download"] }
+yoru-core = { path = "../core", features = ["mcp", "download", "connectors"] }
 serde_json = "1.0.151"

@@ -1,12 +1,12 @@
 {
-  "name": "companion-hub",
+  "name": "yoru-app",
   "version": "0.1.0",
-  "description": "Desktop hub for the DualEye and Yoru desk companions",
+  "description": "Yoru, the personal assistant with a body on the desk: the desktop app",
   "author": "Ettore Caputo <ettore.caputo27@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EttoreCaputo/companion-hub.git"
+    "url": "https://github.com/EttoreCaputo/yoru-hub.git"
   },
   "scripts": {
     "dev": "vite",
@@ -25,9 +25,9 @@
     "vite": "^8.3.1"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/bricolage-grotesque": "^5.3.0",
+    "@fontsource-variable/figtree": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
-    "@fontsource/montserrat": "^5.3.0",
     "@tauri-apps/api": "^2.11.1"
   },
   "private": true,

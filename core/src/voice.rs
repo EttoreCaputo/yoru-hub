@@ -5,16 +5,15 @@
 //! puts the frames back together, filling any it lost with silence so the
 //! timing stays right, and the bridge's voice thread takes each finished
 //! [`Utterance`]: it keeps a WAV copy when asked, transcribes it with
-//! [`Stt`] when there's speech, acts on the words with the language model
-//! ([`Agent`]), or the rules of [`intents`] without one or when it
-//! fails, and answers with [`Tts`] through the board's speaker
+//! [`Stt`] when there's speech, hands the words to Yoru the assistant
+//! ([`crate::assistant`]) when it has a key, else acts on them with the local
+//! language model ([`Agent`]), or the rules of [`intents`] without one or
+//! when it fails, and answers with [`Tts`] through the board's speaker
 //! ([`Speaker`]), or puts the eyes back to idle. When something fails, or
 //! Whisper heard no words, the board shows `error` (a red ring and a short
 //! sound). After a spoken answer the board listens again for a few seconds
 //! without the wake word ([`VoiceConfig::follow_up`]); the wake word said
-//! over the answer stops it (barge-in, on the board). Music playing on this
-//! computer is paused from the wake word to the end of the conversation
-//! ([`VoiceConfig::pause_music`]).
+//! over the answer stops it (barge-in, on the board).
 //!
 //! Speech goes to the board on `audio_down`, paced in real time a little
 //! ahead of the speaker, a sentence at a time: the first plays while the
@@ -34,15 +33,12 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::agent::{Action, Agent, Toolbox};
-use crate::apps;
 use crate::bridge::{BridgeEvent, EventSink};
 use crate::intents::{self, Context};
 use crate::link::{Link, Tool};
 use crate::profile::BoardKind;
 use crate::protocol::Channel;
-use crate::snapshot::Snapshot;
 use crate::stt::Stt;
-use crate::music::Music;
 use crate::timers::Timers;
 use crate::tts::{self, Tts};
 
@@ -206,9 +202,6 @@ pub struct VoiceConfig {
     /// After a spoken answer, listen for a few seconds more without the
     /// wake word.
     pub follow_up: bool,
-    /// Pause the music playing on this computer while the board listens,
-    /// and play it again after.
-    pub pause_music: bool,
 }
 
 /// Whisper's output for silence or noise rather than words.
@@ -217,7 +210,7 @@ fn is_non_speech(text: &str) -> bool {
     t.is_empty() || (t.starts_with('[') && t.ends_with(']')) || (t.starts_with('(') && t.ends_with(')'))
 }
 
-/// Where WAV dumps go by default: `voice/` in DualEye's data folder.
+/// Where WAV dumps go by default: `voice/` in the data folder.
 pub fn default_dump_dir() -> Option<PathBuf> {
     crate::claude::data_dir().map(|d| d.join("voice"))
 }
@@ -237,8 +230,6 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) struct Session {
     pub link: Weak<Link>,
     pub speaker: Arc<Speaker>,
-    /// The latest snapshot, for "how hot is the CPU".
-    pub snapshot: Arc<Mutex<Option<Snapshot>>>,
     /// Set after a tool changed faces or rotation: the bridge reads them back.
     pub settings_changed: Arc<AtomicBool>,
     /// The board's tools for the agent, listed once per connection.
@@ -252,8 +243,10 @@ pub(crate) struct Session {
     pub conversation_over: Box<dyn Fn() + Send + Sync>,
     /// The host's timers, which the voice sets and silences.
     pub timers: Arc<Timers>,
-    /// What's playing, which the voice pauses and skips.
-    pub music: Arc<Music>,
+    /// Yoru the assistant, which answers when it can.
+    pub assistant: Option<Arc<crate::Assistant>>,
+    /// Where the assistant's actions are allowed or denied.
+    pub agents: Arc<crate::claude::agents::Agents>,
 }
 
 /// What the link's reader hands the pipeline.
@@ -283,12 +276,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 sink(BridgeEvent::BoardLog { line: "host: another board is answering, this one stopped listening".into() });
                 continue;
             }
-            Hearing::Started { trigger } => {
-                // A follow-up is the same conversation: the music is paused
-                // already, or the person played it.
-                if config.pause_music && trigger != "follow_up" {
-                    pause_music(session, sink);
-                }
+            Hearing::Started { .. } => {
                 if let (Some(agent), Some(link)) = (&config.agent, session.link.upgrade())
                     && let Err(e) = agent.prime(&BoardToolbox { link: &link, session, language: "en" })
                 {
@@ -311,7 +299,6 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             utterance: utterance.clone(),
         });
         if !utterance.speech {
-            resume_music(session, sink);
             (session.conversation_over)();
             continue;
         }
@@ -319,7 +306,11 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
         // The board shows thinking meanwhile.
         let follow_up = utterance.trigger == "follow_up";
         let transcript = match &config.stt {
-            None => Err("idle"),
+            // Voice is off or its model isn't usable: say so rather than drop the words.
+            None => {
+                sink(BridgeEvent::VoiceError { message: "nothing transcribes what Yoru hears: turn voice on and pick a speech-to-text model".into() });
+                Err(if follow_up { "idle" } else { "error" })
+            }
             Some(stt) => match stt.transcribe(&utterance.samples) {
                 Ok(t) if is_non_speech(&t.text) => {
                     sink(BridgeEvent::Transcript { id: utterance.id, transcript: None });
@@ -356,33 +347,11 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             Next::Interrupted => false,
         };
         if over {
-            resume_music(session, sink);
             (session.conversation_over)();
         }
     }
     // The board is gone mid-conversation.
-    resume_music(session, sink);
     (session.conversation_over)();
-}
-
-/// Pause the music on a thread of its own: asking the player takes a moment,
-/// and the language model's prompt shouldn't wait for it.
-fn pause_music(session: &Session, sink: &EventSink) {
-    let (music, sink) = (session.music.clone(), sink.clone());
-    let _ = thread::Builder::new().name("dualeye-voice-music".into()).spawn(move || match music.pause_for_voice() {
-        Ok(Some(player)) => sink(BridgeEvent::BoardLog { line: format!("host: {player} paused while listening") }),
-        Ok(None) => {}
-        Err(e) => sink(BridgeEvent::BoardLog { line: format!("host: could not pause the music: {e}") }),
-    });
-}
-
-/// Play again what [`pause_music`] paused, once the conversation is over.
-fn resume_music(session: &Session, sink: &EventSink) {
-    match session.music.resume_after_voice() {
-        Ok(Some(player)) => sink(BridgeEvent::BoardLog { line: format!("host: {player} playing again") }),
-        Ok(None) => {}
-        Err(e) => sink(BridgeEvent::BoardLog { line: format!("host: could not play the music again: {e}") }),
-    }
 }
 
 /// What the board does once the host has answered.
@@ -401,14 +370,27 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
     // "Stop" or "5 more minutes" for an alarm needs no language model: the rules, at once.
     let alarm = session.timers.is_ringing() || session.timers.dismissed_within(ALARM_FOLLOW_UP);
     let quick = alarm && intents::understand(text, language, &Context { alarm, ..Context::default() }).calls.iter().any(|(t, _)| matches!(t.as_str(), "control_timer" | "update_timer"));
-    let agent = config.agent.as_ref().filter(|_| !quick);
-    let answer = agent.and_then(|agent| match agent.respond(text, language, &BoardToolbox { link, session, language }) {
+    let assistant = session.assistant.as_ref().filter(|a| !quick && a.is_ready());
+    let answer = assistant.and_then(|a| match a.respond(text, Some(language), crate::assistant::Channel::Voice, &VoiceHost { link, session }) {
+        Ok(reply) => Some((reply.text, reply.actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect(), true, "assistant")),
+        // Its free limits ran out: say so and when, rather than a worse answer.
+        Err(e) if a.limited().is_some() => {
+            sink(BridgeEvent::VoiceError { message: e });
+            a.limited().map(|limit| (crate::assistant::limit_line(&limit, language), Vec::new(), true, "assistant"))
+        }
+        Err(e) => {
+            sink(BridgeEvent::VoiceError { message: format!("{e}; answering without the assistant") });
+            None
+        }
+    });
+    let agent = config.agent.as_ref().filter(|_| !quick && answer.is_none());
+    let answer = answer.or_else(|| agent.and_then(|agent| match agent.respond(text, language, &BoardToolbox { link, session, language }) {
         Ok(turn) => Some((turn.reply, turn.actions.iter().map(action_line).collect(), true, "llm")),
         Err(e) => {
             sink(BridgeEvent::VoiceError { message: format!("{e}; answering with the rules instead") });
             None
         }
-    });
+    }));
     let (reply, actions, understood, by) = answer.unwrap_or_else(|| {
         let (reply, actions, understood) = rules(link, session, text, language);
         (reply, actions, understood, "rules")
@@ -448,11 +430,9 @@ fn rules(link: &Link, session: &Session, text: &str, language: &str) -> (String,
     let timers = &session.timers;
     let alarm = timers.is_ringing() || timers.dismissed_within(ALARM_FOLLOW_UP);
     let ctx = Context {
-        snapshot: session.snapshot.lock().unwrap().clone(),
         volume: volume(),
         timers: timers.list(),
         alarm,
-        music: intents::asks_music(text).then(|| session.music.refresh()).flatten(),
     };
     let plan = intents::understand(text, language, &ctx);
     let toolbox = BoardToolbox { link, session, language };
@@ -472,33 +452,22 @@ fn rules(link: &Link, session: &Session, text: &str, language: &str) -> (String,
 const ALARM_FOLLOW_UP: Duration = Duration::from_secs(20);
 
 /// Board tools the voice agent doesn't get: muted by voice, the board
-/// couldn't be unmuted by voice; the eyes and the pet's sounds are settings
-/// for the app and toys, not worth a tool in a small model's prompt.
-const NOT_BY_VOICE: &[&str] = &["set_mic", "set_eyes", "play_eyes", "set_pet", "play_sound"];
+/// couldn't be unmuted by voice; the sounds are toys, not worth a tool; and
+/// the host's own (cards, the agents' list, the inbox).
+fn not_by_voice(name: &str) -> bool {
+    matches!(name, "set_mic" | "play_sound") || BoardKind::hub_only(name)
+}
 
-/// The board's tools as the voice agent gets them: without those in
-/// [`NOT_BY_VOICE`], plus the host's `get_metrics`, timers ([`Timers::tools`]),
-/// music ([`Music::tools`]) and apps ([`apps::tools`]).
+/// The board's tools as the voice agent gets them: without those
+/// [`not_by_voice`] keeps out, plus the host's timers ([`Timers::tools`]).
 pub fn voice_tools(board: Vec<Tool>) -> Vec<Tool> {
-    let metrics = Tool {
-        name: "get_metrics".into(),
-        description: "Current CPU and GPU temperature, load, clock, power and memory of this computer, and its fan speeds.".into(),
-        input_schema: json!({"type": "object", "properties": {}}),
-    };
-    board
-        .into_iter()
-        .filter(|t| !NOT_BY_VOICE.contains(&t.name.as_str()))
-        .chain([metrics])
-        .chain(Timers::tools())
-        .chain(Music::tools())
-        .chain(apps::tools())
-        .collect()
+    board.into_iter().filter(|t| !not_by_voice(&t.name)).chain(Timers::tools()).collect()
 }
 
 /// `get_state` without what only a developer wants (memory, link and UI
 /// statistics): fewer tokens for the model to read.
 pub fn trim_state(state: &Value) -> Value {
-    let mut out = json!({"screens": state["screens"], "voice": {}, "audio": {"volume": state["audio"]["volume"]}});
+    let mut out = json!({"brightness": state["brightness"], "activity": state["activity"], "battery": state["battery"], "voice": {}, "audio": {"volume": state["audio"]["volume"]}});
     for key in ["wake_word", "wake_words", "muted"] {
         out["voice"][key] = state["voice"][key].clone();
     }
@@ -538,34 +507,58 @@ impl Toolbox for BoardToolbox<'_> {
     }
 
     fn call(&self, name: &str, arguments: &Value) -> Result<String, String> {
-        if name == "get_metrics" {
-            let snapshot = self.session.snapshot.lock().unwrap().clone().ok_or("no sensor reading yet")?;
-            return Ok(snapshot.metrics_json().to_string());
-        }
         let board = self.session.board.lock().unwrap().clone();
         if let Some(result) = self.session.timers.call_tool_from(name, arguments, self.language, board.as_deref()) {
             return result;
         }
-        if let Some(result) = self.session.music.call_tool(name, arguments) {
-            return result;
-        }
-        if let Some(result) = apps::call_tool(name, arguments) {
-            return result;
-        }
-        if NOT_BY_VOICE.contains(&name) {
+        if not_by_voice(name) {
             return Err(format!("{name} can't be used by voice"));
         }
         let result = self.link.call_tool(name, arguments.clone(), TOOL_TIMEOUT).map_err(|e| e.to_string())?;
         if result.is_error {
             return Err(result.text());
         }
-        if matches!(name, "set_face" | "set_rotation") {
+        if name == "set_setting" {
             self.session.settings_changed.store(true, Ordering::Relaxed);
         }
         Ok(match (name, &result.structured_content) {
             ("get_state", Some(state)) => trim_state(state).to_string(),
             _ => result.text(),
         })
+    }
+}
+
+/// What the assistant does through the board the voice came from.
+struct VoiceHost<'a> {
+    link: &'a Link,
+    session: &'a Session,
+}
+
+impl crate::assistant::Host for VoiceHost<'_> {
+    fn board_tools(&self) -> Vec<Tool> {
+        // The assistant has the timers itself.
+        let board = match self.link.list_tools(TOOL_TIMEOUT) {
+            Ok(tools) => tools,
+            Err(_) => crate::link::load_tools_cache(*self.session.kind.lock().unwrap()).unwrap_or_default(),
+        };
+        board.into_iter().filter(|t| !not_by_voice(&t.name)).collect()
+    }
+
+    fn call_board(&self, name: &str, arguments: &Value) -> Result<String, String> {
+        if not_by_voice(name) {
+            return Err(format!("{name} can't be used by the assistant"));
+        }
+        let result = self.link.call_tool(name, arguments.clone(), TOOL_TIMEOUT).map_err(|e| e.to_string())?;
+        match (result.is_error, name, &result.structured_content) {
+            (true, ..) => Err(result.text()),
+            (false, "get_state", Some(state)) => Ok(trim_state(state).to_string()),
+            _ => Ok(result.text()),
+        }
+    }
+
+    fn confirm(&self, title: &str, text: &str, detail: &str) -> Option<bool> {
+        use crate::claude::agents::Decision;
+        self.session.agents.confirm(title, text, Some(detail), crate::assistant::CONFIRM_WAIT).map(|d| d == Decision::Allow)
     }
 }
 

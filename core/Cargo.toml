@@ -1,43 +1,37 @@
 [package]
-name = "companion-core"
+name = "yoru-core"
 version = "0.1.0"
 edition = "2024"
-description = "Host side of the DualEye and Yoru desk companions: link, sensors, voice, agent"
+description = "Host side of Yoru, the personal assistant with a body on the desk: link, voice, agent, connectors"
 authors = ["Ettore Caputo <ettore.caputo27@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/EttoreCaputo/companion-hub"
+repository = "https://github.com/EttoreCaputo/yoru-hub"
 
 [dependencies]
 aes-gcm = "0.11.1"
+async-trait = { version = "0.1.89", optional = true }
 base64 = "0.23.1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 crc32fast = "1.5.2"
 flate2 = { version = "1.1.10", optional = true }
 getrandom = "0.3"
 hmac = "0.13.0"
+keyring = { version = "4.2.0", optional = true }
 image = { version = "0.25.10", default-features = false, features = ["gif", "png", "jpeg", "webp", "bmp"] }
+reqwest = { version = "0.13.2", default-features = false, optional = true }
 mdns-sd = "0.21.5"
 rmcp = { version = "3.5.0", default-features = false, features = ["server", "transport-io"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 serialport = { version = "4.10.1", default-features = false }
 sha2 = "0.11.0"
-starship-battery = "0.12.0"
-sysinfo = { version = "0.39.6", default-features = false, features = ["system", "component", "network", "disk"] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 tar = { version = "0.4.46", optional = true }
 tokio = { version = "1.53.1", features = ["rt", "time"], optional = true }
 ureq = "3.4.2"
+url = { version = "2.5.8", optional = true }
 
-# NVML ships with the NVIDIA driver on Linux and Windows; it is loaded at runtime,
-# so machines without an NVIDIA GPU just skip it.
-[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
-nvml-wrapper = "0.13.0"
-
-# The system's media session (the music face) on Windows.
-[target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Foundation", "Media_Control", "Storage_Streams"] }
-
-# The mouse pointer (the eyes face) on X11, loaded at run time.
+# The mouse pointer (Yoru's eyes) on X11, loaded at run time.
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-dl = "2.21"
 
@@ -48,6 +42,10 @@ io-kit-sys = "0.4.1"
 mach2 = "0.4.3"
 
 [dev-dependencies]
+# An in-process MCP server over HTTP and stdio for the connectors' tests.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+rmcp = { version = "3.5.0", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
+tokio = { version = "1.53.1", features = ["full"] }
 tempfile = "3.27.0"
 
 [features]
@@ -56,5 +54,13 @@ tempfile = "3.27.0"
 provision = ["download", "dep:flate2", "dep:tar"]
 # HTTPS downloads checked against a SHA-256 (`download`, `models::download`).
 download = []
-# The MCP server (`mcp::serve_stdio`), for `dualeye mcp` and `companion-hub --mcp`.
+# The MCP server (`mcp::serve_stdio`), for `yoru mcp` and the app's `--mcp`.
 mcp = ["dep:rmcp", "dep:tokio"]
+# The MCP client for the user's services (`connectors`): remote servers over
+# Streamable HTTP with OAuth, and local ones run as a child process, with
+# tokens in the system keychain.
+connectors = [
+    "dep:rmcp", "rmcp/client", "rmcp/auth", "rmcp/reqwest", "rmcp/transport-streamable-http-client-reqwest", "rmcp/transport-child-process",
+    "dep:tokio", "tokio/rt-multi-thread", "tokio/net", "tokio/io-util", "tokio/sync", "tokio/macros", "tokio/process",
+    "dep:reqwest", "dep:keyring", "dep:url", "dep:async-trait",
+]

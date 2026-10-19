@@ -48,8 +48,8 @@ fn send(key: &str, path: &str, body: Option<&Value>) -> Result<Vec<u8>, CloudErr
     }
     let (code, message) = error_detail(&body);
     Err(match (status, code.as_deref()) {
-        (_, Some("quota_exceeded")) => CloudError::RateLimited { provider, retry_after: Some(QUOTA_WAIT) },
-        (429, _) => CloudError::RateLimited { provider, retry_after },
+        (_, Some("quota_exceeded")) => CloudError::RateLimited { provider, retry_after: Some(QUOTA_WAIT), per_day: true },
+        (429, _) => CloudError::RateLimited { provider, retry_after, per_day: false },
         (401 | 403, None | Some("invalid_api_key")) => CloudError::BadKey { provider },
         _ => CloudError::Status { provider, status, message },
     })

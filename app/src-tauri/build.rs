@@ -1,7 +1,7 @@
 use std::path::Path;
 
 /// Boards whose firmware the app embeds, as folders under `firmware/`.
-const BOARDS: [&str; 2] = ["dualeye", "yoru"];
+const BOARDS: [&str; 1] = ["yoru"];
 
 fn main() {
     check_firmware();

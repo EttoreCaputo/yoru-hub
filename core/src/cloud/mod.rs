@@ -3,7 +3,7 @@
 //! voices ([`crate::Tts`]).
 //!
 //! A [`Provider`] is a service: where it is, how to talk to it ([`Api`]),
-//! where its API key comes from and the models of it DualEye knows
+//! where its API key comes from and the models of it Yoru knows
 //! ([`CloudModel`]). Wherever a local model id goes (`--stt`, `--llm`,
 //! `--tts-voice`, the app's settings) a cloud one does too, as
 //! `provider:model`: `groq:whisper-large-v3-turbo`, `groq:hannah`. Local ids
@@ -15,7 +15,7 @@
 //! [`openai`] that [`Client`] sends its requests to.
 //!
 //! API keys come from the provider's environment variable (`GROQ_API_KEY`)
-//! or `keys.json` in DualEye's data folder ([`set_api_key`]), readable only
+//! or `keys.json` in the data folder ([`set_api_key`]), readable only
 //! by its owner.
 //!
 //! A model that hits its provider's limits (429: too many requests a
@@ -24,6 +24,7 @@
 //! [`CloudError::RateLimited`], which [`crate::Stt`], [`crate::Llm`] and
 //! [`crate::Tts`] answer with a local model when there's one.
 
+pub mod anthropic;
 pub mod elevenlabs;
 mod openai;
 
@@ -49,6 +50,8 @@ pub enum Api {
     /// ElevenLabs': voices only ([`elevenlabs`]).
     #[serde(rename = "elevenlabs")]
     ElevenLabs,
+    /// Anthropic's Messages API: the assistant's brain ([`anthropic`]).
+    Anthropic,
 }
 
 /// An online service.
@@ -167,12 +170,34 @@ const ACCOUNT_VOICE: CloudModel = CloudModel {
     max_chars: 0,
 };
 
-/// Every service DualEye can use.
-pub const PROVIDERS: &[Provider] = &[GROQ, ELEVENLABS];
+/// [Anthropic](https://platform.claude.com): Claude, the assistant's brain
+/// ([`crate::assistant`]). Paid by use; what you ask and what the
+/// connectors read go to Anthropic.
+pub const ANTHROPIC: Provider = Provider {
+    id: "anthropic",
+    name: "Anthropic",
+    api: Api::Anthropic,
+    base_url: "https://api.anthropic.com",
+    key_env: "ANTHROPIC_API_KEY",
+    keys_url: "https://platform.claude.com/settings/keys",
+    note: "Claude, Yoru's brain; paid by use. What you ask and what Yoru reads for you are sent to Anthropic",
+    models: &[],
+};
+
+/// Every service Yoru can use.
+pub const PROVIDERS: &[Provider] = &[ANTHROPIC, GROQ, ELEVENLABS];
 
 impl Provider {
     pub fn by_id(id: &str) -> Option<&'static Provider> {
         PROVIDERS.iter().find(|p| p.id == id)
+    }
+
+    /// Where its requests go: `GROQ_BASE_URL` (its key's variable, with
+    /// `_BASE_URL`) when set, for a proxy or a test server, else
+    /// [`Provider::base_url`].
+    pub fn url(&self) -> String {
+        let env = self.key_env.replace("_API_KEY", "_BASE_URL");
+        std::env::var(env).ok().map(|u| u.trim().trim_end_matches('/').to_string()).filter(|u| !u.is_empty()).unwrap_or_else(|| self.base_url.into())
     }
 
     /// Its API key: from [`Provider::key_env`], else saved with [`set_api_key`].
@@ -189,6 +214,7 @@ impl Provider {
                 None => Ok(()),
             },
             Api::ElevenLabs => elevenlabs::check_key(&key),
+            Api::Anthropic => anthropic::check_key(&key),
         }
     }
 
@@ -299,8 +325,9 @@ pub enum CloudError {
     NoKey { provider: &'static str, env: &'static str },
     /// The key was refused (401, 403).
     BadKey { provider: &'static str },
-    /// Too many requests (429): how long to wait, when it said.
-    RateLimited { provider: &'static str, retry_after: Option<Duration> },
+    /// Too many requests (429): how long to wait, when it said, and whether
+    /// what ran out is the day's allowance rather than the minute's.
+    RateLimited { provider: &'static str, retry_after: Option<Duration>, per_day: bool },
     /// Any other error status, with the provider's message.
     Status { provider: &'static str, status: u16, message: String },
     /// It couldn't be reached.
@@ -314,8 +341,13 @@ impl fmt::Display for CloudError {
         match self {
             CloudError::NoKey { provider, env } => write!(f, "{provider}: no API key (set {env}, or add one in the app)"),
             CloudError::BadKey { provider } => write!(f, "{provider}: the API key was refused"),
-            CloudError::RateLimited { provider, retry_after: Some(d) } => write!(f, "{provider}: rate limit reached, try again in {} s", d.as_secs().max(1)),
-            CloudError::RateLimited { provider, retry_after: None } => write!(f, "{provider}: rate limit reached"),
+            CloudError::RateLimited { provider, retry_after, per_day } => {
+                let what = if *per_day { "the day's limit" } else { "the rate limit" };
+                match retry_after {
+                    Some(d) => write!(f, "{provider}: {what} was reached, try again in {}", wait_text(*d)),
+                    None => write!(f, "{provider}: {what} was reached"),
+                }
+            }
             CloudError::Status { provider, status, message } => write!(f, "{provider}: {status} {message}"),
             CloudError::Network { provider, why } => write!(f, "{provider}: {why}"),
             CloudError::Invalid { provider, why } => write!(f, "{provider}: {why}"),
@@ -332,11 +364,22 @@ impl CloudError {
     }
 }
 
+/// A wait for people: `40 s`, `12 min`, `3 h 5 min`.
+pub fn wait_text(d: Duration) -> String {
+    let s = d.as_secs().max(1);
+    match s {
+        0..=59 => format!("{s} s"),
+        60..=3599 => format!("{} min", s.div_ceil(60)),
+        _ => format!("{} h {} min", s / 3600, (s % 3600) / 60),
+    }
+}
+
 /// How long a model that hit its limits without saying when to retry is left alone.
 const COOLDOWN: Duration = Duration::from_secs(60);
 
-/// The models that hit their limits, by `provider:model` id, and until when.
-static LIMITED: Mutex<BTreeMap<String, Instant>> = Mutex::new(BTreeMap::new());
+/// The models that hit their limits, by `provider:model` id: until when, and
+/// whether it was the day's limit.
+static LIMITED: Mutex<BTreeMap<String, (Instant, bool)>> = Mutex::new(BTreeMap::new());
 
 /// A transcription: the text, its language as the provider names it
 /// (`italian`, `english`) and `segments` with `avg_logprob`, like
@@ -373,6 +416,7 @@ impl Client {
         match self.model.provider.api {
             Api::OpenAi => openai::check(self),
             Api::ElevenLabs => elevenlabs::check(self),
+            Api::Anthropic => anthropic::check_key(&self.key),
         }
     }
 
@@ -383,7 +427,7 @@ impl Client {
     pub fn chat(&self, request: &Value) -> Result<Value, CloudError> {
         self.limited(|| match self.model.provider.api {
             Api::OpenAi => openai::chat(self, request),
-            Api::ElevenLabs => Err(self.unsupported("chat")),
+            Api::ElevenLabs | Api::Anthropic => Err(self.unsupported("chat")),
         })
     }
 
@@ -391,7 +435,7 @@ impl Client {
     pub fn transcribe(&self, wav: &[u8], language: Option<&str>, prompt: &str) -> Result<TranscriptionReply, CloudError> {
         self.limited(|| match self.model.provider.api {
             Api::OpenAi => openai::transcribe(self, wav, language, prompt),
-            Api::ElevenLabs => Err(self.unsupported("transcription")),
+            Api::ElevenLabs | Api::Anthropic => Err(self.unsupported("transcription")),
         })
     }
 
@@ -401,6 +445,7 @@ impl Client {
         self.limited(|| match self.model.provider.api {
             Api::OpenAi => openai::speak(self, text),
             Api::ElevenLabs => elevenlabs::speak(self, text, language),
+            Api::Anthropic => Err(self.unsupported("speech")),
         })
     }
 
@@ -410,28 +455,29 @@ impl Client {
 
     /// Whether the model is left alone after hitting its limits.
     pub fn is_limited(&self) -> bool {
-        self.limited_for().is_some()
+        self.limit().is_some()
     }
 
-    fn limited_for(&self) -> Option<Duration> {
+    /// The limit the model is waiting out, as the error its requests get.
+    pub fn limit(&self) -> Option<CloudError> {
         let mut limited = LIMITED.lock().unwrap();
         let id = self.model.id();
-        let left = limited.get(&id).and_then(|until| until.checked_duration_since(Instant::now()));
+        let left = limited.get(&id).and_then(|(until, per_day)| Some((until.checked_duration_since(Instant::now())?, *per_day)));
         if left.is_none() {
             limited.remove(&id);
         }
-        left
+        left.map(|(left, per_day)| CloudError::RateLimited { provider: self.model.provider.name, retry_after: Some(left), per_day })
     }
 
     /// `request`, unless the model hit its limits and it's not yet time to
     /// retry; a limit it hits now is remembered.
     fn limited<T>(&self, request: impl FnOnce() -> Result<T, CloudError>) -> Result<T, CloudError> {
-        if let Some(left) = self.limited_for() {
-            return Err(CloudError::RateLimited { provider: self.model.provider.name, retry_after: Some(left) });
+        if let Some(limit) = self.limit() {
+            return Err(limit);
         }
         let reply = request();
-        if let Err(CloudError::RateLimited { retry_after, .. }) = &reply {
-            LIMITED.lock().unwrap().insert(self.model.id(), Instant::now() + retry_after.unwrap_or(COOLDOWN));
+        if let Err(CloudError::RateLimited { retry_after, per_day, .. }) = &reply {
+            LIMITED.lock().unwrap().insert(self.model.id(), (Instant::now() + retry_after.unwrap_or(COOLDOWN), *per_day));
         }
         reply
     }
@@ -505,15 +551,26 @@ mod tests {
     #[test]
     fn a_limit_is_remembered() {
         let client = Client { model: CloudRef::by_id("groq:whisper-large-v3").unwrap(), key: "k".into(), voice_id: None };
-        let limit = || CloudError::RateLimited { provider: "Groq", retry_after: Some(Duration::from_secs(30)) };
+        let limit = || CloudError::RateLimited { provider: "Groq", retry_after: Some(Duration::from_secs(30)), per_day: true };
         assert!(!client.is_limited());
         assert_eq!(client.limited(|| Err::<(), _>(limit())), Err(limit()));
         assert!(client.is_limited());
+        assert!(matches!(client.limit(), Some(CloudError::RateLimited { per_day: true, .. })));
         // Not asked again while it's limited.
         let reply = client.limited(|| -> Result<(), CloudError> { panic!("asked") });
         assert!(reply.is_err_and(|e| e.is_limit()));
-        LIMITED.lock().unwrap().clear();
+        // Only its own: other tests keep limits of their own models.
+        LIMITED.lock().unwrap().remove(&client.model.id());
         assert_eq!(client.limited(|| Ok(1)), Ok(1));
+    }
+
+    #[test]
+    fn waits_read_well() {
+        assert_eq!(wait_text(Duration::from_secs(40)), "40 s");
+        assert_eq!(wait_text(Duration::from_secs(61)), "2 min");
+        assert_eq!(wait_text(Duration::from_secs(3 * 3600 + 300)), "3 h 5 min");
+        let e = CloudError::RateLimited { provider: "Groq", retry_after: Some(Duration::from_secs(90)), per_day: true };
+        assert_eq!(e.to_string(), "Groq: the day's limit was reached, try again in 2 min");
     }
 
     #[test]

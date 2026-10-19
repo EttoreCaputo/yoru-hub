@@ -1,6 +1,8 @@
-# Companion Hub
+# Yoru Hub
 
-The host program (Rust core, CLI, Tauri + Svelte app) for the ESP32-S3 desk companions DualEye (`../esp32s3-dualeye-pcmonitor`) and Yoru (`../yoru`). It came out of DualEye's `host/`. Multi-board plan: `docs/multiboard.md`.
+The host program of Yoru (`../yoru`): Rust core, CLI, Tauri + Svelte app. The folder is `yoru-hub`; it was Companion Hub until 2026-10-19. It came out of DualEye's `host/`.
+
+Since 2026-10-19 it is Yoru's personal assistant, for Yoru only: MCP connectors with OAuth (`core/src/connectors/`), the assistant on Claude (`core/src/assistant/`, `core/src/cloud/anthropic.rs`), watchers, notifications, memory, routines. The plan is `docs/assistant.md`. DualEye is gone from here (it keeps its own `host/`); `docs/multiboard.md` is history.
 
 ## Rule: the user makes the commits
 
@@ -10,19 +12,19 @@ Never run `git commit`, `git push` or anything else that writes history. Leave t
 
 Identifiers, comments, log messages, strings, file names and docs are written in English, even when the conversation is in another language. The only exception is text the user sees in another language on purpose (the app's Italian translations).
 
-## Rule: board differences go through the profile
+## Rule: protocol changes go to the firmware too
 
-Never hardcode one board's names (mDNS service, crypto labels, `hello.board`, tools, faces) in shared code: they belong to that board's profile. A change to the protocol is made in both firmware repositories too (`docs/protocol.md` in each).
+A change to the board protocol is made in `../yoru/docs/protocol.md` as well.
 
 ## Checks after a change
 
-- `cargo check --workspace` and `cargo test --workspace --exclude companion-hub`
+- `cargo check --workspace` and `cargo test -p yoru-core --features mcp,provision,connectors` (the crates are `yoru-core`, `yoru-cli`, `yoru-app`)
 - `npm run check` in `app/`
-- The app needs `firmware/<board>/` filled by `tools/fetch_firmware.sh` and, on macOS, the power helper from `tools/build_power_helper.sh`.
+- The app needs `firmware/yoru/` filled by `tools/fetch_firmware.sh`.
 
 ## Versions
 
-The app version is in `app/src-tauri/tauri.conf.json`, `app/package.json`, and every crate's `Cargo.toml` (with the `version` on the app's `companion-core` dependency). Keep them equal; CI names the release after the Tauri one.
+The app version is in `app/src-tauri/tauri.conf.json`, `app/package.json`, and every crate's `Cargo.toml` (with the `version` on the app's `yoru-core` dependency). Keep them equal; CI names the release after the Tauri one.
 
 ## Conventions
 
