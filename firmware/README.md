@@ -1,6 +1,3 @@
-# Firmware images
+# Firmware image
 
-One folder per board, each with `merged-binary.bin`, `version.txt` and `FIRMWARE_CHANGELOG.md`. The app embeds them at compile time. They are not committed: `tools/fetch_firmware.sh` copies them from the firmware repositories (locally) and the release workflow builds them (in CI).
-
-- `dualeye/`: [esp32s3-dualeye-pcmonitor](https://github.com/EttoreCaputo/esp32s3-dualeye-pcmonitor)
-- `yoru/`: [Yoru](https://github.com/EttoreCaputo/Yoru)
+`yoru/` holds Yoru's `merged-binary.bin`, `version.txt` and `FIRMWARE_CHANGELOG.md`. The app embeds them at compile time. They are not committed: `tools/fetch_firmware.sh` copies them from [Yoru's repository](https://github.com/EttoreCaputo/Yoru) (locally) and the release workflow builds them (in CI).
