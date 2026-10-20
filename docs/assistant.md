@@ -40,7 +40,7 @@ There are three kinds of service:
 
 `agent.rs` already has the loop: tools, their results fed back, a short memory, a provider with a local fallback. What changes:
 - **A model that can handle many tools.** A provider for Anthropic's Messages API next to the OpenAI-compatible one (`cloud/`). The local model stays for quick and offline requests.
-- **Two brains.** The user picks one (`provider` in `assistant.json`; unset: Claude when it has a key, else Groq when it has one), see "The brain" below.
+- **Four brains.** The user picks one (`provider` in `assistant.json`; unset: the first with a key of Claude, OpenAI and Groq; Ollama only when picked), see "The brain" below.
 - **Tools per request.** The connectors that matter for the request, picked from their descriptions, plus Yoru's own: `notify`, `remember`, timers, the board's tools. Not every tool of every connector at once.
 - **Acting asks first.** A tool marked as acting (send a mail, create an event, close an issue) shows on the board's approval card (`show_approval`, already in the firmware) and in the app, and runs only on Allow. Reading never asks.
 - **Longer turns.** More rounds and tokens than a voice command; the spoken reply stays short, and the full answer is kept in the conversation in the app.
@@ -48,17 +48,20 @@ There are three kinds of service:
 
 ## The brain
 
-Decided on 2026-10-19: Yoru thinks with one of two brains, so people can start without paying.
+Decided on 2026-10-19: Yoru thinks with one of two brains, so people can start without paying. On 2026-10-20 OpenAI (paid, cheap) and Ollama (a model on this computer, free and private) joined Groq in `assistant/compat.rs`, the turn for every brain that speaks OpenAI's chat completions. They differ in a budget (`compat::Budget`): Groq and Ollama get the tight one below (Groq counts the answer's reserved tokens against its 8K a minute, and a local model reads a short prompt best), OpenAI a roomy one (16 connector tools, the memory to 12,000 characters, the last 10 turns, results to 30,000 characters, 4,096 tokens an answer).
 
-| | Groq (`assistant/groq.rs`) | Claude (`cloud/anthropic.rs`) |
+- **OpenAI** (`openai_model`, `gpt-6-luna` by default; `gpt-5.4-mini`, `gpt-5.6-terra`). Only models that call tools through Chat Completions: they do it with `reasoning_effort: "none"`, and want `max_completion_tokens` instead of `max_tokens`. GPT-6.1 Sol and Astra call tools only through the Responses API, which Yoru doesn't speak. Its key serves `whisper-1` too.
+- **Ollama** (`ollama_model`, empty until the user picks one of the models Ollama lists at `/v1/models`). No key; `http://localhost:11434/v1`, or `OLLAMA_BASE_URL`. The model must support tools.
+
+| | Groq, Ollama, OpenAI (`assistant/compat.rs`) | Claude (`cloud/anthropic.rs`) |
 |---|---|---|
 | Cost | free, with daily limits (free plan: 8K tokens a minute, 200K a day for GPT-OSS) | paid by use |
 | Model | `groq_model`: `openai/gpt-oss-120b` by default; `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `llama-3.3-70b-versatile` | `model`: `claude-opus-5-5` by default |
 | Turn | `/chat/completions` with function calling: `tool_calls` run by the same tool runner, answered with `role: "tool"` messages; same rounds, same confirmation before acting | Messages API, thinking, effort |
-| Connector tools | picked locally for each request (`assistant/select.rs`: BM25 over service, name and description against the request and the turns before, with a few Italian words mapped to English); 8 at most, plus those the conversation used, plus `find_tools` for the model to ask for more | all of them, deferred behind server-side tool search |
-| Web search | none: Groq's compound models aren't used, and the model is told it can't search | the server tool |
-| Prompt | a compact system prompt, the memory cut to 3,000 characters, the last 4 turns, tool results cut to 6,000 characters | the full prompt, cached |
-| Triage | structured output (`response_format: json_schema`, strict) for GPT-OSS and Qwen; JSON mode with the schema in the prompt for Llama | `output_config.format` |
+| Connector tools | picked locally for each request (`assistant/select.rs`: BM25 over service, name and description against the request and the turns before, with a few Italian words mapped to English); 6 at most (16 on OpenAI), plus those the conversation used, plus `find_tools` for the model to ask for more | all of them, deferred behind server-side tool search |
+| Web search | none: Groq's compound models aren't used, OpenAI searches only through the Responses API, and the model is told it can't search | the server tool |
+| Prompt | a compact system prompt, the memory cut to 3,000 characters, the last 4 turns, tool results cut to 6,000 characters, tool descriptions to 300, 1,024 tokens an answer (2,048 for a triage) | the full prompt, cached |
+| Triage | structured output (`response_format: json_schema`, strict) for OpenAI, GPT-OSS and Qwen; JSON mode with the schema in the prompt for Llama and Ollama | `output_config.format` |
 
 The conversation is kept in memory in the brain's own form (Anthropic's content blocks or OpenAI's messages); changing the brain starts a new one. The saved log (`conversation.json`) is the app's neutral `ChatLine`s, so nothing old breaks.
 

@@ -40,8 +40,11 @@
   }
 
   // The brain: the settings' choice, else the one with a key, else Groq (free, to start).
-  const brain = $derived<Brain>(store.info?.settings.provider ?? store.info?.brain ?? "groq");
-  const brainKey = $derived(brain === "groq" ? (store.info?.groq_key ?? null) : (store.info?.key ?? null));
+  // Ollama needs no key: it is set up in Settings, so here it counts as Groq.
+  const chosen = $derived<Brain>(store.info?.settings.provider ?? store.info?.brain ?? "groq");
+  const brain = $derived<Brain>(chosen === "ollama" ? "groq" : chosen);
+  const brainKey = $derived(brain === "groq" ? (store.info?.groq_key ?? null) : brain === "openai" ? (store.info?.openai_key ?? null) : (store.info?.key ?? null));
+  const KEY_HINTS: Record<string, string> = { groq: "gsk_…", openai: "sk-proj-…", anthropic: "sk-ant-…" };
   const pick = (b: Brain) => store.saveSettings((s) => (s.provider = b));
 
   // The voice: an ElevenLabs key, then one of the account's voices.
@@ -141,16 +144,16 @@
         <h1 id="setup-title">{t.brain.title}</h1>
         <p class="dim">{t.brain.text}</p>
         <div class="services" role="radiogroup" aria-label={t.brain.title}>
-          {#each [["groq", t.brain.groq, t.brain.groqWhat], ["anthropic", t.brain.anthropic, t.brain.anthropicWhat]] as [id, name, what] (id)}
+          {#each [["groq", t.brain.groq, t.brain.groqWhat], ["openai", t.brain.openai, t.brain.openaiWhat], ["anthropic", t.brain.anthropic, t.brain.anthropicWhat]] as [id, name, what] (id)}
             <button class="service" class:done={brain === id} role="radio" aria-checked={brain === id} onclick={() => pick(id as Brain)}>
               <b>{name}</b>
               <span>{what}</span>
             </button>
           {/each}
         </div>
-        <p class="faint">{brain === "groq" ? t.brain.groqKey : t.brain.anthropicKey}</p>
+        <p class="faint">{brain === "groq" ? t.brain.groqKey : brain === "openai" ? t.brain.openaiKey : t.brain.anthropicKey}</p>
         {#key brain}
-          <div class="field"><KeyField provider={brain} source={brainKey} placeholder={brain === "groq" ? "gsk_…" : "sk-ant-…"} onchange={() => store.refreshInfo()} /></div>
+          <div class="field"><KeyField provider={brain} source={brainKey} placeholder={KEY_HINTS[brain]} onchange={() => store.refreshInfo()} /></div>
         {/key}
         {#if store.info?.ready && brainKey}<p class="status"><span class="dot done"></span>{t.brain.ok}</p>{/if}
       {:else if step === 1}

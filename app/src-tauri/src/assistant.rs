@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use yoru_core::assistant::watchers::{self, ScheduleEvent, WatchEntry, Watcher};
 use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, Host, Notification, Reply, Settings, TaskHost};
 use yoru_core::claude::agents::{Agents, Decision};
-use yoru_core::cloud::{KeySource, Provider};
+use yoru_core::cloud::{self, KeySource, Provider};
 use yoru_core::connectors::catalog::{self, Preset};
 use yoru_core::connectors::{ConnectorConfig, ConnectorEvent, ConnectorStatus, Connectors};
 use yoru_core::{Board, BoardKind, Tool};
@@ -176,6 +176,9 @@ pub struct AssistantInfo {
     /// Where the Groq key comes from.
     groq_key: Option<KeySource>,
     groq_models: Vec<BrainModel>,
+    /// Where the OpenAI key comes from.
+    openai_key: Option<KeySource>,
+    openai_models: Vec<BrainModel>,
     /// Groq's free limit, while it is waited out: what the user reads.
     limited: Option<String>,
     /// Where its files are (memory.md, inbox.json…).
@@ -192,12 +195,24 @@ fn info_of(a: &Assistant) -> AssistantInfo {
         brain: a.settings().brain(),
         key: Provider::by_id("anthropic").and_then(|p| p.key_source()).map(|(_, s)| s),
         groq_key: Provider::by_id("groq").and_then(|p| p.key_source()).map(|(_, s)| s),
-        groq_models: assistant::groq::models().into_iter().map(|(id, note)| BrainModel { id, note }).collect(),
-        limited: a.limited().map(|e| assistant::groq::brain_error(&e)),
+        groq_models: brain_models(Brain::Groq),
+        openai_key: Provider::by_id("openai").and_then(|p| p.key_source()).map(|(_, s)| s),
+        openai_models: brain_models(Brain::OpenAi),
+        limited: a.limited().map(|e| assistant::compat::brain_error(&e)),
         dir: a.dir().map(|d| d.display().to_string()),
         quiet_until: a.quiet_until(),
         quiet_now: a.quiet_now(),
     }
+}
+
+fn brain_models(brain: Brain) -> Vec<BrainModel> {
+    assistant::compat::models(brain).into_iter().map(|(id, note)| BrainModel { id, note }).collect()
+}
+
+/// The models Ollama has on this computer; an error when it isn't running.
+#[tauri::command]
+pub async fn ollama_models() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| cloud::list_models(&cloud::OLLAMA).map_err(|e| assistant::compat::brain_error(&e))).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

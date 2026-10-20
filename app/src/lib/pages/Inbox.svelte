@@ -2,6 +2,7 @@
 <script lang="ts">
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
+  import ConfirmButton from "../ui/ConfirmButton.svelte";
   import NotificationRow from "../ui/NotificationRow.svelte";
 
   const t = $derived(i18n.t.inbox);
@@ -10,10 +11,6 @@
 
   const sources = $derived([...new Set(store.inbox.map((n) => n.source))].sort());
   const list = $derived(store.inbox.filter((n) => (show === "all" || !n.read) && (!source || n.source === source)));
-
-  async function clear() {
-    if (confirm(t.clearConfirm)) await store.clearInbox();
-  }
 </script>
 
 <div class="page">
@@ -39,7 +36,7 @@
     </div>
     <div class="row end">
       <button class="btn quiet small" disabled={!store.unread} onclick={() => store.readAll()}>{t.readAll}</button>
-      <button class="btn quiet small" disabled={!store.inbox.length} onclick={clear}>{t.clear}</button>
+      <ConfirmButton small label={t.clear} question={t.clearConfirm} sure={t.clearSure} disabled={!store.inbox.length} onconfirm={() => store.clearInbox()} />
     </div>
   </div>
 

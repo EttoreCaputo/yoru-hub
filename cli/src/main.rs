@@ -7,8 +7,9 @@
 //!   yoru                          # connect the board and run (the app does the same)
 //!   yoru --stt --tts              # ...and talk with it, with spoken replies
 //!   yoru cloud key groq           # Yoru's brain, free with daily limits: a Groq API key (read from stdin)
-//!   yoru cloud key anthropic      # ...or Claude, paid and the best: an Anthropic API key
-//!   yoru settings provider groq   # which brain (anthropic, groq, auto); groq_model openai/gpt-oss-20b
+//!   yoru cloud key anthropic      # ...or Claude, paid and the best: an Anthropic API key (or openai: GPT, paid)
+//!   yoru settings provider groq   # which brain (anthropic, openai, groq, ollama, auto); groq_model openai/gpt-oss-20b
+//!   yoru settings ollama_model qwen3:8b   # a model on this computer, through Ollama: no key
 //!   yoru ask "che email ho?"      # ask the assistant, as if said to the board
 //!   yoru inbox                    # the notifications (also: inbox read ID, dismiss ID, clear)
 //!   yoru memory                   # what Yoru knows about you (also: memory edit, memory forget TEXT)
@@ -35,7 +36,7 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use yoru_core::agent;
-use yoru_core::assistant::{self, Assistant, Channel, TaskHost, watchers::{self, Watcher, Watchers, WatchKind}};
+use yoru_core::assistant::{self, Assistant, Brain, Channel, TaskHost, watchers::{self, Watcher, Watchers, WatchKind}};
 use yoru_core::bridge::{self, BridgeConfig, BridgeEvent, ManagerEvent, Transport};
 use yoru_core::claude::{hooks, statusline};
 use yoru_core::cloud::{self, CloudRef, Provider};
@@ -230,8 +231,9 @@ enum Command {
         action: connectors_cmd::Action,
     },
     /// The assistant's settings: `settings` prints them, `settings KEY VALUE`
-    /// changes one (name, provider: anthropic, groq or auto; model: Claude's;
-    /// groq_model; effort, task_effort, web_search: Claude only; recap,
+    /// changes one (name, provider: anthropic, openai, groq, ollama or auto;
+    /// model: Claude's; openai_model, groq_model, ollama_model; effort,
+    /// task_effort, web_search: Claude only; recap,
     /// recap_at, recap_weekdays_only, quiet, quiet_from, quiet_to)
     Settings {
         key: Option<String>,
@@ -449,7 +451,7 @@ fn main() -> ExitCode {
     };
     let stop = Arc::new(AtomicBool::new(false));
     if !the_assistant.is_ready() {
-        eprintln!("no brain: Yoru can't think or watch anything yet (yoru cloud key groq, free, or yoru cloud key anthropic)");
+        eprintln!("no brain: Yoru can't think or watch anything yet (yoru cloud key groq, free, yoru cloud key anthropic or openai, or yoru settings provider ollama)");
     }
     // The watchers and the morning recap, on their own thread.
     let scheduler = {
@@ -965,14 +967,28 @@ fn settings_command(key: Option<&str>, value: Option<&str>) -> ExitCode {
         let s = assistant.settings();
         match s.brain() {
             Some(b) => eprintln!("thinking with {} ({}){}", b.name(), s.model_of(b), if b.has_key() { "" } else { ", which has no key yet" }),
-            None => eprintln!("no brain: add a key with yoru cloud key groq (free) or yoru cloud key anthropic"),
+            None => eprintln!("no brain: add a key with yoru cloud key groq (free), anthropic or openai, or use Ollama (yoru settings provider ollama)"),
         }
         return ExitCode::SUCCESS;
     };
-    if key == "groq_model" && !assistant::groq::models().iter().any(|(id, _)| *id == value) {
-        let known: Vec<&str> = assistant::groq::models().into_iter().map(|(id, _)| id).collect();
-        eprintln!("unknown Groq model {value}: one of {}", known.join(", "));
+    let catalog = match key {
+        "groq_model" => Some(Brain::Groq),
+        "openai_model" => Some(Brain::OpenAi),
+        _ => None,
+    };
+    if let Some(brain) = catalog
+        && !assistant::compat::models(brain).iter().any(|(id, _)| *id == value)
+    {
+        let known: Vec<&str> = assistant::compat::models(brain).into_iter().map(|(id, _)| id).collect();
+        eprintln!("unknown {} model {value}: one of {}", brain.name(), known.join(", "));
         return ExitCode::FAILURE;
+    }
+    if key == "ollama_model" {
+        match cloud::list_models(&cloud::OLLAMA) {
+            Ok(models) if !models.iter().any(|m| m == value) => eprintln!("Ollama has no {value} yet: ollama pull {value}"),
+            Err(e) => eprintln!("{e}"),
+            Ok(_) => {}
+        }
     }
     // `auto`: the brain that has a key, Claude first.
     let value: Value = if key == "provider" && value == "auto" { Value::Null } else { serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.into())) };

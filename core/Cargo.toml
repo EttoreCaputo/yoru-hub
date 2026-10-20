@@ -30,6 +30,9 @@ tar = { version = "0.4.46", optional = true }
 tokio = { version = "1.53.1", features = ["rt", "time"], optional = true }
 ureq = "3.4.2"
 url = { version = "2.5.8", optional = true }
+http = { version = "1", optional = true }
+futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
+sse-stream = { version = "0.2", optional = true }
 
 # The mouse pointer (Yoru's eyes) on X11, loaded at run time.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -62,5 +65,5 @@ mcp = ["dep:rmcp", "dep:tokio"]
 connectors = [
     "dep:rmcp", "rmcp/client", "rmcp/auth", "rmcp/reqwest", "rmcp/transport-streamable-http-client-reqwest", "rmcp/transport-child-process",
     "dep:tokio", "tokio/rt-multi-thread", "tokio/net", "tokio/io-util", "tokio/sync", "tokio/macros", "tokio/process",
-    "dep:reqwest", "dep:keyring", "dep:url", "dep:async-trait",
+    "dep:reqwest", "dep:keyring", "dep:url", "dep:async-trait", "dep:http", "dep:futures", "dep:sse-stream",
 ]

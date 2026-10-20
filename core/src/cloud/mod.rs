@@ -70,6 +70,11 @@ pub struct Provider {
     /// One line about it for the person picking it.
     pub note: &'static str,
     pub models: &'static [CloudModel],
+    /// Whether it needs a key: a server on this computer (Ollama) doesn't.
+    pub needs_key: bool,
+    /// Whether any model id is one of its models: the ones the person has
+    /// (Ollama's), not a catalog ([`ANY_MODEL`]).
+    pub any_model: bool,
 }
 
 /// A model of a [`Provider`].
@@ -141,6 +146,8 @@ pub const GROQ: Provider = Provider {
         orpheus("austin", "Orpheus on Groq, English, man's voice"),
         orpheus("daniel", "Orpheus on Groq, English, man's voice"),
     ],
+    needs_key: true,
+    any_model: false,
 };
 
 /// [ElevenLabs](https://elevenlabs.io): voices only, those of the account,
@@ -155,6 +162,8 @@ pub const ELEVENLABS: Provider = Provider {
     keys_url: "https://elevenlabs.io/app/developers/api-keys",
     note: "The voices of your account; free plan: 10,000 credits a month. The answers are sent to ElevenLabs",
     models: &[],
+    needs_key: true,
+    any_model: false,
 };
 
 /// What `elevenlabs:voice/<voice_id>` names: a voice of the person's
@@ -182,10 +191,59 @@ pub const ANTHROPIC: Provider = Provider {
     keys_url: "https://platform.claude.com/settings/keys",
     note: "Claude, Yoru's brain; paid by use. What you ask and what Yoru reads for you are sent to Anthropic",
     models: &[],
+    needs_key: true,
+    any_model: false,
 };
 
+/// [OpenAI](https://platform.openai.com): a brain for the assistant, paid
+/// by use, and Whisper. Only the models that call tools through Chat
+/// Completions are here (October 2026): GPT-6 Luna and GPT-5.4 Mini do it
+/// only with `reasoning_effort` set to `none`; GPT-6.1 Sol and GPT-6 Astra
+/// call tools only through the Responses API, which Yoru doesn't speak.
+pub const OPENAI: Provider = Provider {
+    id: "openai",
+    name: "OpenAI",
+    api: Api::OpenAi,
+    base_url: "https://api.openai.com/v1",
+    key_env: "OPENAI_API_KEY",
+    keys_url: "https://platform.openai.com/api-keys",
+    note: "GPT, a brain for Yoru; paid by use. What you ask and what Yoru reads for you are sent to OpenAI",
+    models: &[
+        chat("gpt-6-luna", "GPT-6 Luna: fast and cheap ($0.10 / $0.50 a million tokens)", NO_REASONING),
+        chat("gpt-5.4-mini", "GPT-5.4 Mini: smarter, still quick ($0.75 / $4.50)", NO_REASONING),
+        chat("gpt-5.6-terra", "GPT-5.6 Terra: smarter still, pricier ($2 / $12)", NO_REASONING),
+        whisper("whisper-1", "Whisper on OpenAI: paid by the minute"),
+    ],
+    needs_key: true,
+    any_model: false,
+};
+
+/// OpenAI's models call tools through Chat Completions only without reasoning.
+const NO_REASONING: &str = r#"{"reasoning_effort": "none"}"#;
+
+/// [Ollama](https://ollama.com): models on this computer, free and private,
+/// through its OpenAI-compatible API. No key; the models are the ones the
+/// person pulled ([`list_models`]), so any id is one ([`ANY_MODEL`]).
+/// `OLLAMA_BASE_URL` points it at another machine.
+pub const OLLAMA: Provider = Provider {
+    id: "ollama",
+    name: "Ollama",
+    api: Api::OpenAi,
+    base_url: "http://localhost:11434/v1",
+    key_env: "OLLAMA_API_KEY",
+    keys_url: "https://ollama.com/search?c=tools",
+    note: "Models on this computer: free and private, as smart as the computer allows",
+    models: &[],
+    needs_key: false,
+    any_model: true,
+};
+
+/// What `ollama:<model>` names: a model the person has, not in the catalog.
+/// Its name is the [`Client`]'s.
+const ANY_MODEL: CloudModel = CloudModel { id: "model", kind: Kind::Llm, model: "", voice: None, language: None, note: "A model you have", params: "", max_chars: 0 };
+
 /// Every service Yoru can use.
-pub const PROVIDERS: &[Provider] = &[ANTHROPIC, GROQ, ELEVENLABS];
+pub const PROVIDERS: &[Provider] = &[ANTHROPIC, OPENAI, GROQ, OLLAMA, ELEVENLABS];
 
 impl Provider {
     pub fn by_id(id: &str) -> Option<&'static Provider> {
@@ -207,15 +265,29 @@ impl Provider {
 
     /// Whether its key works, asking something free of it.
     pub fn check_key(&'static self) -> Result<(), CloudError> {
-        let key = self.api_key().ok_or(CloudError::NoKey { provider: self.name, env: self.key_env })?;
+        let key = self.key_or_none()?;
         match self.api {
+            Api::OpenAi if self.any_model => openai::list_models(&self.client(&ANY_MODEL, key)).map(|_| ()),
             Api::OpenAi => match self.models.first() {
-                Some(model) => Client { model: CloudRef { provider: self, model }, key, voice_id: None }.check(),
+                Some(model) => self.client(model, key).check(),
                 None => Ok(()),
             },
             Api::ElevenLabs => elevenlabs::check_key(&key),
             Api::Anthropic => anthropic::check_key(&key),
         }
+    }
+
+    /// Its key, or an empty one when it needs none.
+    fn key_or_none(&self) -> Result<String, CloudError> {
+        match self.api_key() {
+            Some(key) => Ok(key),
+            None if !self.needs_key => Ok(String::new()),
+            None => Err(CloudError::NoKey { provider: self.name, env: self.key_env }),
+        }
+    }
+
+    fn client(&'static self, model: &'static CloudModel, key: String) -> Client {
+        Client { model: CloudRef { provider: self, model }, key, voice_id: None, name: None }
     }
 
     /// Its API key and where it came from.
@@ -246,12 +318,16 @@ pub struct CloudRef {
 
 impl CloudRef {
     /// `groq:hannah` → Groq's Hannah. `None` for a local id (no `:`) or one
-    /// that isn't known. Any `elevenlabs:voice/<voice_id>` is known.
+    /// that isn't known. Any `elevenlabs:voice/<voice_id>` is known, and any
+    /// `ollama:<model>`.
     pub fn by_id(id: &str) -> Option<Self> {
         let (provider, model) = id.split_once(':')?;
         let provider = Provider::by_id(provider)?;
         if provider.api == Api::ElevenLabs && account_voice_id(model).is_some() {
             return Some(Self { provider, model: &ACCOUNT_VOICE });
+        }
+        if provider.any_model && !model.is_empty() {
+            return Some(Self { provider, model: &ANY_MODEL });
         }
         let model = provider.models.iter().find(|m| m.id == model)?;
         Some(Self { provider, model })
@@ -276,6 +352,12 @@ fn account_voice_id(model: &str) -> Option<&str> {
 /// Whether `id` names a cloud model (or tries to: it has a `:`).
 pub fn is_cloud_id(id: &str) -> bool {
     id.contains(':')
+}
+
+/// The chat models `provider` has now (Ollama's: the ones the person pulled).
+pub fn list_models(provider: &'static Provider) -> Result<Vec<String>, CloudError> {
+    let key = provider.key_or_none()?;
+    openai::list_models(&provider.client(&ANY_MODEL, key))
 }
 
 fn keys_file() -> Option<PathBuf> {
@@ -394,6 +476,8 @@ pub struct Client {
     key: String,
     /// The account's voice an `elevenlabs:voice/<voice_id>` names.
     pub voice_id: Option<String>,
+    /// The model an `ollama:<model>` names, which isn't in the catalog.
+    pub name: Option<String>,
 }
 
 impl fmt::Debug for Client {
@@ -406,9 +490,15 @@ impl Client {
     /// The cloud model `id` (`groq:hannah`) of `kind`, with its provider's key.
     pub fn new(id: &str, kind: Kind) -> Result<Self, String> {
         let model = CloudRef::by_id(id).filter(|r| r.model.kind == kind).ok_or_else(|| format!("unknown cloud model {id}"))?;
-        let key = model.provider.api_key().ok_or_else(|| CloudError::NoKey { provider: model.provider.name, env: model.provider.key_env }.to_string())?;
+        let key = model.provider.key_or_none().map_err(|e| e.to_string())?;
         let voice_id = id.split_once(':').and_then(|(_, m)| account_voice_id(m)).filter(|_| model.provider.api == Api::ElevenLabs).map(str::to_string);
-        Ok(Self { model, key, voice_id })
+        let name = id.split_once(':').map(|(_, m)| m.to_string()).filter(|_| model.provider.any_model);
+        Ok(Self { model, key, voice_id, name })
+    }
+
+    /// The provider's name for the model: the catalog's, or the one the id gave.
+    pub fn model_name(&self) -> &str {
+        self.name.as_deref().unwrap_or(self.model.model.model)
     }
 
     /// Check the key and that the service answers (lists its models: free).
@@ -535,7 +625,8 @@ mod tests {
     #[test]
     fn catalog_is_consistent() {
         for p in PROVIDERS {
-            assert!(!p.id.contains(':') && p.base_url.starts_with("https://"));
+            // A key only ever goes over HTTPS; a server on this computer needs none.
+            assert!(!p.id.contains(':') && (p.base_url.starts_with("https://") || (!p.needs_key && p.base_url.starts_with("http://localhost"))), "{}", p.id);
             for m in p.models {
                 assert_eq!(p.models.iter().filter(|o| o.id == m.id).count(), 1, "{} twice", m.id);
                 assert_eq!(m.kind == Kind::Voice, m.voice.is_some(), "{}", m.id);
@@ -550,7 +641,7 @@ mod tests {
 
     #[test]
     fn a_limit_is_remembered() {
-        let client = Client { model: CloudRef::by_id("groq:whisper-large-v3").unwrap(), key: "k".into(), voice_id: None };
+        let client = Client { model: CloudRef::by_id("groq:whisper-large-v3").unwrap(), key: "k".into(), voice_id: None, name: None };
         let limit = || CloudError::RateLimited { provider: "Groq", retry_after: Some(Duration::from_secs(30)), per_day: true };
         assert!(!client.is_limited());
         assert_eq!(client.limited(|| Err::<(), _>(limit())), Err(limit()));

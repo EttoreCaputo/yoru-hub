@@ -34,7 +34,7 @@ export type Routines = {
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
-export type Brain = "anthropic" | "groq";
+export type Brain = "anthropic" | "openai" | "groq" | "ollama";
 
 export type AssistantSettings = {
   name: string;
@@ -42,6 +42,9 @@ export type AssistantSettings = {
   provider: Brain | null;
   model: string;
   groq_model: string;
+  openai_model: string;
+  /** A model Ollama has (`qwen3:8b`); empty: none picked yet. */
+  ollama_model: string;
   effort: Effort;
   task_effort: Effort;
   web_search: boolean;
@@ -57,6 +60,8 @@ export type AssistantInfo = {
   key: KeySource | null;
   groq_key: KeySource | null;
   groq_models: { id: string; note: string }[];
+  openai_key: KeySource | null;
+  openai_models: { id: string; note: string }[];
   /** Groq's free limit, while it is waited out. */
   limited: string | null;
   dir: string | null;

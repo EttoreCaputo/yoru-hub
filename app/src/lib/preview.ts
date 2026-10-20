@@ -170,6 +170,8 @@ const info: AssistantInfo = {
     provider: onGroq ? "groq" : null,
     model: "claude-opus-5-5",
     groq_model: "openai/gpt-oss-120b",
+    openai_model: "gpt-6-luna",
+    ollama_model: "",
     effort: "medium",
     task_effort: "low",
     web_search: true,
@@ -180,6 +182,12 @@ const info: AssistantInfo = {
   key: noKey || onGroq ? null : "saved",
   groq_key: noKey ? null : onGroq ? "saved" : null,
   groq_models: groqModels,
+  openai_key: null,
+  openai_models: [
+    { id: "gpt-6-luna", note: "GPT-6 Luna: fast and cheap ($0.10 / $0.50 a million tokens)" },
+    { id: "gpt-5.4-mini", note: "GPT-5.4 Mini: smarter, still quick ($0.75 / $4.50)" },
+    { id: "gpt-5.6-terra", note: "GPT-5.6 Terra: smarter still, pricier ($2 / $12)" },
+  ],
   limited: null,
   dir: "~/Library/Application Support/yoru",
   quiet_until: null,
@@ -249,7 +257,9 @@ const voice: VoiceInfo = {
   download: null,
   providers: [
     { id: "anthropic", name: "Anthropic", note: "Claude, Yoru's brain; paid by use.", keys_url: "https://platform.claude.com/settings/keys", key_env: "ANTHROPIC_API_KEY", key: info.key },
+    { id: "openai", name: "OpenAI", note: "GPT, a brain for Yoru; paid by use.", keys_url: "https://platform.openai.com/api-keys", key_env: "OPENAI_API_KEY", key: info.openai_key },
     { id: "groq", name: "Groq", note: "Free with daily limits.", keys_url: "https://console.groq.com/keys", key_env: "GROQ_API_KEY", key: info.groq_key },
+    { id: "ollama", name: "Ollama", note: "Models on this computer.", keys_url: "https://ollama.com/search?c=tools", key_env: "OLLAMA_API_KEY", key: null },
     { id: "elevenlabs", name: "ElevenLabs", note: "Natural voices.", keys_url: "https://elevenlabs.io/app/settings/api-keys", key_env: "ELEVENLABS_API_KEY", key: null },
   ],
 };
@@ -262,8 +272,9 @@ const accountVoices: AccountVoice[] = [
 
 /** The brain as the core picks it: the settings', else the one with a key, Claude first. */
 function resolveBrain() {
-  info.brain = info.settings.provider ?? (info.key ? "anthropic" : info.groq_key ? "groq" : null);
-  info.ready = info.brain === "anthropic" ? !!info.key : info.brain === "groq" ? !!info.groq_key : false;
+  info.brain = info.settings.provider ?? (info.key ? "anthropic" : info.openai_key ? "openai" : info.groq_key ? "groq" : null);
+  const ready = { anthropic: !!info.key, openai: !!info.openai_key, groq: !!info.groq_key, ollama: !!info.settings.ollama_model };
+  info.ready = info.brain ? ready[info.brain] : false;
 }
 
 const offline = params.get("board") === "off";
@@ -408,12 +419,14 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   timer_tool: () => timers,
   dismiss_timers: () => timers,
   voice_info: () => voice,
+  ollama_models: async () => (await sleep(300), ["llama3.1:8b", "qwen3:8b"]),
   set_voice: (a) => ((voice.settings = a.settings), voice),
   set_api_key: (a) => {
     const p = voice.providers.find((p) => p.id === a.provider);
     if (p) p.key = a.key ? "saved" : null;
     if (a.provider === "anthropic") info.key = a.key ? "saved" : null;
     if (a.provider === "groq") info.groq_key = a.key ? "saved" : null;
+    if (a.provider === "openai") info.openai_key = a.key ? "saved" : null;
     resolveBrain();
     return voice;
   },

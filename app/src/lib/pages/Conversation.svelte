@@ -9,6 +9,7 @@
   import type { ChatLine } from "../types";
   import ApprovalCard from "../ui/ApprovalCard.svelte";
   import Composer from "../ui/Composer.svelte";
+  import ConfirmButton from "../ui/ConfirmButton.svelte";
   import { ago } from "../ui/when";
 
   const t = $derived(i18n.t.conversation);
@@ -22,10 +23,6 @@
     queueMicrotask(() => end?.scrollIntoView({ block: "end", behavior: "smooth" }));
   });
 
-  async function forget() {
-    if (confirm(t.forgetConfirm)) await call("forget_conversation");
-  }
-
   const failed = (l: ChatLine) => l.from === "yoru" && l.text.startsWith("(error:");
 </script>
 
@@ -35,7 +32,11 @@
       <h1>{t.title}</h1>
       <p class="lede">{t.lede}</p>
     </div>
-    {#if store.chat.length}<button class="btn quiet" onclick={forget}>{t.forget}</button>{/if}
+    {#if store.chat.length}
+      <div class="row">
+        <ConfirmButton label={t.forget} question={t.forgetConfirm} sure={t.forgetSure} onconfirm={() => call("forget_conversation")} />
+      </div>
+    {/if}
   </div>
 
   {#if !store.chat.length && !store.asking}

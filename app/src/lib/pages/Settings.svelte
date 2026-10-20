@@ -1,6 +1,6 @@
 <!--
-  Yoru's brain (Groq or Claude, their keys and models, how hard Claude
-  thinks), other providers' keys, the app's language, and Claude Code's integration.
+  Yoru's brain (Groq, OpenAI, Claude or Ollama, their keys and models, how
+  hard Claude thinks), other providers' keys, the app's language, and Claude Code's integration.
 -->
 <script lang="ts">
   import { call, why } from "../api";
@@ -15,6 +15,7 @@
   const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
   const CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
   const brain = $derived(store.info?.brain ?? null);
+  const BRAIN_NAMES: Record<Brain, string> = { anthropic: "Claude", openai: "OpenAI", groq: "Groq", ollama: "Ollama" };
 
   let voice = $state<VoiceInfo | null>(null);
   let alerts = $state<ClaudeAlertsInfo | null>(null);
@@ -34,8 +35,25 @@
     void readAll();
   });
 
-  // Groq's key is the brain's too: it is in the brain's section.
-  const others = $derived(voice?.providers.filter((p) => p.id !== "anthropic" && p.id !== "groq") ?? []);
+  // The brains' keys (Groq's and OpenAI's serve speech to text too) are in the brain's section.
+  const BRAINS = ["anthropic", "openai", "groq", "ollama"];
+  const others = $derived(voice?.providers.filter((p) => !BRAINS.includes(p.id)) ?? []);
+
+  // Ollama's models are the ones pulled on this computer: asked when it is the brain.
+  let ollamaModels = $state<string[] | null>(null);
+  let ollamaError = $state("");
+  async function readOllama() {
+    ollamaError = "";
+    try {
+      ollamaModels = await call<string[]>("ollama_models");
+    } catch (e) {
+      ollamaModels = null;
+      ollamaError = why(e);
+    }
+  }
+  $effect(() => {
+    if (s?.provider === "ollama") void readOllama();
+  });
 
   async function run<T>(job: () => Promise<T>, then: (v: T) => void) {
     error = "";
@@ -69,12 +87,14 @@
   <section class="panel">
     {#if s}
       <div class="setting">
-        <div class="what"><b>{t.provider}</b>{#if !store.info?.ready}<span class="error-text">{brain ? t.brainNoKey(brain === "groq" ? "Groq" : "Claude") : t.noBrain}</span>{:else if store.info?.limited}<span class="error-text">{store.info.limited}</span>{/if}</div>
+        <div class="what"><b>{t.provider}</b>{#if !store.info?.ready}<span class="error-text">{brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain}</span>{:else if store.info?.limited}<span class="error-text">{store.info.limited}</span>{/if}</div>
         <div class="how">
           <select value={s.provider ?? ""} onchange={(e) => store.saveSettings((x) => (x.provider = (e.currentTarget.value || null) as Brain | null))} aria-label={t.provider}>
             <option value="">{t.providers.auto}</option>
             <option value="groq">{t.providers.groq}</option>
+            <option value="openai">{t.providers.openai}</option>
             <option value="anthropic">{t.providers.anthropic}</option>
+            <option value="ollama">{t.providers.ollama}</option>
           </select>
         </div>
       </div>
@@ -90,6 +110,33 @@
           <select value={s.groq_model} onchange={(e) => store.saveSettings((x) => (x.groq_model = e.currentTarget.value))} aria-label={t.groqModel}>
             {#each store.info?.groq_models ?? [] as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
           </select>
+        </div>
+      </div>
+    {/if}
+    <div class="block">
+      <div class="what"><b>{t.openai}</b><span class="dim">{t.openaiHint}</span></div>
+      <KeyField provider="openai" source={store.info?.openai_key ?? null} placeholder="sk-proj-…" onchange={() => (store.refreshInfo(), readAll())} />
+    </div>
+    {#if s}
+      <div class="setting">
+        <div class="what"><b>{t.openaiModel}</b>{#if brain === "openai"}<span>{t.groqNote}</span>{/if}</div>
+        <div class="how">
+          <select value={s.openai_model} onchange={(e) => store.saveSettings((x) => (x.openai_model = e.currentTarget.value))} aria-label={t.openaiModel}>
+            {#each store.info?.openai_models ?? [] as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
+          </select>
+        </div>
+      </div>
+      <div class="setting">
+        <div class="what">
+          <b>{t.ollamaModel}</b><span class="dim">{t.ollamaHint}</span>
+          {#if brain === "ollama"}<span>{t.groqNote}</span>{/if}
+          {#if ollamaError}<span class="error-text">{ollamaError}</span>{:else if ollamaModels && !ollamaModels.length}<span class="error-text">{t.ollamaNone}</span>{/if}
+        </div>
+        <div class="how">
+          <input class="model mono" type="text" list="ollama-models" value={s.ollama_model} placeholder={t.ollamaPick} spellcheck="false" onchange={(e) => store.saveSettings((x) => (x.ollama_model = e.currentTarget.value.trim()))} aria-label={t.ollamaModel} />
+          <datalist id="ollama-models">{#each ollamaModels ?? [] as m (m)}<option value={m}></option>{/each}</datalist>
+          <button class="btn small" onclick={readOllama}>{t.ollamaRefresh}</button>
+          <button class="btn small" onclick={() => call("open_key_page", { provider: "ollama" })}>{t.ollamaGet}</button>
         </div>
       </div>
     {/if}

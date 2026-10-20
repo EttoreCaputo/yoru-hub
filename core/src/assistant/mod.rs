@@ -1,5 +1,6 @@
 //! Yoru, the assistant: a brain ([`Brain`]: Claude through
-//! [`crate::cloud::anthropic`], or a model on Groq through [`groq`]) with the
+//! [`crate::cloud::anthropic`], or a model on OpenAI, Groq or Ollama through
+//! [`compat`]) with the
 //! user's services (the connectors, [`ExternalTools`]), the board's tools,
 //! the timers, a memory ([`Memory`]) and an inbox ([`Inbox`]).
 //!
@@ -17,9 +18,10 @@
 //! event) asks first, on the board's card and in the app, through
 //! [`Host::confirm`].
 //!
-//! On Groq ([`groq`]) the turn is OpenAI's function calling instead, with no
-//! web search, and only the connector tools that match the request
-//! ([`select`]): its free plan allows a few thousand tokens a minute.
+//! On OpenAI, Groq and Ollama ([`compat`]) the turn is OpenAI's function
+//! calling instead, with no web search, and only the connector tools that
+//! match the request ([`select`]): Groq's free plan allows a few thousand
+//! tokens a minute, and a model on this computer reads a short prompt best.
 //!
 //! The conversation is kept in memory in the form of the brain that made it
 //! (Anthropic's content blocks, or OpenAI's messages); changing the brain
@@ -28,8 +30,8 @@
 //! to: thinking blocks are tied to the history they were made in, so a long
 //! or old conversation starts over instead of being trimmed.
 
+pub mod compat;
 pub mod external;
-pub mod groq;
 pub mod inbox;
 pub mod memory;
 pub mod routines;
@@ -57,6 +59,8 @@ pub use memory::Memory;
 pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
 /// Groq's, unless the settings say otherwise.
 pub const DEFAULT_GROQ_MODEL: &str = "openai/gpt-oss-120b";
+/// OpenAI's, unless the settings say otherwise.
+pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-luna";
 /// Requests to the model in one turn before it has to stop.
 const MAX_ROUNDS: usize = 16;
 const MAX_TOKENS: u32 = 16_000;
@@ -77,15 +81,22 @@ const EXTERNAL_TIMEOUT: Duration = Duration::from_secs(60);
 pub enum Brain {
     /// Claude: paid, the best, with web search and tool search.
     Anthropic,
+    /// A model on OpenAI: paid by use, no web search.
+    #[serde(rename = "openai")]
+    OpenAi,
     /// A model on Groq: free with daily limits, no web search.
     Groq,
+    /// A model on this computer, through Ollama: free and private, no key.
+    Ollama,
 }
 
 impl Brain {
     pub fn provider(self) -> &'static cloud::Provider {
         match self {
             Brain::Anthropic => &cloud::ANTHROPIC,
+            Brain::OpenAi => &cloud::OPENAI,
             Brain::Groq => &cloud::GROQ,
+            Brain::Ollama => &cloud::OLLAMA,
         }
     }
 
@@ -94,14 +105,16 @@ impl Brain {
         self.provider().name
     }
 
+    /// Whether it has its key, or needs none (Ollama).
     pub fn has_key(self) -> bool {
-        self.provider().api_key().is_some()
+        !self.provider().needs_key || self.provider().api_key().is_some()
     }
 
-    /// The brain when the settings don't choose: Claude when it has a key,
-    /// else Groq when it has one.
+    /// The brain when the settings don't choose: the first with a key of
+    /// Claude, OpenAI and Groq. Ollama is only ever chosen: it has no key
+    /// that says the person wants it.
     pub fn auto() -> Option<Brain> {
-        [Brain::Anthropic, Brain::Groq].into_iter().find(|b| b.has_key())
+        [Brain::Anthropic, Brain::OpenAi, Brain::Groq].into_iter().find(|b| b.provider().api_key().is_some())
     }
 }
 
@@ -117,6 +130,10 @@ pub struct Settings {
     pub model: String,
     /// Groq's model: one of the chat models in [`cloud::GROQ`]'s catalog.
     pub groq_model: String,
+    /// OpenAI's model: one of the chat models in [`cloud::OPENAI`]'s catalog.
+    pub openai_model: String,
+    /// Ollama's model, one the person pulled (`qwen3:8b`); empty: none chosen yet.
+    pub ollama_model: String,
     /// `low`, `medium`, `high`, `xhigh` or `max`.
     pub effort: String,
     /// The effort of the jobs it does on its own (watchers, recap): they run
@@ -137,7 +154,9 @@ impl Settings {
     pub fn model_of(&self, brain: Brain) -> &str {
         match brain {
             Brain::Anthropic => &self.model,
+            Brain::OpenAi => &self.openai_model,
             Brain::Groq => &self.groq_model,
+            Brain::Ollama => &self.ollama_model,
         }
     }
 }
@@ -149,6 +168,8 @@ impl Default for Settings {
             provider: None,
             model: DEFAULT_MODEL.into(),
             groq_model: DEFAULT_GROQ_MODEL.into(),
+            openai_model: DEFAULT_OPENAI_MODEL.into(),
+            ollama_model: String::new(),
             effort: "medium".into(),
             task_effort: "low".into(),
             web_search: true,
@@ -322,17 +343,19 @@ impl Assistant {
         self.quiet_until().is_some() || self.settings().routines.quiet_now()
     }
 
-    /// Whether it can think: its brain has a key.
+    /// Whether it can think: its brain has a key, and a model (Ollama's is
+    /// the person's to pick).
     pub fn is_ready(&self) -> bool {
-        self.settings().brain().is_some_and(Brain::has_key)
+        let settings = self.settings();
+        settings.brain().is_some_and(|b| b.has_key() && !settings.model_of(b).is_empty())
     }
 
     /// The limit the brain is waiting out (Groq's free plan), if it is.
     pub fn limited(&self) -> Option<CloudError> {
         let settings = self.settings();
         match settings.brain()? {
-            Brain::Groq => groq::client(&settings).ok()?.limit(),
             Brain::Anthropic => None,
+            brain => compat::client(&settings, brain).ok()?.limit(),
         }
     }
 
@@ -402,7 +425,7 @@ impl Assistant {
                 messages.push(json!({"role": "user", "content": [{"type": "text", "text": prompt}]}));
                 self.run_claude(messages, settings, effort, host)
             }
-            Some(Brain::Groq) => groq::run(self, messages, prompt, settings, host),
+            Some(brain) => compat::run(self, brain, messages, prompt, settings, host),
             None => Err(NO_BRAIN.into()),
         }
     }
@@ -522,7 +545,7 @@ impl Assistant {
                 }
                 Ok(text_of(&response["content"]))
             }
-            Some(Brain::Groq) => groq::complete_json(&settings, prompt, schema),
+            Some(brain) => compat::complete_json(&settings, brain, prompt, schema),
             None => Err(NO_BRAIN.into()),
         }
     }
@@ -598,7 +621,7 @@ impl Assistant {
     }
 }
 
-const NO_BRAIN: &str = "Yoru has no brain yet: add a Groq key (free) or an Anthropic key in Settings (or set GROQ_API_KEY or ANTHROPIC_API_KEY)";
+const NO_BRAIN: &str = "Yoru has no brain yet: add a Groq key (free), an OpenAI or Anthropic key, or pick an Ollama model in Settings";
 
 /// What Yoru says aloud when its brain hit `limit` ([`Assistant::limited`]),
 /// in `language` (`it`, `en`).

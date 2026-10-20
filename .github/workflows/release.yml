@@ -1,6 +1,6 @@
 # On every push to main: build Yoru's firmware from its own repository,
-# then the desktop app for Linux, macOS (Apple Silicon and Intel)
-# and Windows with that firmware inside, and with whisper.cpp's and llama.cpp's
+# then the desktop app for macOS (Apple Silicon and Intel; Linux and Windows
+# are off for now) with that firmware inside, and with whisper.cpp's and llama.cpp's
 # servers for voice (tools/build_sidecars.sh), and publish them all on the
 # GitHub release `v<app version>`.
 #
@@ -137,11 +137,11 @@ jobs:
             awk -v v="$yoru" '/^## /{p = ($2 == v || $2 == "v" v); next} p' firmware/yoru/FIRMWARE_CHANGELOG.md
             echo
             echo "### Downloads"
-            echo "- **Windows**: \`Yoru_${app}_windows-x64-setup.exe\` or \`.msi\`."
+            # echo "- **Windows**: \`Yoru_${app}_windows-x64-setup.exe\` or \`.msi\`."
             echo "- **macOS Apple Silicon** (M1 and later): \`Yoru_${app}_macos-apple-silicon.dmg\`."
             echo "- **macOS Intel**: \`Yoru_${app}_macos-intel.dmg\`."
             echo "  The app isn't notarized: the first time, open it, then allow it in System Settings → Privacy & Security (Open Anyway), or run \`xattr -cr \"/Applications/Yoru.app\"\`."
-            echo "- **Linux**: \`Yoru_${app}_linux-x64\` as \`.AppImage\`, \`.deb\` or \`.rpm\`."
+            # echo "- **Linux**: \`Yoru_${app}_linux-x64\` as \`.AppImage\`, \`.deb\` or \`.rpm\`."
             echo "- \`yoru-firmware-$yoru.bin\`: the merged image alone, to flash at 0x0 with esptool."
             echo
             echo "Voice: the app ships whisper.cpp and llama.cpp (MIT); it downloads the models, and installs Piper (GPL-3.0) when you ask."
@@ -169,14 +169,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux
-            os: ubuntu-22.04
-            platform: linux-x64
-            args: ""
-          - name: Windows
-            os: windows-latest
-            platform: windows-x64
-            args: ""
+          # Linux and Windows are off for now: only macOS ships. Uncomment
+          # them (and their lines in the release notes) to bring them back.
+          # - name: Linux
+          #   os: ubuntu-22.04
+          #   platform: linux-x64
+          #   args: ""
+          # - name: Windows
+          #   os: windows-latest
+          #   platform: windows-x64
+          #   args: ""
           - name: macOS Apple Silicon
             os: macos-latest
             platform: macos-apple-silicon

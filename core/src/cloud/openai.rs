@@ -1,5 +1,5 @@
-//! [`Api::OpenAi`](super::Api::OpenAi): OpenAI's HTTP API, which Groq and
-//! most other services speak.
+//! [`Api::OpenAi`](super::Api::OpenAi): OpenAI's HTTP API, which OpenAI,
+//! Groq, Ollama and most other services speak.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -24,8 +24,9 @@ fn url(client: &Client, path: &str) -> String {
     format!("{}{path}", client.model.provider.url())
 }
 
-fn auth(client: &Client) -> String {
-    format!("Bearer {}", client.key)
+/// The request with the key, unless the service needs none (Ollama).
+fn authorized<B>(client: &Client, request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+    if client.key.is_empty() { request } else { request.header("Authorization", format!("Bearer {}", client.key)) }
 }
 
 /// The body of a successful answer, or the error it stands for.
@@ -95,7 +96,15 @@ fn json(client: &Client, body: &[u8]) -> Result<Value, CloudError> {
 }
 
 pub(super) fn check(client: &Client) -> Result<(), CloudError> {
-    read(client, agent().get(url(client, "/models")).header("Authorization", auth(client)).call()).map(|_| ())
+    read(client, authorized(client, agent().get(url(client, "/models"))).call()).map(|_| ())
+}
+
+/// The ids of the models the service has.
+pub(super) fn list_models(client: &Client) -> Result<Vec<String>, CloudError> {
+    let reply = json(client, &read(client, authorized(client, agent().get(url(client, "/models"))).call())?)?;
+    let mut ids: Vec<String> = reply["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(str::to_string)).collect();
+    ids.sort();
+    Ok(ids)
 }
 
 /// `request` cut down to [`CHAT_FIELDS`], with the model and its params.
@@ -105,7 +114,7 @@ fn chat_request(client: &Client, request: &Value) -> Value {
     if !body.contains_key("tools") {
         body.remove("tool_choice");
     }
-    body.insert("model".into(), client.model.model.model.into());
+    body.insert("model".into(), client.model_name().into());
     let asked = body.get("max_tokens").and_then(Value::as_u64);
     if let Ok(Value::Object(params)) = serde_json::from_str::<Value>(client.model.model.params) {
         body.extend(params);
@@ -115,12 +124,18 @@ fn chat_request(client: &Client, request: &Value) -> Value {
     if let (Some(asked), Some(floor)) = (asked, body.get("max_tokens").and_then(Value::as_u64)) {
         body.insert("max_tokens".into(), asked.max(floor).into());
     }
+    // OpenAI's own models refuse `max_tokens`: they count their reasoning too.
+    if client.model.provider.id == "openai"
+        && let Some(max) = body.remove("max_tokens")
+    {
+        body.insert("max_completion_tokens".into(), max);
+    }
     Value::Object(body)
 }
 
 pub(super) fn chat(client: &Client, request: &Value) -> Result<Value, CloudError> {
     let body = serde_json::to_vec(&chat_request(client, request)).map_err(|e| CloudError::Invalid { provider: client.model.provider.name, why: e.to_string() })?;
-    let sent = agent().post(url(client, "/chat/completions")).header("Authorization", auth(client)).header("Content-Type", "application/json").send(&body[..]);
+    let sent = authorized(client, agent().post(url(client, "/chat/completions"))).header("Content-Type", "application/json").send(&body[..]);
     let reply = json(client, &read(client, sent)?)?;
     reply.pointer("/choices/0/message").cloned().ok_or_else(|| CloudError::Invalid {
         provider: client.model.provider.name,
@@ -134,14 +149,14 @@ pub(super) fn transcribe(client: &Client, wav: &[u8], language: Option<&str>, pr
         fields.push(("language", l));
     }
     let (content_type, body) = crate::stt::multipart(wav, &fields).map_err(|e| CloudError::Invalid { provider: client.model.provider.name, why: e.to_string() })?;
-    let sent = agent().post(url(client, "/audio/transcriptions")).header("Authorization", auth(client)).header("Content-Type", content_type).send(&body[..]);
+    let sent = authorized(client, agent().post(url(client, "/audio/transcriptions"))).header("Content-Type", content_type).send(&body[..]);
     json(client, &read(client, sent)?)
 }
 
 pub(super) fn speak(client: &Client, text: &str) -> Result<Vec<u8>, CloudError> {
     let m = client.model.model;
     let body = serde_json::json!({"model": m.model, "voice": m.voice.unwrap_or_default(), "input": text, "response_format": "wav"}).to_string();
-    let sent = agent().post(url(client, "/audio/speech")).header("Authorization", auth(client)).header("Content-Type", "application/json").send(body.as_bytes());
+    let sent = authorized(client, agent().post(url(client, "/audio/speech"))).header("Content-Type", "application/json").send(body.as_bytes());
     read(client, sent)
 }
 
@@ -153,7 +168,7 @@ mod tests {
 
     #[test]
     fn chat_request_drops_llama_settings_and_adds_params() {
-        let client = Client { model: CloudRef::by_id("groq:openai/gpt-oss-20b").unwrap(), key: "k".into(), voice_id: None };
+        let client = Client { model: CloudRef::by_id("groq:openai/gpt-oss-20b").unwrap(), key: "k".into(), voice_id: None, name: None };
         let request = json!({"messages": [], "tools": [], "tool_choice": "auto", "top_k": 20, "max_tokens": 256, "chat_template_kwargs": {}});
         let body = chat_request(&client, &request);
         assert_eq!(body["model"], "openai/gpt-oss-20b");
@@ -164,6 +179,20 @@ mod tests {
         assert!(body.get("tool_choice").is_none());
         // More than the params' floor is kept.
         assert_eq!(chat_request(&client, &json!({"messages": [], "max_tokens": 4096}))["max_tokens"], 4096);
+    }
+
+    #[test]
+    fn openai_counts_completion_tokens_and_ollama_takes_any_model() {
+        let openai = Client { model: CloudRef::by_id("openai:gpt-6-luna").unwrap(), key: "k".into(), voice_id: None, name: None };
+        let body = chat_request(&openai, &json!({"messages": [], "max_tokens": 4096}));
+        assert_eq!((body["model"].as_str(), body["max_completion_tokens"].as_u64()), (Some("gpt-6-luna"), Some(4096)));
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["reasoning_effort"], "none");
+        let ollama = Client::new("ollama:qwen3:8b", crate::models::Kind::Llm).unwrap();
+        assert_eq!(ollama.model_name(), "qwen3:8b");
+        let body = chat_request(&ollama, &json!({"messages": [], "max_tokens": 1024}));
+        assert_eq!((body["model"].as_str(), body["max_tokens"].as_u64()), (Some("qwen3:8b"), Some(1024)));
+        assert!(Client::new("ollama:", crate::models::Kind::Llm).is_err());
     }
 
     #[test]

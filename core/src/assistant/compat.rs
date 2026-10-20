@@ -1,79 +1,110 @@
-//! The assistant on Groq ([`Brain::Groq`]): free, with daily limits, through
-//! OpenAI's chat completions and function calling ([`cloud::Client::chat`]).
+//! The assistant on a brain that speaks OpenAI's chat completions and
+//! function calling ([`cloud::Client::chat`]): OpenAI ([`Brain::OpenAi`]),
+//! Groq ([`Brain::Groq`]: free, with daily limits) and Ollama
+//! ([`Brain::Ollama`]: a model on this computer).
 //!
 //! What differs from Claude, and why:
-//! - **No tool search, few tools.** The free plan allows about 8,000 tokens
-//!   a minute, so a request carries Yoru's own tools and only the connector
-//!   tools that match it ([`select`]); `find_tools` lets the model ask for
-//!   more mid-turn.
-//! - **No web search.** Groq's models that search (compound) aren't used:
-//!   the model is told it can't.
-//! - **A short prompt and a short history.** A compact system prompt, the
-//!   memory cut shorter, the last few turns, and tool results cut.
-//! - **Limits are said plainly.** A 429 becomes "the free limit for the
-//!   day (or the minute) was reached, try again in…" ([`brain_error`]); the
-//!   model isn't asked again until then ([`cloud::Client::limit`]).
+//! - **No tool search, few tools.** A request carries Yoru's own tools and
+//!   only the connector tools that match it ([`select`]); `find_tools` lets
+//!   the model ask for more mid-turn. How many, and how much of the memory,
+//!   the history and the tools' results, is the brain's [`Budget`]: Groq's
+//!   free plan allows about 8,000 tokens a minute, reserved answer
+//!   included, and a model on this computer reads a short prompt best.
+//! - **No web search.** OpenAI searches only through its Responses API, and
+//!   Groq's models that search (compound) aren't used: the model is told it
+//!   can't.
+//! - **Limits are said plainly.** A 429 on Groq becomes "the free limit for
+//!   the day (or the minute) was reached, try again in…" ([`brain_error`]);
+//!   the model isn't asked again until then ([`cloud::Client::limit`]).
 
 use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use super::{Action, Assistant, ExternalTool, Host, MAX_ROUNDS, Reply, Settings, own_tools, schema_or_empty, select, tool_json};
+use super::{Action, Assistant, Brain, ExternalTool, Host, MAX_ROUNDS, Reply, Settings, own_tools, schema_or_empty, select, tool_json};
 use crate::cloud::{self, CloudError, Client};
 use crate::models::Kind;
 use crate::timers::Timers;
 
-/// Tokens of an answer: room for its reasoning, a tool call or a long reply.
-const MAX_TOKENS: u32 = 2048;
-/// Tokens of a triage's answer: a list of items.
-const JSON_MAX_TOKENS: u32 = 4096;
-/// Connector tools picked for a request.
-const PICK: usize = 8;
-/// More, when the model asks with `find_tools`.
-const FIND: usize = 5;
-/// The memory it reads, in characters.
-const MEMORY_MAX: usize = 3000;
-/// A tool's result, in characters: a mailbox's search can be 60 KB.
-const RESULT_MAX: usize = 6000;
-/// The same, for the turns before this one.
-const OLD_RESULT_MAX: usize = 600;
-/// A tool's description, in characters.
-const DESCRIPTION_MAX: usize = 400;
-/// The user's turns kept from the conversation.
-const TURNS_KEPT: usize = 4;
-
-/// The settings' Groq model, with Groq's key.
-pub fn client(settings: &Settings) -> Result<Client, String> {
-    Client::new(&format!("groq:{}", settings.groq_model), Kind::Llm)
+/// How much a request carries, by brain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Budget {
+    /// Tokens of an answer: room for its reasoning, a tool call or a long
+    /// reply. Groq counts them against the minute's tokens before answering.
+    pub max_tokens: u32,
+    /// The same, for a triage's answer: a list of items.
+    pub json_max_tokens: u32,
+    /// Connector tools picked for a request.
+    pub pick: usize,
+    /// More, when the model asks with `find_tools`.
+    pub find: usize,
+    /// The memory it reads, in characters.
+    pub memory_max: usize,
+    /// A tool's result, in characters: a mailbox's search can be 60 KB.
+    pub result_max: usize,
+    /// The same, for the turns before this one.
+    pub old_result_max: usize,
+    /// A tool's description, in characters.
+    pub description_max: usize,
+    /// The user's turns kept from the conversation.
+    pub turns_kept: usize,
 }
 
-/// The chat models of Groq Yoru knows: their ids (`openai/gpt-oss-120b`) and notes.
-pub fn models() -> Vec<(&'static str, &'static str)> {
-    cloud::GROQ.models.iter().filter(|m| m.kind == Kind::Llm).map(|m| (m.id, m.note)).collect()
+/// Groq's free plan and a model on this computer: every token counts.
+const TIGHT: Budget = Budget { max_tokens: 1024, json_max_tokens: 2048, pick: 6, find: 4, memory_max: 3000, result_max: 6000, old_result_max: 600, description_max: 300, turns_kept: 4 };
+/// OpenAI: paid by the token, with a long context.
+const ROOMY: Budget = Budget { max_tokens: 4096, json_max_tokens: 4096, pick: 16, find: 8, memory_max: 12_000, result_max: 30_000, old_result_max: 2000, description_max: 1000, turns_kept: 10 };
+
+pub fn budget(brain: Brain) -> Budget {
+    if brain == Brain::OpenAi { ROOMY } else { TIGHT }
 }
 
-/// Whether Groq follows a JSON schema strictly for `model` (Groq's
-/// structured outputs, October 2026); the others get JSON mode.
-fn follows_schema(model: &str) -> bool {
-    model.starts_with("openai/gpt-oss") || model == "qwen/qwen3.8-27b"
+/// The settings' model of `brain`, with its key.
+pub fn client(settings: &Settings, brain: Brain) -> Result<Client, String> {
+    let model = settings.model_of(brain);
+    if model.is_empty() {
+        return Err(format!("no {} model chosen: pick one in Settings", brain.name()));
+    }
+    Client::new(&format!("{}:{model}", brain.provider().id), Kind::Llm)
 }
 
-/// What the user reads when Groq failed.
+/// The chat models of `brain`'s catalog: their ids (`openai/gpt-oss-120b`)
+/// and notes. Ollama has none: its models are the person's ([`cloud::list_models`]).
+pub fn models(brain: Brain) -> Vec<(&'static str, &'static str)> {
+    brain.provider().models.iter().filter(|m| m.kind == Kind::Llm).map(|m| (m.id, m.note)).collect()
+}
+
+/// Whether `model` follows a JSON schema strictly (structured outputs:
+/// OpenAI's, Groq's GPT-OSS and Qwen, October 2026); the others get JSON mode.
+fn follows_schema(brain: Brain, model: &str) -> bool {
+    match brain {
+        Brain::OpenAi => true,
+        Brain::Groq => model.starts_with("openai/gpt-oss") || model == "qwen/qwen3.8-27b",
+        Brain::Anthropic | Brain::Ollama => false,
+    }
+}
+
+/// What the user reads when the brain failed.
 pub fn brain_error(e: &CloudError) -> String {
     match e {
-        CloudError::RateLimited { retry_after, per_day, .. } => {
+        CloudError::RateLimited { provider: "Groq", retry_after, per_day } => {
             let when = retry_after.map(|d| format!(": try again in {}", cloud::wait_text(d))).unwrap_or_else(|| ": try again in a minute".into());
             let what = if *per_day { "Groq's free limit for the day was reached" } else { "Groq's free limit for the minute was reached" };
-            let hint = if *per_day { " (or switch Yoru's brain to Anthropic in Settings)" } else { "" };
+            let hint = if *per_day { " (or switch Yoru's brain in Settings)" } else { "" };
             format!("{what}{when}{hint}")
         }
-        CloudError::Status { status: 413, .. } => "the request was too big for Groq's free plan: start a new conversation, or ask about one service at a time".into(),
+        CloudError::Status { provider: "Groq", status: 413, .. } => "the request was too big for Groq's free plan: start a new conversation, or ask about one service at a time".into(),
+        CloudError::Network { provider: "Ollama", .. } => "Ollama doesn't answer: is it running on this computer?".into(),
+        CloudError::Status { provider: "Ollama", status: 404, .. } => "Ollama doesn't have that model: pull it, or pick another in Settings".into(),
+        CloudError::Status { provider: "Ollama", status: 400, message } if message.contains("does not support tools") => {
+            "that Ollama model can't use tools: pick one that can (qwen3, llama3.1, mistral…)".into()
+        }
         e => e.to_string(),
     }
 }
 
-/// Who Yoru is, in fewer words than Claude's prompt: every token counts
-/// against the free plan's minute.
+/// Who Yoru is, in fewer words than Claude's prompt: on Groq every token
+/// counts against the free plan's minute.
 fn system_prompt(name: &str, services: bool) -> String {
     let services = if services {
         "The tools of the user's services (mail, calendar, documents, tasks…) relevant to the request are given; if one you need is missing, call find_tools."
@@ -102,8 +133,8 @@ fn find_tools_tool() -> Value {
 }
 
 /// Anthropic's tool shape to OpenAI's function.
-fn function(tool: &Value) -> Value {
-    let description: String = tool["description"].as_str().unwrap_or_default().chars().take(DESCRIPTION_MAX).collect();
+fn function(tool: &Value, description_max: usize) -> Value {
+    let description: String = tool["description"].as_str().unwrap_or_default().chars().take(description_max).collect();
     let mut parameters = schema_or_empty(&tool["input_schema"]);
     if let Some(map) = parameters.as_object_mut() {
         map.remove("$schema");
@@ -121,7 +152,7 @@ fn external_json(t: &ExternalTool) -> Value {
 
 /// What the model may call: Yoru's tools, the timers, the board's and the
 /// connector tools picked.
-fn tool_list(board: &[crate::link::Tool], picked: &[&ExternalTool], more: bool) -> Vec<Value> {
+fn tool_list(board: &[crate::link::Tool], picked: &[&ExternalTool], more: bool, budget: &Budget) -> Vec<Value> {
     let mut tools = own_tools();
     tools.extend(Timers::tools().iter().map(tool_json));
     tools.extend(board.iter().map(tool_json));
@@ -129,19 +160,19 @@ fn tool_list(board: &[crate::link::Tool], picked: &[&ExternalTool], more: bool) 
         tools.push(find_tools_tool());
     }
     tools.extend(picked.iter().map(|t| external_json(t)));
-    tools.iter().map(function).collect()
+    tools.iter().map(|t| function(t, budget.description_max)).collect()
 }
 
-/// Keep the last [`TURNS_KEPT`] turns, starting at a user's message, and
-/// shrink the tool results before them.
-fn trim(messages: &mut Vec<Value>) {
+/// Keep the last [`Budget::turns_kept`] turns, starting at a user's
+/// message, and shrink the tool results before them.
+fn trim(messages: &mut Vec<Value>, budget: &Budget) {
     let starts: Vec<usize> = messages.iter().enumerate().filter(|(_, m)| m["role"] == "user").map(|(i, _)| i).collect();
-    if starts.len() > TURNS_KEPT {
-        messages.drain(..starts[starts.len() - TURNS_KEPT]);
+    if starts.len() > budget.turns_kept {
+        messages.drain(..starts[starts.len() - budget.turns_kept]);
     }
     for m in messages.iter_mut().filter(|m| m["role"] == "tool") {
-        if let Some(text) = m["content"].as_str().filter(|t| t.chars().count() > OLD_RESULT_MAX) {
-            m["content"] = Value::String(cut(text, OLD_RESULT_MAX));
+        if let Some(text) = m["content"].as_str().filter(|t| t.chars().count() > budget.old_result_max) {
+            m["content"] = Value::String(cut(text, budget.old_result_max));
         }
     }
 }
@@ -192,30 +223,31 @@ fn chat(client: &Client, request: &Value) -> Result<Value, String> {
     }
 }
 
-/// A turn on Groq: `prompt` after `messages` (OpenAI's form), the tools run
-/// until the model answers in words.
-pub(super) fn run(a: &Assistant, messages: &mut Vec<Value>, prompt: &str, settings: &Settings, host: &dyn Host) -> Result<Reply, String> {
-    let client = client(settings)?;
+/// A turn on `brain`: `prompt` after `messages` (OpenAI's form), the tools
+/// run until the model answers in words.
+pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt: &str, settings: &Settings, host: &dyn Host) -> Result<Reply, String> {
+    let client = client(settings, brain)?;
+    let budget = budget(brain);
     let started = Instant::now();
-    trim(messages);
+    trim(messages, &budget);
     let query = query_of(messages, prompt);
     let used = used_tools(messages);
     messages.push(json!({"role": "user", "content": prompt}));
     let external_tools = a.external().map(|e| e.tools()).unwrap_or_default();
     let board_tools = host.board_tools();
-    let mut picked: Vec<&ExternalTool> = select::pick(&external_tools, &query, &used, PICK);
+    let mut picked: Vec<&ExternalTool> = select::pick(&external_tools, &query, &used, budget.pick);
     let system = json!({"role": "system", "content": format!(
         "{}\n\n<memory>\n{}\n</memory>",
         system_prompt(&settings.name, !external_tools.is_empty()),
-        a.memory.for_prompt_within(MEMORY_MAX)
+        a.memory.for_prompt_within(budget.memory_max)
     )});
-    let model = format!("groq:{}", settings.groq_model);
+    let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));
     let mut actions: Vec<Action> = Vec::new();
     for _ in 0..MAX_ROUNDS {
-        let tools = tool_list(&board_tools, &picked, !external_tools.is_empty());
+        let tools = tool_list(&board_tools, &picked, !external_tools.is_empty(), &budget);
         let mut all = vec![system.clone()];
         all.extend(messages.iter().cloned());
-        let message = chat(&client, &json!({"messages": all, "tools": tools, "tool_choice": "auto", "max_tokens": MAX_TOKENS}))?;
+        let message = chat(&client, &json!({"messages": all, "tools": tools, "tool_choice": "auto", "max_tokens": budget.max_tokens}))?;
         let calls = message["tool_calls"].as_array().cloned().unwrap_or_default();
         let text = clean(message["content"].as_str().unwrap_or_default());
         if calls.is_empty() {
@@ -230,37 +262,37 @@ pub(super) fn run(a: &Assistant, messages: &mut Vec<Value>, prompt: &str, settin
             let arguments = call.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
             let input = serde_json::from_str::<Value>(if arguments.trim().is_empty() { "{}" } else { arguments }).map_err(|e| format!("error: the arguments weren't valid JSON ({e})"));
             let text = if name == "find_tools" {
-                find_more(&external_tools, &mut picked, input.as_ref().ok().and_then(|i| i["query"].as_str()).unwrap_or_default())
+                find_more(&external_tools, &mut picked, input.as_ref().ok().and_then(|i| i["query"].as_str()).unwrap_or_default(), budget.find)
             } else {
                 let (text, ok) = a.run_one(name, input.as_ref().map_err(Clone::clone), &board_tools, &external_tools, host, &mut actions);
                 if ok { text } else { format!("error: {text}") }
             };
-            messages.push(json!({"role": "tool", "tool_call_id": id, "content": cut(&text, RESULT_MAX)}));
+            messages.push(json!({"role": "tool", "tool_call_id": id, "content": cut(&text, budget.result_max)}));
         }
     }
     Err("it took too many steps; ask again more simply".into())
 }
 
-/// `find_tools`: the best [`FIND`] tools for `query` not given yet join
+/// `find_tools`: the best `count` tools for `query` not given yet join
 /// `picked`; what the model reads back.
-fn find_more<'a>(all: &'a [ExternalTool], picked: &mut Vec<&'a ExternalTool>, query: &str) -> String {
+fn find_more<'a>(all: &'a [ExternalTool], picked: &mut Vec<&'a ExternalTool>, query: &str, count: usize) -> String {
     let given: Vec<String> = picked.iter().map(|t| t.name.clone()).collect();
     let rest: Vec<ExternalTool> = all.iter().filter(|t| !given.contains(&t.name)).cloned().collect();
-    let found: Vec<String> = select::pick(&rest, query, &[], FIND).into_iter().map(|t| t.name.clone()).collect();
+    let found: Vec<String> = select::pick(&rest, query, &[], count).into_iter().map(|t| t.name.clone()).collect();
     picked.extend(all.iter().filter(|t| found.contains(&t.name)));
     if found.is_empty() { "no other tool matches; answer with what you have".into() } else { format!("now available: {}", found.join(", ")) }
 }
 
 /// One answer in JSON for `schema`: strict structured output where the
 /// model has it, else JSON mode with the schema in the prompt.
-pub(super) fn complete_json(settings: &Settings, prompt: &str, schema: &Value) -> Result<String, String> {
-    let client = client(settings)?;
-    let (prompt, format) = if follows_schema(&settings.groq_model) {
+pub(super) fn complete_json(settings: &Settings, brain: Brain, prompt: &str, schema: &Value) -> Result<String, String> {
+    let client = client(settings, brain)?;
+    let (prompt, format) = if follows_schema(brain, settings.model_of(brain)) {
         (prompt.to_string(), json!({"type": "json_schema", "json_schema": {"name": "answer", "strict": true, "schema": schema}}))
     } else {
         (format!("{prompt}\n\nAnswer with JSON only, matching this schema:\n{schema}"), json!({"type": "json_object"}))
     };
-    let request = json!({"messages": [{"role": "user", "content": prompt}], "response_format": format, "max_tokens": JSON_MAX_TOKENS});
+    let request = json!({"messages": [{"role": "user", "content": prompt}], "response_format": format, "max_tokens": budget(brain).json_max_tokens});
     let message = client.chat(&request).map_err(|e| brain_error(&e))?;
     Ok(clean(message["content"].as_str().unwrap_or_default()))
 }
@@ -312,7 +344,7 @@ mod tests {
         assert!(!reply.actions[1].ok);
         let first = requests.recv().unwrap();
         assert_eq!(first["model"], "openai/gpt-oss-120b");
-        assert!(first["max_tokens"].as_u64().unwrap() >= u64::from(MAX_TOKENS));
+        assert!(first["max_tokens"].as_u64().unwrap() >= u64::from(TIGHT.max_tokens));
         assert_eq!(first["messages"][0]["role"], "system");
         assert!(first["messages"][1]["content"].as_str().unwrap().contains("channel: voice, language: it"));
         let names: Vec<&str> = first["tools"].as_array().unwrap().iter().filter_map(|t| t.pointer("/function/name").and_then(Value::as_str)).collect();
@@ -382,9 +414,9 @@ mod tests {
             messages.push(json!({"role": "tool", "tool_call_id": "c", "content": "x".repeat(2000)}));
             messages.push(json!({"role": "assistant", "content": "ok"}));
         }
-        trim(&mut messages);
+        trim(&mut messages, &TIGHT);
         assert_eq!(messages[0]["content"], "question 2");
-        assert_eq!(messages.iter().filter(|m| m["role"] == "user").count(), TURNS_KEPT);
+        assert_eq!(messages.iter().filter(|m| m["role"] == "user").count(), TIGHT.turns_kept);
         assert!(messages.iter().filter(|m| m["role"] == "tool").all(|m| m["content"].as_str().unwrap().chars().count() < 700));
         assert_eq!(used_tools(&messages), ["tool2", "tool3", "tool4", "tool5"]);
         assert_eq!(query_of(&messages, "now"), "question 5\nquestion 4\nnow");
@@ -395,9 +427,43 @@ mod tests {
     fn find_tools_adds_more() {
         let all = Mail.tools();
         let mut picked: Vec<&ExternalTool> = vec![&all[0]];
-        assert!(find_more(&all, &mut picked, "send a mail").contains("gmail__send"));
+        assert!(find_more(&all, &mut picked, "send a mail", 5).contains("gmail__send"));
         assert_eq!(picked.len(), 2);
-        assert!(find_more(&all, &mut picked, "weather").starts_with("no other tool"));
+        assert!(find_more(&all, &mut picked, "weather", 5).starts_with("no other tool"));
+    }
+
+    #[test]
+    fn openai_and_ollama_take_the_same_turn() {
+        let _env = crate::assistant::tests::ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (url, requests) = fake_server(vec![answer(json!({"role": "assistant", "content": "Ciao!"})), answer(json!({"role": "assistant", "content": "Eccomi."}))]);
+        // SAFETY: only these tests read these variables, under ENV.
+        unsafe {
+            std::env::set_var("OPENAI_BASE_URL", &url);
+            std::env::set_var("OPENAI_API_KEY", "test-key");
+            std::env::set_var("OLLAMA_BASE_URL", &url);
+        }
+        let a = assistant();
+        a.set_settings(Settings { provider: Some(Brain::OpenAi), ..Settings::default() }).unwrap();
+        assert!(a.is_ready());
+        let reply = a.respond("Ciao", Some("it"), Channel::Text, &NoBoard).unwrap();
+        assert_eq!(reply.model, "openai:gpt-6-luna");
+        let first = requests.recv().unwrap();
+        assert_eq!(first["model"], "gpt-6-luna");
+        assert_eq!(first["max_completion_tokens"], u64::from(ROOMY.max_tokens));
+        // Ollama needs no key, but a model the person picks.
+        a.set_settings(Settings { provider: Some(Brain::Ollama), ..Settings::default() }).unwrap();
+        assert!(!a.is_ready());
+        assert!(a.respond("Ciao", Some("it"), Channel::Text, &NoBoard).unwrap_err().contains("no Ollama model"));
+        a.set_settings(Settings { provider: Some(Brain::Ollama), ollama_model: "qwen3:8b".into(), ..Settings::default() }).unwrap();
+        assert!(a.is_ready());
+        assert_eq!(a.respond("Ciao", Some("it"), Channel::Text, &NoBoard).unwrap().model, "ollama:qwen3:8b");
+        let second = requests.recv().unwrap();
+        assert_eq!((second["model"].as_str(), second["max_tokens"].as_u64()), (Some("qwen3:8b"), Some(u64::from(TIGHT.max_tokens))));
+        unsafe {
+            std::env::remove_var("OPENAI_BASE_URL");
+            std::env::remove_var("OPENAI_API_KEY");
+            std::env::remove_var("OLLAMA_BASE_URL");
+        }
     }
 
     #[test]
@@ -405,7 +471,8 @@ mod tests {
         let minute = CloudError::RateLimited { provider: "Groq", retry_after: Some(std::time::Duration::from_secs(7)), per_day: false };
         assert_eq!(brain_error(&minute), "Groq's free limit for the minute was reached: try again in 7 s");
         assert!(brain_error(&CloudError::Status { provider: "Groq", status: 413, message: String::new() }).contains("too big"));
-        let names: Vec<&str> = models().into_iter().map(|(id, _)| id).collect();
+        assert!(brain_error(&CloudError::Network { provider: "Ollama", why: "refused".into() }).contains("running"));
+        let names: Vec<&str> = models(Brain::Groq).into_iter().map(|(id, _)| id).collect();
         assert!(names.contains(&super::super::DEFAULT_GROQ_MODEL) && names.contains(&"llama-3.3-70b-versatile"));
     }
 }

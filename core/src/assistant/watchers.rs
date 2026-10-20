@@ -35,8 +35,9 @@ use super::{Assistant, Brain, Host, Urgency, inbox::now_ms};
 const SEEN_KEEP: usize = 500;
 /// The most of a tool's output the model reads.
 const OUTPUT_MAX: usize = 60_000;
-/// On Groq: its free plan allows about 8,000 tokens a minute, prompt included.
-const OUTPUT_MAX_GROQ: usize = 12_000;
+/// On Groq (its free plan allows about 8,000 tokens a minute, prompt
+/// included) and Ollama (a model on this computer reads a short prompt best).
+const OUTPUT_MAX_TIGHT: usize = 12_000;
 /// The scheduler looks at the clock this often.
 const TICK: Duration = Duration::from_secs(20);
 
@@ -319,7 +320,7 @@ pub struct Item {
 
 /// Ask the model which items of `output` are new and worth telling.
 fn triage(assistant: &Assistant, watcher: &Watcher, output: &str, seen: &[String], baseline: bool) -> Result<Vec<Item>, String> {
-    let max = if assistant.settings().brain() == Some(Brain::Groq) { OUTPUT_MAX_GROQ } else { OUTPUT_MAX };
+    let max = if matches!(assistant.settings().brain(), Some(Brain::Groq | Brain::Ollama)) { OUTPUT_MAX_TIGHT } else { OUTPUT_MAX };
     let output: String = output.chars().take(max).collect();
     let seen = if seen.is_empty() { "(none)".to_string() } else { seen.iter().rev().take(200).cloned().collect::<Vec<_>>().join("\n") };
     let prompt = format!(

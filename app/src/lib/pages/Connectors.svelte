@@ -73,12 +73,15 @@
   }
 
   let signingIn = $state(new Set<string>());
+  let loginErrors = $state<Record<string, string>>({});
   async function signIn(id: string) {
     signingIn = new Set([...signingIn, id]);
+    loginErrors = { ...loginErrors, [id]: "" };
     try {
       await call("login_connector", { id });
-    } catch {
-      // The card shows the connector's own state and error.
+    } catch (e) {
+      // A failed sign-in doesn't always change the connector's state, so say why here.
+      loginErrors = { ...loginErrors, [id]: why(e) };
     } finally {
       signingIn = new Set([...signingIn].filter((x) => x !== id));
       await store.refreshConnectors();
@@ -106,7 +109,7 @@
   {#if store.connectors.length}
     <div class="mine">
       {#each store.connectors as c (c.id)}
-        <ConnectorCard {c} signingIn={signingIn.has(c.id)} onsignin={() => signIn(c.id)} />
+        <ConnectorCard {c} signingIn={signingIn.has(c.id)} loginError={loginErrors[c.id] ?? ""} onsignin={() => signIn(c.id)} />
       {/each}
     </div>
   {:else}

@@ -18,7 +18,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rmcp::model::{CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ClientConfig, ContentBlock, Implementation, ResourceContents, Tool};
+use rmcp::model::{ProtocolVersion, CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ClientConfig, ContentBlock, Implementation, ResourceContents, Tool};
 use rmcp::service::{ClientInitializeError, NotificationContext, RunningService, ServiceError};
 use rmcp::transport::auth::{AuthClient, AuthError, AuthorizationManager, OAuthClientConfig};
 use rmcp::transport::streamable_http_client::{AuthRequiredError, InsufficientScopeError, StreamableHttpClient, StreamableHttpClientTransportConfig};
@@ -33,6 +33,7 @@ use tokio::task::JoinHandle;
 use super::config::{ConnectorConfig, ConnectorsFile, EnvValue, ToolPolicy, TransportConfig};
 use super::login::{self, LoginParams};
 use super::store::{self, ConnectorCredentials, ConnectorStates, Keychain, SecretStore};
+use super::lenient;
 use super::{ConnectionState, ConnectorError, ConnectorEvent, ConnectorStatus, ConnectorTool, ToolInfo, ToolOutput, names};
 
 const MIN_BACKOFF: Duration = Duration::from_secs(1);
@@ -602,14 +603,14 @@ async fn connect_http(shared: &Shared, config: &ConnectorConfig, url: &str, hand
     if !had_token {
         // Never signed in: a plain client, so a server without auth never
         // touches the keychain; one that wants a sign-in answers 401.
-        let transport = StreamableHttpClientTransport::with_client(reqwest::Client::new(), transport_config);
+        let transport = StreamableHttpClientTransport::with_client(lenient::Lenient(reqwest::Client::new()), transport_config);
         return serve_http(handler, transport, false).await;
     }
     let mut manager = AuthorizationManager::new(url).await.map_err(|e| ConnectFailure::Other(e.to_string()))?;
     manager.set_credential_store(credentials);
     manager.set_state_store(ConnectorStates::new(&config.id, shared.secrets.clone()));
     authorize_from_store(shared, config, url, &mut manager).await?;
-    let transport = StreamableHttpClientTransport::with_client(AuthClient::new(reqwest::Client::new(), manager), transport_config);
+    let transport = StreamableHttpClientTransport::with_client(AuthClient::new(lenient::Lenient(reqwest::Client::new()), manager), transport_config);
     serve_http(handler, transport, true).await
 }
 
@@ -726,7 +727,8 @@ struct Handler {
 impl ClientHandler for Handler {
     fn get_info(&self) -> ClientConfig {
         let info = Implementation::new("yoru", env!("CARGO_PKG_VERSION")).with_title("Yoru");
-        ClientConfig::new(ClientCapabilities::default(), info)
+        // Pinned: the default is the newest revision, which has no `initialize`, and Google's servers answer that with "Method not supported".
+        ClientConfig::new(ClientCapabilities::default(), info).with_protocol_version(ProtocolVersion::V_2025_06_18)
     }
 
     async fn on_tool_list_changed(&self, _context: NotificationContext<RoleClient>) {

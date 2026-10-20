@@ -28,6 +28,7 @@
 
 pub mod catalog;
 pub mod config;
+mod lenient;
 mod login;
 mod manager;
 pub mod names;

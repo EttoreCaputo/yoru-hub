@@ -7,6 +7,7 @@
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
   import type { Routines, ScheduleEvent, Watcher } from "../types";
+  import ConfirmButton from "../ui/ConfirmButton.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import WatcherEditor from "../ui/WatcherEditor.svelte";
   import { ago } from "../ui/when";
@@ -46,10 +47,6 @@
       running = new Set([...running].filter((x) => x !== id));
       await store.refreshWatchers();
     }
-  }
-
-  async function remove(w: Watcher) {
-    if (confirm(t.removeConfirm(w.name))) await store.removeWatcher(w.id);
   }
 
   const toggle = (w: Watcher, enabled: boolean) => store.putWatcher({ ...w, enabled });
@@ -138,7 +135,7 @@
           <div class="row actions">
             <button class="btn small" disabled={running.has(w.id) || !store.info?.ready} onclick={() => runNow(w.id)}>{running.has(w.id) ? t.running : t.runNow}</button>
             <button class="btn quiet small" onclick={() => (editing = structuredClone($state.snapshot(w)) as Watcher)}>{t.edit}</button>
-            <button class="btn quiet small" onclick={() => remove(w)}>{t.remove}</button>
+            <ConfirmButton small label={t.remove} question={t.removeConfirm(w.name)} sure={t.removeSure} onconfirm={() => store.removeWatcher(w.id)} />
           </div>
         </li>
       {/each}

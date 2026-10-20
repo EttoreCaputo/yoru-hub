@@ -10,10 +10,11 @@
   import ServiceIcon from "./ServiceIcon.svelte";
   import Toggle from "./Toggle.svelte";
 
-  let { c, signingIn, onsignin }: { c: ConnectorStatus; signingIn: boolean; onsignin: () => void } = $props();
+  let { c, signingIn, loginError = "", onsignin }: { c: ConnectorStatus; signingIn: boolean; loginError?: string; onsignin: () => void } = $props();
   const t = $derived(i18n.t.connectors);
   let tools = $state(false);
   let error = $state("");
+  let removing = $state(false);
 
   const dot = $derived(
     { connected: "done", connecting: "think", needs_login: "wait", error: "wrong", disabled: "" }[c.state] ?? "",
@@ -30,7 +31,10 @@
     }
   }
 
-  const remove = () => confirm(t.removeConfirm(c.name)) && run("remove_connector", { id: c.id });
+  // Two clicks instead of confirm(): the webview may swallow native dialogs.
+  const remove = () => (removing ? run("remove_connector", { id: c.id }) : (removing = true));
+  // A failed sign-in can leave a half-saved registration behind even without tokens, so reset is offered whenever the service isn't plainly connected.
+  const canReset = $derived(c.transport === "http" && (c.signed_in || c.state !== "connected"));
   const policy = (tool: ToolInfo, enabled: boolean, acts: boolean) => run("set_tool_policy", { id: c.id, tool: tool.name, enabled, acts });
 </script>
 
@@ -57,9 +61,16 @@
       <button class="btn quiet small" aria-expanded={tools} onclick={() => (tools = !tools)}>{tools ? t.hideTools : `${t.showTools} · ${t.tools(c.tools.length)}`}</button>
     {/if}
     <span class="spacer"></span>
-    {#if c.signed_in}<button class="btn quiet small" onclick={() => run("logout_connector", { id: c.id })}>{t.signOut}</button>{/if}
-    <button class="btn quiet small" onclick={remove}>{t.remove}</button>
+    {#if canReset}<button class="btn quiet small" onclick={() => run("logout_connector", { id: c.id })}>{c.signed_in ? t.signOut : t.resetSignIn}</button>{/if}
+    {#if removing}
+      <span class="faint sure">{t.removeConfirm(c.name)}</span>
+      <button class="btn quiet small" onclick={() => (removing = false)}>{t.cancel}</button>
+      <button class="btn small" onclick={remove}>{t.removeSure}</button>
+    {:else}
+      <button class="btn quiet small" onclick={remove}>{t.remove}</button>
+    {/if}
   </div>
+  {#if loginError && !signingIn}<p class="error-text">{loginError}</p>{/if}
   {#if error}<p class="error-text">{error}</p>{/if}
 
   {#if tools}
@@ -118,6 +129,9 @@
   .actions {
     margin-top: 12px;
     gap: 4px;
+  }
+  .sure {
+    font-size: 12px;
   }
   .spacer {
     flex: 1;
