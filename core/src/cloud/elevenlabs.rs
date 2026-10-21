@@ -4,8 +4,8 @@
 //! A voice of it is one the person's account has, by its id
 //! (`elevenlabs:voice/<voice_id>`): one they designed or added on
 //! ElevenLabs' site, or one of ElevenLabs' own ([`voices`] lists them). It
-//! speaks with Flash v2.5, the fastest model and half a credit a character,
-//! as 16-bit PCM at 16 kHz, the board's rate. The key needs the Text to
+//! speaks with v4 Turbo, as quick as Flash and able to act out audio tags
+//! ([`crate::tts::AUDIO_TAGS`]), as 16-bit PCM at 16 kHz, the board's rate. The key needs the Text to
 //! Speech permission, and Voices with read access.
 
 use std::io::Read;
@@ -21,8 +21,9 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a voice is left alone once the month's credits are used up:
 /// Piper speaks meanwhile.
 const QUOTA_WAIT: Duration = Duration::from_secs(3600);
-/// What every voice speaks with: any voice works with any model.
-const SPEECH_MODEL: &str = "eleven_flash_v2_5";
+/// What every voice speaks with: any voice works with any model. v4 Turbo
+/// is as quick as Flash and reads audio tags ([`crate::tts::AUDIO_TAGS`]).
+const SPEECH_MODEL: &str = "eleven_v4_turbo";
 
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();

@@ -43,6 +43,7 @@ pub mod watchers;
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -283,6 +284,9 @@ pub struct Assistant {
     /// The language every reply is in (`it`, `en`), the one picked in the
     /// app; `None` follows the user's.
     language: Mutex<Option<String>>,
+    /// The voice acts out audio tags ([`crate::tts::AUDIO_TAGS`]): the
+    /// prompt teaches them ([`audio_tags_rule`]).
+    audio_tags: AtomicBool,
 }
 
 impl std::fmt::Debug for Assistant {
@@ -314,6 +318,7 @@ impl Assistant {
             listeners: Mutex::default(),
             quiet_until: Mutex::default(),
             language: Mutex::default(),
+            audio_tags: AtomicBool::new(false),
             dir,
         }
     }
@@ -395,6 +400,15 @@ impl Assistant {
         *self.language.lock().unwrap() = language.map(str::to_string);
     }
 
+    /// Whether the voice acts out audio tags, so the model may write them.
+    pub fn set_audio_tags(&self, on: bool) {
+        self.audio_tags.store(on, Ordering::Relaxed);
+    }
+
+    fn audio_tags(&self) -> bool {
+        self.audio_tags.load(Ordering::Relaxed)
+    }
+
     /// The language replies are in: the [one set](Self::set_language), else `heard`.
     fn reply_language(&self, heard: Option<&str>) -> Option<String> {
         self.language.lock().unwrap().clone().or(heard.map(str::to_string))
@@ -428,7 +442,11 @@ impl Assistant {
             }
             std::mem::take(&mut conversation.messages)
         };
-        let result = self.run(&mut messages, &with_context(text, language, channel), language, channel, &settings, &settings.effort, host, on);
+        let mut result = self.run(&mut messages, &with_context(text, language, channel), language, channel, &settings, &settings.effort, host, on);
+        // The tags are for the voice: the app and the board show the words.
+        if let Ok(reply) = &mut result {
+            reply.text = crate::tts::without_audio_tags(&reply.text);
+        }
         {
             let mut conversation = self.conversation.lock().unwrap();
             // A failed turn leaves a question without an answer: start over next time.
@@ -464,7 +482,7 @@ impl Assistant {
                 messages.push(json!({"role": "user", "content": [{"type": "text", "text": prompt}]}));
                 self.run_claude(messages, settings, effort, host, on)
             }
-            Some(brain) => compat::run(self, brain, messages, prompt, &reminder(language, channel), settings, host, on),
+            Some(brain) => compat::run(self, brain, messages, prompt, &reminder(language, channel, self.audio_tags()), settings, host, on),
             None => Err(NO_BRAIN.into()),
         }
     }
@@ -484,6 +502,10 @@ impl Assistant {
         // After the cached part: a change of language keeps the cache.
         if let Some(l) = self.reply_language(None) {
             system.as_array_mut().unwrap().push(json!({"type": "text", "text": format!("Always reply in {}.", language_name(&l))}));
+        }
+        // After it too: changing the voice keeps the cache.
+        if self.audio_tags() {
+            system.as_array_mut().unwrap().push(json!({"type": "text", "text": audio_tags_rule()}));
         }
         let mut actions = Vec::new();
         let mut model = settings.model.clone();
@@ -831,12 +853,26 @@ fn context_line(language: Option<&str>, channel: Channel) -> String {
     format!("[now: {now}, channel: {channel}{language}]")
 }
 
+/// What the model is told when its voice acts out audio tags
+/// ([`crate::tts::AUDIO_TAGS`]): the closed list, and to use them sparingly.
+pub(crate) fn audio_tags_rule() -> String {
+    let tags: Vec<String> = crate::tts::AUDIO_TAGS.iter().map(|t| format!("[{t}]")).collect();
+    format!(
+        "Your voice acts out audio tags. In a reply said aloud (channel: voice) you may put one, in square brackets, right before the words it colours: {}. \
+Only these, written exactly so: the voice would read any other aloud. At most one or two in a reply, and only when the feeling is real \
+(a joke, good news, a sigh at bad news); most replies need none. Never in notifications, memory lines, tool arguments or typed replies. \
+They are the one exception to the rule against symbols.",
+        tags.join(", ")
+    )
+}
+
 /// What a model is told again after tool results, whose language (often
 /// English) and lists it otherwise carries into the answer.
-fn reminder(language: Option<&str>, channel: Channel) -> String {
+fn reminder(language: Option<&str>, channel: Channel, audio_tags: bool) -> String {
     let language = language.map(|l| format!("in {}", language_name(l))).unwrap_or_else(|| "in the user's language".into());
+    let tags = if audio_tags { " (audio tags excepted)" } else { "" };
     match channel {
-        Channel::Voice => format!("Now answer the user {language}, in one to three plain sentences said aloud: no markdown, lists, URLs or symbols."),
+        Channel::Voice => format!("Now answer the user {language}, in one to three plain sentences said aloud: no markdown, lists, URLs or symbols{tags}."),
         Channel::Text => format!("Now answer the user {language}."),
     }
 }
@@ -1050,5 +1086,12 @@ mod tests {
         assert_eq!(text_of(&json!([{"type": "thinking", "thinking": ""}, {"type": "text", "text": "Ciao "}, {"type": "text", "text": "Ettore"}])), "Ciao Ettore");
         assert!(with_context("ciao", Some("it"), Channel::Voice).contains("channel: voice, reply in: Italian"));
         assert_eq!(schema_or_empty(&Value::Null)["type"], "object");
+    }
+
+    #[test]
+    fn audio_tags_are_taught_only_for_a_voice_that_acts_them_out() {
+        assert!(audio_tags_rule().contains("[laughs], [sighs]"));
+        assert!(reminder(Some("it"), Channel::Voice, true).contains("audio tags excepted"));
+        assert!(!reminder(Some("it"), Channel::Voice, false).contains("audio tags"));
     }
 }

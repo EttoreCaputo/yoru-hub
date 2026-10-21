@@ -15,6 +15,10 @@
 //! any reason (its limits, the month's credits, the network, the key), a
 //! downloaded voice of the language speaks instead, if there's one, and the
 //! cloud voice is left alone for a minute ([`CLOUD_RETRY`]).
+//!
+//! An ElevenLabs voice acts out [`AUDIO_TAGS`] (`[laughs]`, `[whispers]`):
+//! [`speakable`] keeps them, and every other voice, a fallback too, gets
+//! the text without them.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -45,6 +49,11 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a cloud voice that failed is left to its fallback before it's
 /// asked again (one over its limits says how long itself).
 pub const CLOUD_RETRY: Duration = Duration::from_secs(60);
+
+/// The audio tags the assistant may write when its voice acts them out
+/// ([`Tts::reads_audio_tags`]): a short list from ElevenLabs' v4 guide that
+/// suits Yoru, so a voice that can't act them out is sure to lose them all.
+pub const AUDIO_TAGS: &[&str] = &["laughs", "sighs", "exhales", "whispers", "curious", "excited", "happy", "sad", "sarcastic", "mischievously"];
 
 impl Engine {
     pub const ALL: [Engine; 1] = [Engine::Piper];
@@ -321,6 +330,12 @@ impl Tts {
         Ok(())
     }
 
+    /// Whether `language`'s voice acts out [`AUDIO_TAGS`]. Its fallback
+    /// doesn't, but it gets the text without them.
+    pub fn reads_audio_tags(&self, language: &str) -> bool {
+        self.voice_for(language).and_then(|v| self.config.clients.get(v)).is_some_and(cloud::Client::reads_audio_tags)
+    }
+
     /// Why a cloud voice is being stood in for by a downloaded one, while it is.
     pub fn cloud_trouble(&self) -> Option<String> {
         let mut failed = self.failed.lock().unwrap();
@@ -354,14 +369,19 @@ impl Tts {
         if !text.chars().any(char::is_alphanumeric) {
             return Ok(());
         }
+        let plain = without_audio_tags(text);
         let mut voice = self.voice_for(language).ok_or_else(|| TtsError::new(Engine::Piper, "no voice downloaded"))?.to_string();
         if let Some(client) = self.config.clients.get(&voice) {
             let fallback = self.config.fallbacks.get(language);
             match fallback {
                 Some(f) if self.resting(&voice) => voice = f.clone(),
                 _ => {
+                    let said = if client.reads_audio_tags() { text } else { plain.as_str() };
+                    if !said.chars().any(char::is_alphanumeric) {
+                        return Ok(());
+                    }
                     let mut heard = false;
-                    match self.speak_cloud(client, text, language, &mut |samples| {
+                    match self.speak_cloud(client, said, language, &mut |samples| {
                         heard |= !samples.is_empty();
                         out(samples);
                     }) {
@@ -382,7 +402,11 @@ impl Tts {
                 }
             }
         }
-        let wav = self.request(text, &voice)?;
+        // A sentence that was only a tag ("[laughs]") has nothing left to say.
+        if !plain.chars().any(char::is_alphanumeric) {
+            return Ok(());
+        }
+        let wav = self.request(&plain, &voice)?;
         let engine = Model::by_id(&voice).and_then(Model::engine).unwrap_or(Engine::Piper);
         let (rate, samples) = parse_wav(&wav).ok_or_else(|| TtsError::new(engine, "not a 16-bit mono WAV"))?;
         out(resample(&samples, rate, SAMPLE_RATE));
@@ -563,7 +587,8 @@ pub fn sentence_end(text: &str) -> Option<usize> {
 
 /// `text` as a voice can read it. The model is asked for plain sentences
 /// when it is heard, but Markdown, links, emoji and symbols still slip
-/// through, and a voice spells them out or stumbles on them.
+/// through, and a voice spells them out or stumbles on them. The
+/// [`AUDIO_TAGS`] stay, for the voice that acts them out.
 pub fn speakable(text: &str, language: &str) -> String {
     let mut out = String::new();
     for line in text.lines().map(|l| speakable_line(l, language)).filter(|l| !l.is_empty()) {
@@ -582,26 +607,63 @@ pub fn speakable(text: &str, language: &str) -> String {
 fn speakable_line(line: &str, language: &str) -> String {
     let line = without_urls(&link_texts(without_markers(line)));
     let mut out = String::new();
-    let mut chars = line.chars().peekable();
-    while let Some(c) = chars.next() {
+    let mut chars = line.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
         match c {
             c if c.is_alphanumeric() || c.is_whitespace() || is_mark(c) => out.push(c),
+            '[' => match audio_tag_at(&line[i..]) {
+                Some((tag, len)) => {
+                    out.push_str(&format!(" [{tag}] "));
+                    while chars.next_if(|(j, _)| *j < i + len).is_some() {}
+                }
+                None => out.push(' '),
+            },
             '\'' | '’' | '(' | ')' | '%' | '€' | '$' | '£' | '-' => out.push(c),
             '–' | '—' => out.push(','),
             '…' => out.push('.'),
             '&' => out.push_str(&format!(" {} ", word(language, "and"))),
             '°' => {
                 // "20°C" is said "20 degrees".
-                if chars.peek().is_some_and(|n| matches!(n, 'C' | 'F')) {
+                if chars.peek().is_some_and(|(_, n)| matches!(n, 'C' | 'F')) {
                     chars.next();
                 }
                 out.push_str(&format!(" {}", word(language, "degrees")));
             }
-            // * _ # ` ~ | / \ < > [ ] { } = + @ ", arrows, emoji.
+            // * _ # ` ~ | / \ < > ] { } = + @ ", arrows, emoji.
             _ => out.push(' '),
         }
     }
     tidy(&out.replace(" - ", ", "))
+}
+
+/// The [`AUDIO_TAGS`] one `text` starts with (`[Laughs]` too), and its length in bytes.
+fn audio_tag_at(text: &str) -> Option<(&'static str, usize)> {
+    let inner = text.strip_prefix('[')?;
+    let close = inner.find(']').filter(|&c| c <= 20)?;
+    let name = inner[..close].trim().to_lowercase();
+    AUDIO_TAGS.iter().find(|t| **t == name).map(|t| (*t, close + 2))
+}
+
+/// `text` without its [`AUDIO_TAGS`]: for a voice that would read them out,
+/// and for the screen.
+pub fn without_audio_tags(text: &str) -> String {
+    let line = |l: &str| {
+        let mut out = String::new();
+        let mut rest = l;
+        while let Some(open) = rest.find('[') {
+            out.push_str(&rest[..open]);
+            match audio_tag_at(&rest[open..]) {
+                Some((_, len)) => rest = &rest[open + len..],
+                None => {
+                    out.push('[');
+                    rest = &rest[open + 1..];
+                }
+            }
+        }
+        out.push_str(rest);
+        out.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    text.lines().map(line).collect::<Vec<_>>().join("\n")
 }
 
 fn is_mark(c: char) -> bool {
@@ -631,8 +693,14 @@ fn link_texts(line: &str) -> String {
     let mut out = String::new();
     let mut rest = line;
     while let Some(open) = rest.find('[') {
-        let Some(close) = rest[open..].find("](").map(|i| open + i) else { break };
-        let Some(end) = rest[close..].find(')').map(|i| close + i) else { break };
+        let Some(close) = rest[open..].find(']').map(|i| open + i) else { break };
+        // Brackets that aren't a link (an audio tag) stay as they are.
+        let end = rest[close..].strip_prefix("](").and_then(|after| after.find(')')).map(|i| close + 2 + i);
+        let Some(end) = end else {
+            out.push_str(&rest[..=close]);
+            rest = &rest[close + 1..];
+            continue;
+        };
         out.push_str(&rest[..open]);
         out.push_str(&rest[open + 1..close]);
         rest = &rest[end + 1..];
@@ -761,6 +829,12 @@ mod tests {
     }
 
     #[test]
+    fn audio_tags_come_off_for_other_voices() {
+        assert_eq!(without_audio_tags("[sighs] Va bene. [laughs]\nOk [nota]"), "Va bene.\nOk [nota]");
+        assert_eq!(without_audio_tags("[Whispers]"), "");
+    }
+
+    #[test]
     fn speakable_drops_markdown_and_symbols() {
         assert_eq!(speakable("**Fatto!** Ho messo il timer 🎉", "it"), "Fatto! Ho messo il timer");
         assert_eq!(speakable("## Oggi\n- riunione alle 14:30\n- palestra & spesa", "it"), "Oggi. riunione alle 14:30. palestra e spesa");
@@ -768,5 +842,7 @@ mod tests {
         assert_eq!(speakable("1. `email` → Marco / Luca", "en"), "email Marco Luca");
         assert_eq!(speakable("It's 3.5 degrees — warmer... Done", "en"), "It's 3.5 degrees, warmer... Done");
         assert_eq!(speakable("L'espresso costa 1,20 €", "it"), "L'espresso costa 1,20 €");
+        assert_eq!(speakable("[sighs] Leggi [il meteo](https://meteo.it)", "it"), "[sighs] Leggi il meteo");
+        assert_eq!(speakable("[Laughs] Davvero? [whispers] Non lo dico a nessuno [nota]", "it"), "[laughs] Davvero? [whispers] Non lo dico a nessuno nota");
     }
 }

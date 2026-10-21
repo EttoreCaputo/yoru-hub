@@ -299,8 +299,9 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     let mut loaded: Vec<&ExternalTool> = used.iter().filter_map(|n| findable.iter().find(|t| &t.name == n)).collect();
     loaded.drain(..loaded.len().saturating_sub(budget.loaded));
     let language = a.reply_language(None).map(|l| format!("\n\nAlways reply in {}.", super::language_name(&l))).unwrap_or_default();
+    let tags = if a.audio_tags() { format!("\n\n{}", super::audio_tags_rule()) } else { String::new() };
     let system = json!({"role": "system", "content": format!(
-        "{}\n\n<memory>\n{}\n</memory>{language}",
+        "{}\n\n<memory>\n{}\n</memory>{language}{tags}",
         system_prompt(&settings.name, &services_line(&findable), searches_web(&external_tools)),
         a.memory.for_prompt_within(budget.memory_max)
     )});

@@ -639,10 +639,12 @@ impl Aloud {
     }
 
     fn push(&mut self, sentence: String, language: String) {
-        if !self.text.is_empty() {
+        // The audio tags go to the voice, not to what was said.
+        let plain = tts::without_audio_tags(&sentence);
+        if !self.text.is_empty() && !plain.is_empty() {
             self.text.push(' ');
         }
-        self.text.push_str(&sentence);
+        self.text.push_str(&plain);
         self.fresh = true;
         let _ = self.said.send(Said::Sentence(sentence, language));
     }
@@ -906,10 +908,11 @@ impl Speaker {
                     };
                     let mut gone = false;
                     let audio = tts.synthesize_into(&sentence, &language, &mut |samples| gone |= tx.send(Ok(samples)).is_err());
-                    if !text.is_empty() {
+                    let plain = tts::without_audio_tags(&sentence);
+                    if !text.is_empty() && !plain.is_empty() {
                         text.push(' ');
                     }
-                    text.push_str(&sentence);
+                    text.push_str(&plain);
                     // The board stopped playing it: say no more.
                     if gone {
                         return (text, false);

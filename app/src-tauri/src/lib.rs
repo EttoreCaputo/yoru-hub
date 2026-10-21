@@ -493,6 +493,8 @@ fn apply_language(state: &AppState) {
     let language = app_language(state);
     state.assistant.set_language(Some(&language));
     let mut voice = state.voice.lock().unwrap();
+    // Only a voice that acts them out gets the audio tags taught.
+    state.assistant.set_audio_tags(voice.tts.as_ref().is_some_and(|t| t.reads_audio_tags(&language)));
     if let Some(agent) = &voice.agent {
         agent.set_language(Some(&language));
     }

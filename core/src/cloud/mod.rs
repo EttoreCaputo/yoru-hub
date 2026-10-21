@@ -173,7 +173,7 @@ pub const ELEVENLABS: Provider = Provider {
 const ACCOUNT_VOICE: CloudModel = CloudModel {
     id: "voice",
     kind: Kind::Voice,
-    model: "eleven_flash_v2_5",
+    model: "eleven_v4_turbo",
     voice: Some("voice"),
     language: None,
     note: "A voice of your ElevenLabs account",
@@ -556,6 +556,11 @@ impl Client {
 
     /// Whether [`Client::speak_stream`] works: the voice sends its sound as it makes it.
     pub fn streams_speech(&self) -> bool {
+        self.model.provider.api == Api::ElevenLabs
+    }
+
+    /// Whether the voice acts out [`crate::tts::AUDIO_TAGS`] rather than reading them.
+    pub fn reads_audio_tags(&self) -> bool {
         self.model.provider.api == Api::ElevenLabs
     }
 
