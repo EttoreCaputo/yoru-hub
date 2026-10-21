@@ -4,15 +4,20 @@
 //! ([`Brain::Ollama`]: a model on this computer).
 //!
 //! What differs from Claude, and why:
-//! - **No tool search, few tools.** A request carries Yoru's own tools and
-//!   only the connector tools that match it ([`select`]); `find_tools` lets
-//!   the model ask for more mid-turn. How many, and how much of the memory,
-//!   the history and the tools' results, is the brain's [`Budget`]: Groq's
-//!   free plan allows about 8,000 tokens a minute, reserved answer
-//!   included, and a model on this computer reads a short prompt best.
-//! - **No web search.** OpenAI searches only through its Responses API, and
-//!   Groq's models that search (compound) aren't used: the model is told it
-//!   can't.
+//! - **No tool search: the model finds and loads the tools.** A turn starts
+//!   with Yoru's own tools, the board's essentials (`react`, `get_state`),
+//!   and the tools the conversation already used; the prompt only names the
+//!   connected services and the board. The model searches their tools with `find_tools` (names and a
+//!   line each, [`select`]) and loads the ones it wants with `load_tools`;
+//!   the board's settings (volume, brightness, the menu…) are found the same way.
+//!   So many services cost a line each, not every schema on every request.
+//!   How many tools stay loaded, and how much of the memory, the history and
+//!   the tools' results, is the brain's [`Budget`]: Groq's free plan allows
+//!   about 8,000 tokens a minute, reserved answer included, and a model on
+//!   this computer reads a short prompt best.
+//! - **Web search only through Tavily.** OpenAI searches only through its
+//!   Responses API, and Groq's models that search (compound) aren't used:
+//!   without the Tavily connector the model is told it can't.
 //! - **Limits are said plainly.** A 429 on Groq becomes "the free limit for
 //!   the day (or the minute) was reached, try again in…" ([`brain_error`]);
 //!   the model isn't asked again until then ([`cloud::Client::limit`]).
@@ -21,7 +26,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use super::{Action, Assistant, Brain, ExternalTool, Host, MAX_ROUNDS, Reply, Settings, own_tools, schema_or_empty, select, tool_json};
+use super::{Action, Assistant, BOARD_ESSENTIALS, Brain, ExternalTool, Host, MAX_ROUNDS, Reply, Settings, board_extras, own_tools, schema_or_empty, select, tool_json};
 use crate::cloud::{self, CloudError, Client};
 use crate::models::Kind;
 use crate::timers::Timers;
@@ -34,10 +39,10 @@ pub struct Budget {
     pub max_tokens: u32,
     /// The same, for a triage's answer: a list of items.
     pub json_max_tokens: u32,
-    /// Connector tools picked for a request.
-    pub pick: usize,
-    /// More, when the model asks with `find_tools`.
-    pub find: usize,
+    /// Connector tools loaded at once; loading more lets the oldest go.
+    pub loaded: usize,
+    /// Tools a `find_tools` answer lists.
+    pub found: usize,
     /// The memory it reads, in characters.
     pub memory_max: usize,
     /// A tool's result, in characters: a mailbox's search can be 60 KB.
@@ -51,9 +56,9 @@ pub struct Budget {
 }
 
 /// Groq's free plan and a model on this computer: every token counts.
-const TIGHT: Budget = Budget { max_tokens: 1024, json_max_tokens: 2048, pick: 6, find: 4, memory_max: 3000, result_max: 6000, old_result_max: 600, description_max: 300, turns_kept: 4 };
+const TIGHT: Budget = Budget { max_tokens: 1024, json_max_tokens: 2048, loaded: 6, found: 8, memory_max: 3000, result_max: 6000, old_result_max: 600, description_max: 300, turns_kept: 4 };
 /// OpenAI: paid by the token, with a long context.
-const ROOMY: Budget = Budget { max_tokens: 4096, json_max_tokens: 4096, pick: 16, find: 8, memory_max: 12_000, result_max: 30_000, old_result_max: 2000, description_max: 1000, turns_kept: 10 };
+const ROOMY: Budget = Budget { max_tokens: 4096, json_max_tokens: 4096, loaded: 16, found: 12, memory_max: 12_000, result_max: 30_000, old_result_max: 2000, description_max: 1000, turns_kept: 10 };
 
 pub fn budget(brain: Brain) -> Budget {
     if brain == Brain::OpenAi { ROOMY } else { TIGHT }
@@ -105,15 +110,23 @@ pub fn brain_error(e: &CloudError) -> String {
 
 /// Who Yoru is, in fewer words than Claude's prompt: on Groq every token
 /// counts against the free plan's minute.
-fn system_prompt(name: &str, services: bool) -> String {
-    let services = if services {
-        "The tools of the user's services (mail, calendar, documents, tasks…) relevant to the request are given; if one you need is missing, call find_tools."
+fn system_prompt(name: &str, services: &str, web: bool) -> String {
+    let services = if services.is_empty() {
+        "No services are connected yet.".to_string()
     } else {
-        "No services are connected yet."
+        format!(
+            "Beyond your own tools you can reach: {services}. Their tools aren't loaded until you need them: find them with find_tools, \
+then load the ones you'll call with load_tools; the ones already loaded are in your tools."
+        )
+    };
+    let web = if web {
+        "You can search the web, news included, with Tavily's search: find and load it like the other tools."
+    } else {
+        "You can't search the web: if a question needs it, say so."
     };
     format!(
         "You are {name}, the user's personal assistant. Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker. \
-{services} You can't search the web: if a question needs it, say so.
+{services} {web}
 - Use the tools instead of guessing; never invent facts about the user's data.
 - Tools that change something ask the user first; if they say no, accept it.
 - Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
@@ -123,12 +136,41 @@ fn system_prompt(name: &str, services: bool) -> String {
     )
 }
 
-/// `find_tools`: more of the connectors' tools, when the ones given don't do.
+/// Whether a connected service searches the web: Tavily's search is the one
+/// these brains have, since they get no server tool for it.
+fn searches_web(tools: &[ExternalTool]) -> bool {
+    tools.iter().any(|t| t.name == "tavily__tavily_search")
+}
+
+/// The connected services for the prompt, with how many tools each has:
+/// "Gmail (12 tools), Tavily (4 tools)".
+fn services_line(tools: &[ExternalTool]) -> String {
+    let mut services: Vec<(&str, usize)> = Vec::new();
+    for t in tools {
+        match services.iter_mut().find(|(s, _)| *s == t.service) {
+            Some((_, n)) => *n += 1,
+            None => services.push((&t.service, 1)),
+        }
+    }
+    services.iter().map(|(s, n)| format!("{s} ({n} tool{})", if *n == 1 { "" } else { "s" })).collect::<Vec<_>>().join(", ")
+}
+
+/// `find_tools`: what the services' tools do, without loading any.
 fn find_tools_tool() -> Value {
     json!({
         "name": "find_tools",
-        "description": "Find more tools of the user's services by what they do (e.g. \"reply to a mail\", \"calendar events\"); they become available next.",
+        "description": "Search the tools of the user's services and of your board by what they do (e.g. \"unread mail\", \"events tomorrow\", \
+\"web search\", \"volume\"). Answers each tool's name and what it does; load the ones you need with load_tools.",
         "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+    })
+}
+
+/// `load_tools`: the tools `find_tools` named, callable from the next step.
+fn load_tools_tool(budget: &Budget) -> Value {
+    json!({
+        "name": "load_tools",
+        "description": format!("Load tools named by find_tools so you can call them; at most {} stay loaded, the oldest go first.", budget.loaded),
+        "input_schema": {"type": "object", "properties": {"names": {"type": "array", "items": {"type": "string"}}}, "required": ["names"]},
     })
 }
 
@@ -150,16 +192,18 @@ fn external_json(t: &ExternalTool) -> Value {
     json!({"name": t.name, "description": description, "input_schema": t.input_schema})
 }
 
-/// What the model may call: Yoru's tools, the timers, the board's and the
-/// connector tools picked.
-fn tool_list(board: &[crate::link::Tool], picked: &[&ExternalTool], more: bool, budget: &Budget) -> Vec<Value> {
+/// What the model may call: Yoru's tools, the timers, the board's
+/// essentials, the two that reach the other tools when there are any, and
+/// those loaded.
+fn tool_list(board: &[crate::link::Tool], loaded: &[&ExternalTool], findable: bool, budget: &Budget) -> Vec<Value> {
     let mut tools = own_tools();
     tools.extend(Timers::tools().iter().map(tool_json));
-    tools.extend(board.iter().map(tool_json));
-    if more {
+    tools.extend(board.iter().filter(|t| BOARD_ESSENTIALS.contains(&t.name.as_str())).map(tool_json));
+    if findable {
         tools.push(find_tools_tool());
+        tools.push(load_tools_tool(budget));
     }
-    tools.extend(picked.iter().map(|t| external_json(t)));
+    tools.extend(loaded.iter().map(|t| external_json(t)));
     tools.iter().map(|t| function(t, budget.description_max)).collect()
 }
 
@@ -182,14 +226,6 @@ fn cut(text: &str, max: usize) -> String {
         return text.to_string();
     }
     format!("{}\n[… cut]", text.chars().take(max).collect::<String>())
-}
-
-/// What picks the connector tools: this request and the user's turns before it.
-fn query_of(messages: &[Value], prompt: &str) -> String {
-    let earlier: Vec<&str> = messages.iter().filter(|m| m["role"] == "user").filter_map(|m| m["content"].as_str()).collect();
-    let mut query: Vec<&str> = earlier.into_iter().rev().take(2).collect();
-    query.push(prompt);
-    query.join("\n")
 }
 
 /// The tools the conversation called already.
@@ -230,21 +266,24 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     let budget = budget(brain);
     let started = Instant::now();
     trim(messages, &budget);
-    let query = query_of(messages, prompt);
     let used = used_tools(messages);
     messages.push(json!({"role": "user", "content": prompt}));
     let external_tools = a.external().map(|e| e.tools()).unwrap_or_default();
     let board_tools = host.board_tools();
-    let mut picked: Vec<&ExternalTool> = select::pick(&external_tools, &query, &used, budget.pick);
+    // What find_tools searches: the services' tools and the board's beyond its essentials.
+    let findable: Vec<ExternalTool> = external_tools.iter().cloned().chain(board_extras(&board_tools)).collect();
+    // A follow-up ("and reply to it") still has the tools the conversation used.
+    let mut loaded: Vec<&ExternalTool> = used.iter().filter_map(|n| findable.iter().find(|t| &t.name == n)).collect();
+    loaded.drain(..loaded.len().saturating_sub(budget.loaded));
     let system = json!({"role": "system", "content": format!(
         "{}\n\n<memory>\n{}\n</memory>",
-        system_prompt(&settings.name, !external_tools.is_empty()),
+        system_prompt(&settings.name, &services_line(&findable), searches_web(&external_tools)),
         a.memory.for_prompt_within(budget.memory_max)
     )});
     let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));
     let mut actions: Vec<Action> = Vec::new();
     for _ in 0..MAX_ROUNDS {
-        let tools = tool_list(&board_tools, &picked, !external_tools.is_empty(), &budget);
+        let tools = tool_list(&board_tools, &loaded, !findable.is_empty(), &budget);
         let mut all = vec![system.clone()];
         all.extend(messages.iter().cloned());
         let message = chat(&client, &json!({"messages": all, "tools": tools, "tool_choice": "auto", "max_tokens": budget.max_tokens}))?;
@@ -261,11 +300,16 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
             let name = call.pointer("/function/name").and_then(Value::as_str).unwrap_or_default();
             let arguments = call.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
             let input = serde_json::from_str::<Value>(if arguments.trim().is_empty() { "{}" } else { arguments }).map_err(|e| format!("error: the arguments weren't valid JSON ({e})"));
-            let text = if name == "find_tools" {
-                find_more(&external_tools, &mut picked, input.as_ref().ok().and_then(|i| i["query"].as_str()).unwrap_or_default(), budget.find)
-            } else {
-                let (text, ok) = a.run_one(name, input.as_ref().map_err(Clone::clone), &board_tools, &external_tools, host, &mut actions);
-                if ok { text } else { format!("error: {text}") }
+            let text = match name {
+                "find_tools" => found(&findable, &loaded, input.as_ref().ok().and_then(|i| i["query"].as_str()).unwrap_or_default(), budget.found),
+                "load_tools" => {
+                    let names: Vec<&str> = input.as_ref().ok().and_then(|i| i["names"].as_array()).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+                    load(&findable, &mut loaded, &names, budget.loaded)
+                }
+                _ => {
+                    let (text, ok) = a.run_one(name, input.as_ref().map_err(Clone::clone), &board_tools, &external_tools, host, &mut actions);
+                    if ok { text } else { format!("error: {text}") }
+                }
             };
             messages.push(json!({"role": "tool", "tool_call_id": id, "content": cut(&text, budget.result_max)}));
         }
@@ -273,14 +317,57 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     Err("it took too many steps; ask again more simply".into())
 }
 
-/// `find_tools`: the best `count` tools for `query` not given yet join
-/// `picked`; what the model reads back.
-fn find_more<'a>(all: &'a [ExternalTool], picked: &mut Vec<&'a ExternalTool>, query: &str, count: usize) -> String {
-    let given: Vec<String> = picked.iter().map(|t| t.name.clone()).collect();
-    let rest: Vec<ExternalTool> = all.iter().filter(|t| !given.contains(&t.name)).cloned().collect();
-    let found: Vec<String> = select::pick(&rest, query, &[], count).into_iter().map(|t| t.name.clone()).collect();
-    picked.extend(all.iter().filter(|t| found.contains(&t.name)));
-    if found.is_empty() { "no other tool matches; answer with what you have".into() } else { format!("now available: {}", found.join(", ")) }
+/// A found tool's line: its name and the start of what it does.
+const FOUND_LINE_MAX: usize = 140;
+
+/// `find_tools`: the best `count` tools for `query` that aren't loaded, a
+/// line each. A query that names none ("anything new?") gets the tools that
+/// read, a few per service.
+fn found(all: &[ExternalTool], loaded: &[&ExternalTool], query: &str, count: usize) -> String {
+    let rest: Vec<ExternalTool> = all.iter().filter(|t| !loaded.iter().any(|l| l.name == t.name)).cloned().collect();
+    let mut hits = select::find(&rest, query, count);
+    let head = if hits.is_empty() {
+        hits = select::readers(&rest, count);
+        if hits.is_empty() {
+            return "no other tool; answer with what you have".into();
+        }
+        "Nothing matches; these read:"
+    } else {
+        "Found:"
+    };
+    let lines: Vec<String> = hits
+        .iter()
+        .map(|t| {
+            let what: String = t.description.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(FOUND_LINE_MAX).collect();
+            format!("- {}: {what}{}", t.name, if t.acts { " (asks the user first)" } else { "" })
+        })
+        .collect();
+    format!("{head}\n{}\nLoad the ones you need with load_tools.", lines.join("\n"))
+}
+
+/// `load_tools`: `names` join `loaded`, the oldest leaving past `max`.
+fn load<'a>(all: &'a [ExternalTool], loaded: &mut Vec<&'a ExternalTool>, names: &[&str], max: usize) -> String {
+    let mut added = Vec::new();
+    let mut unknown = Vec::new();
+    for name in names.iter().take(max) {
+        match all.iter().find(|t| t.name == *name) {
+            Some(t) if !loaded.iter().any(|l| l.name == t.name) => {
+                loaded.push(t);
+                added.push(*name);
+            }
+            Some(_) => {}
+            None => unknown.push(*name),
+        }
+    }
+    let gone: Vec<String> = loaded.drain(..loaded.len().saturating_sub(max)).map(|t| t.name.clone()).collect();
+    let mut text = if added.is_empty() { "nothing new loaded".to_string() } else { format!("loaded: {}", added.join(", ")) };
+    if !gone.is_empty() {
+        text.push_str(&format!("; unloaded to make room: {}", gone.join(", ")));
+    }
+    if !unknown.is_empty() {
+        text.push_str(&format!("; no tool named {} (use the names find_tools gives)", unknown.join(", ")));
+    }
+    text
 }
 
 /// One answer in JSON for `schema`: strict structured output where the
@@ -348,8 +435,10 @@ mod tests {
         assert_eq!(first["messages"][0]["role"], "system");
         assert!(first["messages"][1]["content"].as_str().unwrap().contains("channel: voice, language: it"));
         let names: Vec<&str> = first["tools"].as_array().unwrap().iter().filter_map(|t| t.pointer("/function/name").and_then(Value::as_str)).collect();
-        assert!(names.contains(&"notify") && names.contains(&"gmail__send") && names.contains(&"find_tools"));
-        assert!(!names.contains(&"web_search"));
+        // The services are named; none of their tools is loaded yet.
+        assert!(names.contains(&"notify") && names.contains(&"find_tools") && names.contains(&"load_tools"));
+        assert!(!names.contains(&"gmail__send") && !names.contains(&"web_search"));
+        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach: Gmail (2 tools)."));
         // The second carries the calls back without the reasoning, then the results.
         let second = requests.recv().unwrap();
         let back = &second["messages"][2];
@@ -419,17 +508,94 @@ mod tests {
         assert_eq!(messages.iter().filter(|m| m["role"] == "user").count(), TIGHT.turns_kept);
         assert!(messages.iter().filter(|m| m["role"] == "tool").all(|m| m["content"].as_str().unwrap().chars().count() < 700));
         assert_eq!(used_tools(&messages), ["tool2", "tool3", "tool4", "tool5"]);
-        assert_eq!(query_of(&messages, "now"), "question 5\nquestion 4\nnow");
         assert_eq!(clean("<think>hmm</think> Ciao"), "Ciao");
     }
 
     #[test]
-    fn find_tools_adds_more() {
+    fn the_model_finds_then_loads_a_tool() {
+        let _env = crate::assistant::tests::ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let call = |id: &str, name: &str, arguments: &str| answer(json!({"role": "assistant", "content": null, "tool_calls": [
+            {"id": id, "type": "function", "function": {"name": name, "arguments": arguments}},
+        ]}));
+        let (url, requests) = fake_server(vec![
+            call("c1", "find_tools", r#"{"query": "search mail"}"#),
+            call("c2", "load_tools", r#"{"names": ["gmail__search", "gmail__nope"]}"#),
+            call("c3", "gmail__search", "{}"),
+            answer(json!({"role": "assistant", "content": "Nessuna mail nuova."})),
+        ]);
+        point_groq_at(&url);
+        let a = assistant();
+        a.set_settings(Settings { groq_model: "openai/gpt-oss-20b".into(), ..groq_settings() }).unwrap();
+        a.set_external(Some(Arc::new(Mail)));
+        assert_eq!(a.respond("Ho mail nuove?", Some("it"), Channel::Text, &NoBoard).unwrap().text, "Nessuna mail nuova.");
+        let names = |r: &Value| -> Vec<String> { r["tools"].as_array().unwrap().iter().filter_map(|t| t.pointer("/function/name").and_then(Value::as_str)).map(String::from).collect() };
+        let first = requests.recv().unwrap();
+        assert!(!names(&first).iter().any(|n| n.starts_with("gmail__")));
+        let second = requests.recv().unwrap();
+        let listed = second["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+        assert!(listed.contains("- gmail__search: Search mail") && listed.contains("load_tools"), "{listed}");
+        assert!(!names(&second).iter().any(|n| n.starts_with("gmail__")));
+        let third = requests.recv().unwrap();
+        let loaded = third["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+        assert!(loaded.starts_with("loaded: gmail__search") && loaded.contains("no tool named gmail__nope"), "{loaded}");
+        assert!(names(&third).contains(&"gmail__search".to_string()) && !names(&third).contains(&"gmail__send".to_string()));
+    }
+
+    /// A board with its essentials and one setting, that says what it ran.
+    struct Board;
+    impl Host for Board {
+        fn board_tools(&self) -> Vec<crate::link::Tool> {
+            ["react", "get_state", "set_volume"]
+                .into_iter()
+                .map(|name| crate::link::Tool { name: name.into(), description: format!("{name}: the speaker volume"), input_schema: json!({"type": "object"}) })
+                .collect()
+        }
+        fn call_board(&self, name: &str, _: &Value) -> Result<String, String> {
+            Ok(format!("board ran {name}"))
+        }
+        fn confirm(&self, _: &str, _: &str, _: &str) -> Option<bool> {
+            Some(false)
+        }
+    }
+
+    #[test]
+    fn the_boards_settings_are_found_like_a_service() {
+        let _env = crate::assistant::tests::ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let call = |id: &str, name: &str, arguments: &str| answer(json!({"role": "assistant", "content": null, "tool_calls": [
+            {"id": id, "type": "function", "function": {"name": name, "arguments": arguments}},
+        ]}));
+        let (url, requests) = fake_server(vec![
+            call("c1", "load_tools", r#"{"names": ["set_volume"]}"#),
+            call("c2", "set_volume", r#"{"percent": 30}"#),
+            answer(json!({"role": "assistant", "content": "Fatto."})),
+        ]);
+        point_groq_at(&url);
+        let a = assistant();
+        a.set_settings(Settings { groq_model: "openai/gpt-oss-20b".into(), ..groq_settings() }).unwrap();
+        let reply = a.respond("Abbassa il volume", Some("it"), Channel::Text, &Board).unwrap();
+        // Finding and loading aren't actions: the volume is the only one.
+        assert_eq!(reply.actions.len(), 1);
+        assert_eq!(reply.actions[0].summary, "board ran set_volume");
+        let names = |r: &Value| -> Vec<String> { r["tools"].as_array().unwrap().iter().filter_map(|t| t.pointer("/function/name").and_then(Value::as_str)).map(String::from).collect() };
+        let first = requests.recv().unwrap();
+        assert!(names(&first).contains(&"react".to_string()) && names(&first).contains(&"get_state".to_string()));
+        assert!(!names(&first).contains(&"set_volume".to_string()) && names(&first).contains(&"find_tools".to_string()));
+        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach: Yoru's board (1 tool)."));
+        assert!(names(&requests.recv().unwrap()).contains(&"set_volume".to_string()));
+    }
+
+    #[test]
+    fn loading_past_the_budget_lets_the_oldest_go() {
         let all = Mail.tools();
-        let mut picked: Vec<&ExternalTool> = vec![&all[0]];
-        assert!(find_more(&all, &mut picked, "send a mail", 5).contains("gmail__send"));
-        assert_eq!(picked.len(), 2);
-        assert!(find_more(&all, &mut picked, "weather", 5).starts_with("no other tool"));
+        let mut loaded: Vec<&ExternalTool> = vec![&all[0]];
+        let text = load(&all, &mut loaded, &["gmail__send"], 1);
+        assert_eq!(text, "loaded: gmail__send; unloaded to make room: gmail__search");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(load(&all, &mut loaded, &["gmail__send"], 1), "nothing new loaded");
+        // What's loaded isn't found again; a query that names nothing gets the readers.
+        assert!(found(&all, &loaded, "send", 5).starts_with("Nothing matches; these read:\n- gmail__search"));
+        assert!(found(&all, &[&all[0], &all[1]], "mail", 5).starts_with("no other tool"));
+        assert_eq!(services_line(&all), "Gmail (2 tools)");
     }
 
     #[test]

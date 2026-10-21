@@ -19,9 +19,11 @@
 //! [`Host::confirm`].
 //!
 //! On OpenAI, Groq and Ollama ([`compat`]) the turn is OpenAI's function
-//! calling instead, with no web search, and only the connector tools that
-//! match the request ([`select`]): Groq's free plan allows a few thousand
-//! tokens a minute, and a model on this computer reads a short prompt best.
+//! calling instead, with web search only through the Tavily connector, and
+//! no connector tool loaded at first: the model finds them with `find_tools`
+//! ([`select`]) and loads the ones it needs with `load_tools`. Groq's free
+//! plan allows a few thousand tokens a minute, and a model on this computer
+//! reads a short prompt best.
 //!
 //! The conversation is kept in memory in the form of the brain that made it
 //! (Anthropic's content blocks, or OpenAI's messages); changing the brain
@@ -484,14 +486,15 @@ impl Assistant {
     fn tool_list(&self, settings: &Settings, board: &[Tool], external: &[ExternalTool]) -> Vec<Value> {
         let mut tools: Vec<Value> = own_tools();
         tools.extend(Timers::tools().iter().map(tool_json));
-        tools.extend(board.iter().map(tool_json));
+        tools.extend(board.iter().filter(|t| BOARD_ESSENTIALS.contains(&t.name.as_str())).map(tool_json));
         if settings.web_search {
             tools.push(json!({"type": "web_search_20260209", "name": "web_search", "max_uses": 5}));
         }
-        if !external.is_empty() {
-            // The services' tools load only when a request needs them.
+        let deferred: Vec<ExternalTool> = external.iter().cloned().chain(board_extras(board)).collect();
+        if !deferred.is_empty() {
+            // The services' tools and the board's settings load only when a request needs them.
             tools.push(json!({"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}));
-            for t in external {
+            for t in &deferred {
                 let mut description = format!("[{}] {}", t.service, t.description);
                 if t.acts {
                     description.push_str(" (Changes something: the user is asked to allow it first.)");
@@ -656,7 +659,8 @@ fn system_prompt(name: &str) -> String {
         "You are {name}, the user's personal assistant. You live on their computer, and your body is a small round screen on their desk \
 where you appear as a matte sphere with two eyes and two floating hands, with a microphone and a speaker. \
 You are connected to the user's services (mail, calendar, documents, tasks and whatever else they connected): \
-find their tools with tool search when a request needs them.
+find their tools with tool search when a request needs them. \
+Your board's settings (brightness, volume, wake word, its menu, the other settings) are found the same way.
 
 # What you do
 - Answer questions, find things in the user's services and on the web, keep timers and reminders, and tell the user what is worth knowing.
@@ -722,6 +726,24 @@ tell (what they want to be told about), quiet (what they don't want to hear abou
             "input_schema": {"type": "object", "properties": {}},
         }),
     ]
+}
+
+/// The board's tools every turn gets: a reaction and a look at its state.
+/// The rest (brightness, volume, the menu, the settings…) are rarely needed,
+/// so they are found like a service's tools ([`board_extras`]).
+const BOARD_ESSENTIALS: &[&str] = &["react", "get_state"];
+/// The service the board's other tools are found under.
+const BOARD_SERVICE: &str = "Yoru's board";
+
+/// The board's tools beyond [`BOARD_ESSENTIALS`], shaped as a service's so
+/// tool search, `find_tools` and `load_tools` reach them. They still run on
+/// the board ([`Assistant::call_tool`] looks there first) and never ask.
+fn board_extras(board: &[Tool]) -> Vec<ExternalTool> {
+    board
+        .iter()
+        .filter(|t| !BOARD_ESSENTIALS.contains(&t.name.as_str()))
+        .map(|t| ExternalTool { name: t.name.clone(), service: BOARD_SERVICE.into(), description: t.description.clone(), input_schema: t.input_schema.clone(), acts: false })
+        .collect()
 }
 
 fn tool_json(t: &Tool) -> Value {
@@ -853,6 +875,22 @@ mod tests {
         assert!(send["description"].as_str().unwrap().contains("asked to allow"));
         let plain = a.tool_list(&Settings { web_search: false, ..Settings::default() }, &[], &[]);
         assert!(!plain.iter().any(|t| t["name"] == "tool_search_tool_bm25" || t["name"] == "web_search"));
+    }
+
+    #[test]
+    fn only_the_boards_essentials_are_always_there() {
+        let a = assistant();
+        let tool = |name: &str| Tool { name: name.into(), description: format!("{name} on the board"), input_schema: json!({"type": "object"}) };
+        let board = vec![tool("react"), tool("get_state"), tool("set_volume"), tool("show_menu")];
+        let list = a.tool_list(&Settings { web_search: false, ..Settings::default() }, &board, &[]);
+        let loaded: Vec<&str> = list.iter().filter(|t| t.get("defer_loading").is_none()).filter_map(|t| t["name"].as_str()).collect();
+        assert!(loaded.contains(&"react") && loaded.contains(&"get_state") && loaded.contains(&"tool_search_tool_bm25"));
+        let volume = list.iter().find(|t| t["name"] == "set_volume").unwrap();
+        assert_eq!(volume["defer_loading"], true);
+        assert!(volume["description"].as_str().unwrap().starts_with("[Yoru's board]"));
+        let extras = board_extras(&board);
+        assert_eq!(extras.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["set_volume", "show_menu"]);
+        assert!(extras.iter().all(|t| !t.acts));
     }
 
     /// A fake Messages API: answers each request with the next of `replies`,

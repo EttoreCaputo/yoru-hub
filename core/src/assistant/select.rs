@@ -1,16 +1,17 @@
-//! Which connector tools a brain without tool search gets for a request.
+//! How a brain without tool search finds the connectors' tools.
 //!
-//! Claude loads the connectors' tools itself, through tool search. Groq has
-//! nothing like it, and its free plan allows about 8,000 tokens a minute:
-//! every tool's description and schema would not fit. So the request picks
-//! them here: a BM25 score of each tool's service, name and description
-//! against what the user said (and the turns just before), and the best few
-//! go. The tools a conversation already used stay, so a follow-up ("and
-//! reply to it") still finds them.
+//! Claude loads the connectors' tools itself, through tool search. The
+//! other brains start a turn with none of them: with many services
+//! connected, every tool's description and schema would make each request
+//! huge (Groq's free plan allows about 8,000 tokens a minute). The model
+//! asks with `find_tools`, which ranks the tools here, a BM25 score of each
+//! one's service, name and description against its query, and then loads
+//! the ones it wants with `load_tools`.
 //!
 //! The user often speaks Italian and the tools describe themselves in
-//! English: a few common words are mapped to English, and a word matches
-//! another that starts with it ("calendar", "calendario").
+//! English, and the model may search in the user's words: a few common
+//! words are mapped to English, and a word matches another that starts with
+//! it ("calendar", "calendario").
 
 use std::collections::{HashMap, HashSet};
 
@@ -85,6 +86,16 @@ const WORDS: &[(&str, &str)] = &[
     ("assegnato", "assigned assignee"),
     ("assegnati", "assigned assignee"),
     ("file", "file document"),
+    ("notizie", "news search"),
+    ("notizia", "news search"),
+    ("finanza", "finance"),
+    ("borsa", "finance stock market"),
+    ("mercati", "finance market"),
+    ("luminosità", "brightness"),
+    ("luminoso", "brightness"),
+    ("impostazioni", "settings setting"),
+    ("impostazione", "setting settings"),
+    ("parola", "word"),
 ];
 
 /// The words of `text`, lowercased, without the ones that say nothing.
@@ -167,24 +178,17 @@ pub fn scores(tools: &[ExternalTool], query: &str) -> Vec<f64> {
         .collect()
 }
 
-/// The tools for a request: those `used` already, then the best `keep` of
-/// the rest for `query`. When nothing matches (a "what's new?"), the
-/// tools that read, a few per service, so the model can still look.
-pub fn pick<'a>(tools: &'a [ExternalTool], query: &str, used: &[String], keep: usize) -> Vec<&'a ExternalTool> {
-    let mut chosen: Vec<&ExternalTool> = tools.iter().filter(|t| used.contains(&t.name)).collect();
-    let scores = scores(tools, query);
-    let mut ranked: Vec<(usize, f64)> = scores.into_iter().enumerate().filter(|(i, s)| *s > 0.0 && !used.contains(&tools[*i].name)).collect();
+/// The best `max` tools for `query`, best first; only those it names.
+pub fn find<'a>(tools: &'a [ExternalTool], query: &str, max: usize) -> Vec<&'a ExternalTool> {
+    let mut ranked: Vec<(usize, f64)> = scores(tools, query).into_iter().enumerate().filter(|(_, s)| *s > 0.0).collect();
     ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
-    chosen.extend(ranked.into_iter().take(keep).map(|(i, _)| &tools[i]));
-    if chosen.is_empty() {
-        chosen = readers(tools, keep / 2);
-    }
-    chosen
+    ranked.into_iter().take(max).map(|(i, _)| &tools[i]).collect()
 }
 
 /// Up to `max` tools that only read, taking each service's in turn and
-/// those that list or search first.
-fn readers(tools: &[ExternalTool], max: usize) -> Vec<&ExternalTool> {
+/// those that list or search first: what to look at when a query names no
+/// tool ("anything new?").
+pub fn readers(tools: &[ExternalTool], max: usize) -> Vec<&ExternalTool> {
     let looks = |t: &ExternalTool| ["search", "list", "unread", "recent"].iter().any(|w| t.name.to_lowercase().contains(w));
     let mut services: Vec<&str> = Vec::new();
     for t in tools {
@@ -251,31 +255,28 @@ mod tests {
     #[test]
     fn the_best_tools_come_first() {
         let tools = catalog();
-        let picked = pick(&tools, "Send an email to Marco", &[], 3);
+        let picked = find(&tools, "Send an email to Marco", 3);
         assert_eq!(picked[0].name, "gmail__send_message");
         assert!(names(&picked).iter().all(|n| n.starts_with("gmail")));
         // In Italian, through the word list and prefixes.
-        let picked = pick(&tools, "Cosa ho in calendario domani?", &[], 2);
+        let picked = find(&tools, "Cosa ho in calendario domani?", 2);
         assert_eq!(picked[0].service, "Calendar");
-        let picked = pick(&tools, "crea un problema su Linear per la scheda", &[], 2);
+        let picked = find(&tools, "crea un problema su Linear per la scheda", 2);
         assert_eq!(picked[0].name, "linear__create_issue");
-        let picked = pick(&tools, "cerca nelle pagine di Notion", &[], 2);
+        let picked = find(&tools, "cerca nelle pagine di Notion", 2);
         assert!(names(&picked).contains(&"notion__search"));
     }
 
     #[test]
-    fn used_tools_stay_and_nothing_matching_still_reads() {
+    fn nothing_matching_finds_nothing_but_the_readers_are_there() {
         let tools = catalog();
-        let used = vec!["gmail__get_thread".to_string()];
-        let picked = pick(&tools, "and the issues?", &used, 2);
-        assert_eq!(picked[0].name, "gmail__get_thread");
-        assert!(names(&picked).contains(&"linear__list_issues"));
+        assert!(find(&tools, "Ciao, tutto bene?", 8).is_empty());
+        assert!(find(&[], "mail", 8).is_empty());
         // "Anything new?" names no tool: the readers, one per service first.
-        let picked = pick(&tools, "Ciao, tutto bene?", &[], 8);
-        assert_eq!(picked.len(), 4);
-        assert!(picked.iter().all(|t| !t.acts));
-        let services: HashSet<&str> = picked.iter().map(|t| t.service.as_str()).collect();
+        let readers = readers(&tools, 4);
+        assert_eq!(readers.len(), 4);
+        assert!(readers.iter().all(|t| !t.acts));
+        let services: HashSet<&str> = readers.iter().map(|t| t.service.as_str()).collect();
         assert_eq!(services.len(), 4);
-        assert!(pick(&[], "mail", &[], 8).is_empty());
     }
 }

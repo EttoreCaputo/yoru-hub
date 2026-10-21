@@ -36,12 +36,14 @@ There are three kinds of service:
 - **A service that needs our own OAuth client**: Google (Gmail, Calendar, Drive), GitHub, Slack, Box, Asana, HubSpot (none takes dynamic registration or client ID metadata documents, checked 2026-10-19). The app's own client for each is registered once and compiled in from `YORU_<SERVICE>_CLIENT_ID`/`_SECRET` (`docs/oauth-clients.md`), so Connect is one click there too. A build without it falls back to the user's own client, folded under "Advanced" on the card. Google: an app left in "testing" gets refresh tokens that expire after 7 days, and Gmail's scopes are restricted. Fine for personal use, but it shows up as a weekly sign-in until the app is verified.
 - **A local MCP server** (`npx …`, `uvx …`), run as a child process, with its token in the keychain and passed as an environment variable.
 
+Web search on every brain comes from Tavily (`tavily` in the catalog, added 2026-10-21): a remote server with dynamic registration, whose free plan gives 1,000 credits a month (a basic search costs 1, an advanced one 2). Its tools carry no read-only annotations, so the preset marks search, extract, crawl and map as reading; `tavily_research` (4 to 250 credits a call) and `tavily_feedback` start turned off. A watcher on `tavily_search` with `topic: "news"` and `time_range: "day"` follows a subject without the model; feeds stay the better source for fixed headlines, since they cost nothing.
+
 ## The agent
 
 `agent.rs` already has the loop: tools, their results fed back, a short memory, a provider with a local fallback. What changes:
 - **A model that can handle many tools.** A provider for Anthropic's Messages API next to the OpenAI-compatible one (`cloud/`). The local model stays for quick and offline requests.
 - **Four brains.** The user picks one (`provider` in `assistant.json`; unset: the first with a key of Claude, OpenAI and Groq; Ollama only when picked), see "The brain" below.
-- **Tools per request.** The connectors that matter for the request, picked from their descriptions, plus Yoru's own: `notify`, `remember`, timers, the board's tools. Not every tool of every connector at once.
+- **Tools on demand.** Yoru's own (`notify`, `remember`, timers) and the board's essentials (`react`, `get_state`) are always there; a connector's tools and the board's other ones (volume, brightness, wake word, menu, settings) only once the model looks for them (tool search on Claude, `find_tools` and `load_tools` on the other brains). With many services connected, a request doesn't carry every tool of every connector.
 - **Acting asks first.** A tool marked as acting (send a mail, create an event, close an issue) shows on the board's approval card (`show_approval`, already in the firmware) and in the app, and runs only on Allow. Reading never asks.
 - **Longer turns.** More rounds and tokens than a voice command; the spoken reply stays short, and the full answer is kept in the conversation in the app.
 - **A character.** The cat personalities go. Yoru is useful and to the point, with Yoru's manners (`../yoru/docs/CONCEPT.md`).
@@ -58,8 +60,8 @@ Decided on 2026-10-19: Yoru thinks with one of two brains, so people can start w
 | Cost | free, with daily limits (free plan: 8K tokens a minute, 200K a day for GPT-OSS) | paid by use |
 | Model | `groq_model`: `openai/gpt-oss-120b` by default; `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `llama-3.3-70b-versatile` | `model`: `claude-opus-5-5` by default |
 | Turn | `/chat/completions` with function calling: `tool_calls` run by the same tool runner, answered with `role: "tool"` messages; same rounds, same confirmation before acting | Messages API, thinking, effort |
-| Connector tools | picked locally for each request (`assistant/select.rs`: BM25 over service, name and description against the request and the turns before, with a few Italian words mapped to English); 6 at most (16 on OpenAI), plus those the conversation used, plus `find_tools` for the model to ask for more | all of them, deferred behind server-side tool search |
-| Web search | none: Groq's compound models aren't used, OpenAI searches only through the Responses API, and the model is told it can't search | the server tool |
+| Connector tools | none loaded at first: the prompt names the connected services (a line each), the model searches their tools with `find_tools` (names and a line each, ranked by `assistant/select.rs`: BM25 over service, name and description, with a few Italian words mapped to English) and loads the ones it wants with `load_tools`; 6 stay loaded at most (16 on OpenAI), the oldest go first, and those the conversation used stay for follow-ups | all of them, deferred behind server-side tool search |
+| Web search | only through the Tavily connector: Groq's compound models aren't used, OpenAI searches only through the Responses API, and without Tavily the model is told it can't search | the server tool |
 | Prompt | a compact system prompt, the memory cut to 3,000 characters, the last 4 turns, tool results cut to 6,000 characters, tool descriptions to 300, 1,024 tokens an answer (2,048 for a triage) | the full prompt, cached |
 | Triage | structured output (`response_format: json_schema`, strict) for OpenAI, GPT-OSS and Qwen; JSON mode with the schema in the prompt for Llama and Ollama | `output_config.format` |
 

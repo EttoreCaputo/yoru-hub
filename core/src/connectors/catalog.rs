@@ -20,7 +20,7 @@
 
 use serde::{Serialize, Serializer};
 
-use super::config::{ConnectorConfig, OAuthConfig, TransportConfig};
+use super::config::{ConnectorConfig, OAuthConfig, ToolPolicy, TransportConfig};
 
 /// How a client gets an OAuth client id for the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -88,6 +88,11 @@ pub struct Preset {
     /// A fixed redirect port, for clients that must list their exact
     /// redirect URI (`http://127.0.0.1:<port>/callback`).
     pub redirect_port: Option<u16>,
+    /// Starting policies for tools whose annotations are missing or wrong
+    /// (a search that would otherwise ask before every call); the user can
+    /// still change them.
+    #[serde(skip)]
+    pub tools: &'static [(&'static str, ToolPolicy)],
 }
 
 fn is_some<S: Serializer>(client: &Option<AppClient>, s: S) -> Result<S::Ok, S::Error> {
@@ -124,7 +129,7 @@ impl Preset {
             transport: TransportConfig::Http { url: self.url.into() },
             oauth: needed.then_some(oauth),
             enabled: true,
-            tools: Default::default(),
+            tools: self.tools.iter().map(|(name, policy)| (name.to_string(), *policy)).collect(),
         }
     }
 }
@@ -143,6 +148,7 @@ const fn dynamic(id: &'static str, name: &'static str, url: &'static str, docs: 
         scopes: &[],
         auth_params: &[],
         redirect_port: None,
+        tools: &[],
     }
 }
 
@@ -171,6 +177,7 @@ const fn google(id: &'static str, name: &'static str, url: &'static str, notes: 
         scopes: &[],
         auth_params: GOOGLE_PARAMS,
         redirect_port: Some(GOOGLE_REDIRECT_PORT),
+        tools: &[],
     }
 }
 
@@ -196,8 +203,26 @@ const fn own_client(
         scopes: &[],
         auth_params: &[],
         redirect_port: None,
+        tools: &[],
     }
 }
+
+const READS: ToolPolicy = ToolPolicy { enabled: true, acts: false };
+const OFF: ToolPolicy = ToolPolicy { enabled: false, acts: true };
+
+const TAVILY_NOTES: &str = "Web search, with news and finance; gives Yoru the web on every brain. \
+The free plan has 1,000 credits a month: a search costs 1 (2 when advanced).";
+/// Tavily's tools carry no annotations (tavily-mcp's source, 2026-10-21), so
+/// a plain search would ask first. Research costs 4 to 250 credits a call and
+/// would empty the free plan in a few questions; feedback sends text to Tavily.
+const TAVILY_TOOLS: &[(&str, ToolPolicy)] = &[
+    ("tavily_search", READS),
+    ("tavily_extract", READS),
+    ("tavily_crawl", READS),
+    ("tavily_map", READS),
+    ("tavily_research", OFF),
+    ("tavily_feedback", OFF),
+];
 
 static PRESETS: &[Preset] = &[
     // 2026-10-19: URL from the live 401 and metadata of mcp.notion.com (registration_endpoint /register);
@@ -220,6 +245,8 @@ static PRESETS: &[Preset] = &[
     dynamic("stripe", "Stripe", "https://mcp.stripe.com", "https://docs.stripe.com/mcp", "Payments, customers and invoices. Its tools can act on real money."),
     // 2026-10-19: https://huggingface.co/docs/hub/en/hf-mcp-server; metadata has /oauth/register.
     dynamic("huggingface", "Hugging Face", "https://huggingface.co/mcp", "https://huggingface.co/docs/hub/en/hf-mcp-server", "Models, datasets and Spaces; works without signing in, with fewer tools."),
+    // 2026-10-21: https://docs.tavily.com/documentation/mcp; metadata has /register.
+    Preset { tools: TAVILY_TOOLS, ..dynamic("tavily", "Tavily", "https://mcp.tavily.com/mcp/", "https://docs.tavily.com/documentation/mcp", TAVILY_NOTES) },
     // 2026-10-19: https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/; metadata has /register.
     dynamic(
         "cloudflare",
@@ -364,6 +391,15 @@ mod tests {
         assert_eq!(oauth.auth_params.get("access_type").map(String::as_str), Some("offline"));
         assert_eq!(oauth.redirect_port, Some(GOOGLE_REDIRECT_PORT));
         assert_eq!(oauth.client_secret.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn tavily_searches_without_asking_and_skips_research() {
+        let c = preset("tavily").unwrap().config(None, None);
+        assert!(c.oauth.is_none());
+        assert_eq!(c.tools["tavily_search"], ToolPolicy { enabled: true, acts: false });
+        assert!(!c.tools["tavily_research"].enabled);
+        assert!(preset("notion").unwrap().config(None, None).tools.is_empty());
     }
 
     #[test]
