@@ -15,8 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use yoru_core::assistant::watchers::{self, ScheduleEvent, WatchEntry, Watcher};
-use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, Host, Notification, Reply, Settings, TaskHost};
-use yoru_core::claude::agents::{Agents, Decision};
+use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, Confirmations, Host, Notification, Reply, Settings, TaskHost};
 use yoru_core::cloud::{self, KeySource, Provider};
 use yoru_core::connectors::catalog::{self, Preset};
 use yoru_core::connectors::{ConnectorConfig, ConnectorEvent, ConnectorStatus, Connectors};
@@ -55,11 +54,11 @@ impl Services {
 }
 
 /// The app's way for the assistant to reach the board and ask before acting:
-/// the card goes through Claude Code's approvals, so it shows on the board and
-/// in the app at once.
+/// the card goes through the [`Confirmations`] the bridge shares, so it shows
+/// on the board and in the app at once.
 pub struct AppHost {
     pub board: Board,
-    pub agents: Arc<Agents>,
+    pub confirmations: Arc<Confirmations>,
 }
 
 impl Host for AppHost {
@@ -74,7 +73,7 @@ impl Host for AppHost {
     }
 
     fn confirm(&self, title: &str, text: &str, detail: &str) -> Option<bool> {
-        self.agents.confirm(title, text, Some(detail), CONFIRM_WAIT).map(|d| d == Decision::Allow)
+        self.confirmations.ask(title, text, Some(detail), CONFIRM_WAIT)
     }
 }
 
@@ -148,7 +147,7 @@ fn start_scheduler(app: &AppHandle) {
 }
 
 fn host(state: &AppState) -> AppHost {
-    AppHost { board: state.board(None), agents: state.agents.clone() }
+    AppHost { board: state.board(None), confirmations: state.confirmations.clone() }
 }
 
 async fn blocking<T: Send + 'static>(app: AppHandle, job: impl FnOnce(&AppState) -> Result<T, String> + Send + 'static) -> Result<T, String> {

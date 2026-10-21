@@ -335,7 +335,7 @@ impl Default for Timers {
 
 /// Where the timers are kept by default.
 pub fn default_file() -> Option<PathBuf> {
-    crate::claude::data_dir().map(|d| d.join("timers.json"))
+    crate::paths::data_dir().map(|d| d.join("timers.json"))
 }
 
 pub fn now_ms() -> i64 {

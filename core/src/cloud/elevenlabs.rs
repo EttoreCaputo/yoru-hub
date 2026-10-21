@@ -8,6 +8,7 @@
 //! as 16-bit PCM at 16 kHz, the board's rate. The key needs the Text to
 //! Speech permission, and Voices with read access.
 
+use std::io::Read;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -32,6 +33,12 @@ fn agent() -> &'static ureq::Agent {
 /// `path` (with its query) on ElevenLabs, with `key`: the body of a
 /// successful answer. With `body`, a POST of it.
 fn send(key: &str, path: &str, body: Option<&Value>) -> Result<Vec<u8>, CloudError> {
+    let network = |e: ureq::Error| CloudError::Network { provider: ELEVENLABS.name, why: e.to_string() };
+    open(key, path, body)?.body_mut().with_config().limit(32 * 1024 * 1024).read_to_vec().map_err(network)
+}
+
+/// [`send`], the body of the answer still to read: a stream.
+fn open(key: &str, path: &str, body: Option<&Value>) -> Result<ureq::http::Response<ureq::Body>, CloudError> {
     let provider = ELEVENLABS.name;
     let network = |e: ureq::Error| CloudError::Network { provider, why: e.to_string() };
     let url = format!("{}{path}", ELEVENLABS.base_url);
@@ -41,11 +48,11 @@ fn send(key: &str, path: &str, body: Option<&Value>) -> Result<Vec<u8>, CloudErr
     };
     let mut response = sent.map_err(network)?;
     let status = response.status().as_u16();
-    let retry_after = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<f64>().ok()).map(Duration::from_secs_f64);
-    let body = response.body_mut().with_config().limit(32 * 1024 * 1024).read_to_vec().map_err(network)?;
     if (200..300).contains(&status) {
-        return Ok(body);
+        return Ok(response);
     }
+    let retry_after = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<f64>().ok()).map(Duration::from_secs_f64);
+    let body = response.body_mut().with_config().limit(1024 * 1024).read_to_vec().map_err(network)?;
     let (code, message) = error_detail(&body);
     Err(match (status, code.as_deref()) {
         (_, Some("quota_exceeded")) => CloudError::RateLimited { provider, retry_after: Some(QUOTA_WAIT), per_day: true },
@@ -140,14 +147,47 @@ pub(super) fn check_key(key: &str) -> Result<(), CloudError> {
 
 /// `text` spoken in `language` (`it`, `en`): a 16 kHz WAV.
 pub(super) fn speak(client: &Client, text: &str, language: Option<&str>) -> Result<Vec<u8>, CloudError> {
+    let (path, body) = speech_request(client, text, language, "")?;
+    let pcm = send(&client.key, &path, Some(&body))?;
+    let samples: Vec<i16> = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
+    Ok(crate::voice::wav(&samples, 16_000))
+}
+
+/// [`speak`] through the streaming endpoint: 16 kHz samples to `out` as
+/// ElevenLabs makes them, so the first plays before the rest is ready.
+pub(super) fn speak_stream(client: &Client, text: &str, language: Option<&str>, out: &mut dyn FnMut(Vec<i16>)) -> Result<(), CloudError> {
+    let (path, body) = speech_request(client, text, language, "/stream")?;
+    let mut reader = open(&client.key, &path, Some(&body))?.into_body().into_reader();
+    let mut buf = vec![0u8; STREAM_READ];
+    // A sample may be split between two reads.
+    let mut odd: Option<u8> = None;
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => return Ok(()),
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(CloudError::Network { provider: ELEVENLABS.name, why: e.to_string() }),
+        };
+        let mut bytes: Vec<u8> = odd.take().into_iter().chain(buf[..n].iter().copied()).collect();
+        if bytes.len() % 2 == 1 {
+            odd = bytes.pop();
+        }
+        out(bytes.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect());
+    }
+}
+
+/// Bytes asked of the stream at a time: 100 ms of sound.
+const STREAM_READ: usize = 3200;
+
+/// The path and body that speak `text` with the client's voice; `endpoint`
+/// is `""` or `/stream`.
+fn speech_request(client: &Client, text: &str, language: Option<&str>, endpoint: &str) -> Result<(String, Value), CloudError> {
     let voice = client.voice_id.as_deref().ok_or_else(|| CloudError::Invalid { provider: ELEVENLABS.name, why: "no voice chosen".into() })?;
     let mut body = json!({"text": text, "model_id": SPEECH_MODEL});
     if let Some(l) = language {
         body["language_code"] = json!(l);
     }
-    let pcm = send(&client.key, &format!("/v1/text-to-speech/{}?output_format=pcm_16000", urlencoding(voice)), Some(&body))?;
-    let samples: Vec<i16> = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
-    Ok(crate::voice::wav(&samples, 16_000))
+    Ok((format!("/v1/text-to-speech/{}{endpoint}?output_format=pcm_16000", urlencoding(voice)), body))
 }
 
 #[cfg(test)]

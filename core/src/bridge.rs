@@ -6,27 +6,26 @@
 //!
 //! The work is split by what it belongs to:
 //!
-//! - [`sampler`]: the computer's side, once for every board: Claude Code's
-//!   usage, the timers, the time and your presence. It builds a snapshot
+//! - [`sampler`]: the computer's side, once for every board: the timers,
+//!   the time and your presence. It builds a snapshot
 //!   each interval while a session is open and publishes it.
 //! - [`session`]: one board's connection: the protocol v2 handshake (see
 //!   [`crate::link`]), its reader and voice pipeline, the pointer for its
 //!   eyes, and sending it each snapshot.
-//! - [`alerts`]: what is said out loud of the host's own accord: Claude Code
-//!   alerts and timers that are up.
-//! - [`agents`]: Claude Code's sessions step by step, and its permission
-//!   requests, to the frontend and to the boards that can answer them.
+//! - [`alerts`]: what the host says of its own accord: timers that are up
+//!   and the assistant's notifications.
+//! - [`confirm`]: the cards the assistant waits on, to the frontend and to
+//!   the boards that can answer them.
 //!
 //! With a [`Hub`] other processes (the MCP server, `yoru call`) use the
-//! board through this connection, and bring Claude Code's hook events
-//! (`host/claude_hook`) to the alerts.
+//! board through this connection.
 //!
 //! - [`manager`]: finds the boards on USB and WiFi and runs a session for
 //!   each, up to a cap. [`Bridge`] is the manager with one board at most, as
 //!   the bridge always was.
 
-mod agents;
 mod alerts;
+mod confirm;
 mod floor;
 mod manager;
 mod sampler;
@@ -39,9 +38,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::assistant::Assistant;
-use crate::claude::agents::{AgentSession, Agents, Approval};
-use crate::claude::alerts::{Alert, AlertSettings};
+use crate::assistant::{Assistant, Confirmation, Confirmations};
 use crate::firmware::BoardFirmware;
 use crate::hub::Hub;
 use crate::snapshot::Snapshot;
@@ -77,11 +74,9 @@ pub struct BridgeConfig {
     /// a frontend can turn transcription on or change the model while the
     /// bridge runs; each utterance uses the config of the moment it ends.
     pub voice: Arc<Mutex<VoiceConfig>>,
-    /// Which Claude Code alerts to give, and how. Shared like `voice`.
-    pub claude_alerts: Arc<Mutex<AlertSettings>>,
-    /// Claude Code's sessions and permission requests, fed by the hooks.
-    /// Shared, so the frontend reads and answers them.
-    pub agents: Arc<Agents>,
+    /// The cards the assistant waits on. Shared, so the frontend reads and
+    /// answers them too.
+    pub confirmations: Arc<Confirmations>,
     /// Timers, pomodoro and reminders: the board shows and rings them, the
     /// voice and hub clients set them.
     pub timers: Arc<Timers>,
@@ -105,8 +100,7 @@ impl Default for BridgeConfig {
             interval: Duration::from_secs(1),
             hub: None,
             voice: Arc::default(),
-            claude_alerts: Arc::default(),
-            agents: Arc::default(),
+            confirmations: Arc::default(),
             timers: Arc::default(),
             follow_pointer: Arc::new(AtomicBool::new(true)),
             primary: Arc::default(),
@@ -151,12 +145,9 @@ pub enum BridgeEvent {
     Spoken { id: u8, spoken: Spoken },
     /// Speech-to-text or text-to-speech failed, or its sidecar couldn't start.
     VoiceError { message: String },
-    /// An alert about Claude Code, and how it went: `error` says why it
-    /// didn't reach the board (or wasn't spoken).
-    ClaudeAlert { alert: Alert, text: String, error: Option<String> },
-    /// Claude Code's sessions or permission requests changed: all of them,
-    /// as [`Agents::view`] has them.
-    Agents { sessions: Vec<AgentSession>, approvals: Vec<Approval> },
+    /// The assistant's cards changed: all those waiting, as
+    /// [`Confirmations::view`] has them.
+    Confirmations { cards: Vec<Confirmation> },
     /// A timer or reminder is up (or a pomodoro moved on); `text` is what was
     /// said about it, `error` why it wasn't.
     TimerFired { fired: Fired, text: String, error: Option<String> },

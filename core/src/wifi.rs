@@ -60,7 +60,7 @@ impl Paired {
 
 /// Where the paired boards are kept, readable by this user only.
 pub fn paired_file() -> Option<PathBuf> {
-    crate::claude::data_dir().map(|d| d.join("wifi-boards.json"))
+    crate::paths::data_dir().map(|d| d.join("wifi-boards.json"))
 }
 
 pub fn load_paired() -> Vec<Paired> {

@@ -7,9 +7,9 @@
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
   import type { ChatLine } from "../types";
-  import ApprovalCard from "../ui/ApprovalCard.svelte";
   import Composer from "../ui/Composer.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
+  import ConfirmCard from "../ui/ConfirmCard.svelte";
   import { ago } from "../ui/when";
 
   const t = $derived(i18n.t.conversation);
@@ -18,7 +18,7 @@
   // Down to the newest line whenever one comes, or a card, or the wait.
   $effect(() => {
     void store.chat.length;
-    void store.yoruApprovals.length;
+    void store.confirmations.length;
     void store.asking;
     queueMicrotask(() => end?.scrollIntoView({ block: "end", behavior: "smooth" }));
   });
@@ -84,9 +84,9 @@
     {/if}
   </ol>
 
-  {#if store.yoruApprovals.length}
+  {#if store.confirmations.length}
     <div class="cards">
-      {#each store.yoruApprovals as a (a.id)}<ApprovalCard approval={a} />{/each}
+      {#each store.confirmations as c (c.id)}<ConfirmCard card={c} />{/each}
     </div>
   {/if}
 

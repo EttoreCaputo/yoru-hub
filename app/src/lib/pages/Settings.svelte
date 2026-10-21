@@ -2,7 +2,7 @@
   Settings as Yoru's wiring: the mirror in the middle, and each part of the
   settings a card wired to it by a trace, with what it says right now. A card
   opens its own page: Yoru's brain (Groq, OpenAI, Claude or Ollama, their keys
-  and models, how hard Claude thinks), Claude Code's integration, Yoru's voice
+  and models, how hard Claude thinks), Yoru's MCP server, Yoru's voice
   with the cloud voices' keys, the app's language, the board (connection,
   firmware, WiFi, its own settings) and the data folder.
 -->
@@ -11,7 +11,7 @@
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { Brain, ClaudeAlertsInfo, ClaudeLink, Effort, Gaze, McpInfo, VoiceInfo } from "../types";
+  import type { Brain, Effort, Gaze, McpInfo, VoiceInfo } from "../types";
   import YoruBoard from "../YoruBoard.svelte";
   import Board from "../ui/Board.svelte";
   import KeyField from "../ui/KeyField.svelte";
@@ -30,16 +30,12 @@
   const langName = (id: Lang) => LANGUAGES.find((l) => l.id === id)?.name ?? id;
 
   let voice = $state<VoiceInfo | null>(null);
-  let alerts = $state<ClaudeAlertsInfo | null>(null);
-  let link = $state<ClaudeLink | null>(null);
   let mcp = $state<McpInfo | null>(null);
   let error = $state("");
 
   async function readAll() {
-    [voice, alerts, link, mcp] = await Promise.all([
+    [voice, mcp] = await Promise.all([
       call<VoiceInfo>("voice_info").catch(() => null),
-      call<ClaudeAlertsInfo>("claude_alerts_info").catch(() => null),
-      call<ClaudeLink>("claude_link").catch(() => null),
       call<McpInfo>("mcp_info").catch(() => null),
     ]);
   }
@@ -75,11 +71,7 @@
       error = why(e);
     }
   }
-  const hooks = (connect: boolean) => run(() => call<ClaudeAlertsInfo>("claude_hooks", { connect }), (v) => (alerts = v));
-  const statusLine = (connect: boolean) => run(() => call<ClaudeLink>(connect ? "claude_connect" : "claude_disconnect"), (v) => (link = v));
   const registerMcp = (connect: boolean) => run(() => call<McpInfo>("claude_mcp", { connect }), (v) => (mcp = v));
-  const setAlerts = (change: Partial<ClaudeAlertsInfo["settings"]>) =>
-    alerts && run(() => call<ClaudeAlertsInfo>("set_claude_alerts", { settings: { ...$state.snapshot(alerts!.settings), ...change } }), (v) => (alerts = v));
 
   async function setupAgain() {
     await call("set_onboarding", { done: false, tourVersion: null });
@@ -87,17 +79,17 @@
   }
 
   // The parts, wired to Yoru: three on each side, top to bottom.
-  type Part = "brain" | "claude" | "voice" | "language" | "board" | "about";
+  type Part = "brain" | "mcp" | "voice" | "language" | "board" | "about";
   type Wire = { id: Part; side: -1 | 1; row: 0 | 1 | 2; color: string; icon: string };
   const WIRES: Wire[] = [
     { id: "brain", side: -1, row: 0, color: "var(--think)", icon: "M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-1.5 5.5A3 3 0 0 0 9 18.5M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 1.5 5.5 3 3 0 0 1-4.5 5.5M12 4v16M9 10h3M12 14h3" },
     { id: "voice", side: -1, row: 1, color: "#c58cff", icon: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" },
     { id: "language", side: -1, row: 2, color: "#5fd4c8", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5M12 3.5C9.6 5.9 8.5 8.7 8.5 12s1.1 6.1 3.5 8.5" },
-    { id: "claude", side: 1, row: 0, color: "var(--wait)", icon: "M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5.5l-3 13" },
+    { id: "mcp", side: 1, row: 0, color: "var(--wait)", icon: "M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5.5l-3 13" },
     { id: "board", side: 1, row: 1, color: "var(--done)", icon: "M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM9.5 9.5h5v5h-5zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" },
     { id: "about", side: 1, row: 2, color: "var(--pearl-mid)", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5M12 7.6v.1" },
   ];
-  const PAGES: Part[] = ["brain", "claude", "voice", "language", "board", "about"];
+  const PAGES: Part[] = ["brain", "mcp", "voice", "language", "board", "about"];
 
   let open = $state<Part | null>(null);
   let hover = $state<Part | null>(null);
@@ -111,8 +103,6 @@
 
   // What each card says now, and its dot.
   const brainModel = $derived(!s || !brain ? "" : brain === "anthropic" ? s.model : brain === "openai" ? s.openai_model : brain === "groq" ? s.groq_model : s.ollama_model);
-  const links = $derived([alerts?.hooks.connected, link?.connected, mcp?.registered].filter((v) => v !== undefined));
-  const linked = $derived(links.filter(Boolean).length);
   const keyed = $derived(others.filter((p) => p.key).length);
   const firmware = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   const via = $derived(store.port?.startsWith("wifi:") ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
@@ -120,7 +110,7 @@
     brain: !store.info?.ready
       ? { text: brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain, dot: "wrong", warn: true }
       : { text: `${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
-    claude: { text: links.length ? t.linksOf(linked, links.length) : "—", dot: !links.length || !linked ? "" : linked === links.length ? "done" : "wait" },
+    mcp: { text: !mcp ? "—" : mcp.registered ? t.inClaudeCode : t.notInClaudeCode, dot: mcp?.registered ? "done" : "" },
     voice: {
       text: [voice ? (voice.settings.enabled ? t.listening : t.notListening) : "", others.length ? (keyed ? t.keysOf(keyed, others.length) : t.noKeys) : ""].filter(Boolean).join(" · ") || "—",
       dot: voice?.settings.enabled ? "done" : "",
@@ -173,7 +163,7 @@
         {/each}
       </nav>
       {#if open === "brain"}{@render brainPage()}
-      {:else if open === "claude"}{@render claudePage()}
+      {:else if open === "mcp"}{@render mcpPage()}
       {:else if open === "voice"}{@render voicePage()}
       {:else if open === "language"}{@render languagePage()}
       {:else if open === "board"}<Board />
@@ -350,27 +340,9 @@
   {/if}
 {/snippet}
 
-{#snippet claudePage()}
-  <section class="panel">
-    {#if alerts}
-      <div class="setting">
-        <div class="what"><b>{t.hooks}</b><span>{t.hooksHint}</span></div>
-        <div class="how">
-          <span class="state"><span class="dot {alerts.hooks.connected ? 'done' : ''}"></span>{alerts.hooks.connected ? t.connected : t.notConnected}</span>
-          <button class="btn small" onclick={() => hooks(!alerts!.hooks.connected)}>{alerts.hooks.connected ? t.disconnect : t.connect}</button>
-        </div>
-      </div>
-    {/if}
-    {#if link}
-      <div class="setting">
-        <div class="what"><b>{t.statusLine}</b><span>{t.statusLineHint}</span></div>
-        <div class="how">
-          <span class="state"><span class="dot {link.connected ? 'done' : ''}"></span>{link.connected ? t.connected : t.notConnected}</span>
-          <button class="btn small" onclick={() => statusLine(!link!.connected)}>{link.connected ? t.disconnect : t.connect}</button>
-        </div>
-      </div>
-    {/if}
-    {#if mcp}
+{#snippet mcpPage()}
+  {#if mcp}
+    <section class="panel">
       <div class="setting">
         <div class="what"><b>{t.mcp}</b><span>{t.mcpHint}</span></div>
         <div class="how">
@@ -378,18 +350,11 @@
           <button class="btn small" onclick={() => registerMcp(!mcp!.registered)}>{mcp.registered ? t.disconnect : t.connect}</button>
         </div>
       </div>
-    {/if}
-  </section>
-  {#if alerts}
-    <section class="panel">
-      <div class="setting">
-        <div class="what"><b>{t.approvals}</b><span>{t.approvalsHint}</span></div>
-        <div class="how"><Toggle checked={alerts.settings.approvals} label={t.approvals} onchange={(on) => setAlerts({ approvals: on })} /></div>
-      </div>
-      <div class="setting">
-        <div class="what"><b>{t.alertsSpeak}</b></div>
-        <div class="how"><Toggle checked={alerts.settings.speak} label={t.alertsSpeak} onchange={(on) => setAlerts({ speak: on })} /></div>
-      </div>
+      {#if mcp.command}
+        <div class="setting">
+          <div class="what"><b>{t.mcpCommand}</b><span class="mono">{mcp.command} {mcp.args.join(" ")}</span></div>
+        </div>
+      {/if}
     </section>
   {/if}
   {#if error}<p class="error-text note">{error}</p>{/if}

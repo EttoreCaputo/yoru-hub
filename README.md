@@ -15,14 +15,14 @@ Status: early development (0.1.0).
 - **Answers**: with a brain you pick: a model on [Groq](https://console.groq.com/keys) (free, with daily limits: a good start), GPT (OpenAI's API, paid, cheap), a model on this computer through [Ollama](https://ollama.com) (free and private) or Claude (Anthropic's API, paid, the best, with web search), with your connectors' tools, the board's tools and the timers. Anything that changes something (sending a mail, creating an issue) asks first, on the board and in the app.
 - **Watches**: watchers check a connector's tool or do a task every so often, and only what's new and matters becomes a notification. A morning recap, quiet hours and do-not-disturb.
 - **Remembers**: `memory.md` in the data folder, read every turn, edited in the app.
-- **Has a body**: the board shows notifications and Allow/Deny cards, listens after its wake word, and speaks. Claude Code's sessions and permission requests reach it too.
+- **Has a body**: the board shows notifications and Allow/Deny cards, listens after its wake word, and speaks. Any MCP client (Claude Code, Claude Desktop…) can make it react, speak, notify you and set timers, through its MCP server.
 
 ## Repository layout
 
 ```
 core/            library: the assistant (inbox, memory, routines, watchers), connectors (MCP client,
                  OAuth, keychain), link (protocol v2 over USB and WiFi), bridge and hub, voice
-                 (STT, TTS), MCP server, Claude Code, timers, flasher
+                 (STT, TTS), MCP server, timers, flasher
 cli/             `yoru` command line
 app/             desktop app: Svelte UI in src/, Tauri shell in src-tauri/
 firmware/        the board's firmware image, embedded in the app (fetched, not committed)

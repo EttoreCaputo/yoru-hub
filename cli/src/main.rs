@@ -18,12 +18,11 @@
 //!   yoru connectors presets       # services Yoru can connect to (also: add, login, tools, call)
 //!   yoru tools                    # list the board's tools
 //!   yoru call react --name happy
-//!   yoru mcp                      # MCP server on stdio, for Claude Code / Claude Desktop
+//!   yoru mcp                      # MCP server on stdio, for any MCP client (Claude Code, Claude Desktop...)
 //!   yoru models download small    # a Whisper model, for `yoru --stt`
 //!   yoru piper install            # Piper, for `yoru --tts` (needs Python 3)
 //!   yoru say "Ciao!"              # speak through a running bridge's speaker
 //!   yoru timer 10m pasta          # a timer the board rings
-//!   yoru --claude-statusline      # Claude Code status line helper (reads stdin)
 
 mod connectors_cmd;
 
@@ -38,7 +37,6 @@ use clap::{Parser, Subcommand};
 use yoru_core::agent;
 use yoru_core::assistant::{self, Assistant, Brain, Channel, TaskHost, watchers::{self, Watcher, Watchers, WatchKind}};
 use yoru_core::bridge::{self, BridgeConfig, BridgeEvent, ManagerEvent, Transport};
-use yoru_core::claude::{hooks, statusline};
 use yoru_core::cloud::{self, CloudRef, Provider};
 use yoru_core::hardware::{self, Hardware};
 use yoru_core::models::{self, Kind, Model};
@@ -74,14 +72,6 @@ struct Args {
     /// List serial ports and exit
     #[arg(long)]
     list_ports: bool,
-    /// Act as Claude Code's status line command: keep its status JSON for the
-    /// Claude faces and print a short status line
-    #[arg(long = "claude-statusline", hide = true)]
-    claude_statusline: bool,
-    /// Act as a Claude Code hook: pass its JSON to the running bridge for
-    /// the Claude alerts; prints nothing
-    #[arg(long = "claude-hook", hide = true)]
-    claude_hook: bool,
     /// Do not print a line per snapshot
     #[arg(long, short)]
     quiet: bool,
@@ -167,7 +157,7 @@ enum Command {
         args: Vec<String>,
     },
     /// Run an MCP server on stdin/stdout with the board's tools plus
-    /// get_claude_usage, speak and the timers. Add it to Claude Code with
+    /// notify, speak and the timers. Add it to Claude Code with
     /// `claude mcp add yoru -- yoru mcp`
     Mcp {
         /// Used only when neither the app nor a running `yoru` is running
@@ -385,14 +375,6 @@ fn main() -> ExitCode {
         }
         None => {}
     }
-    if args.claude_statusline {
-        statusline::run(std::io::stdin().lock(), std::io::stdout().lock());
-        return ExitCode::SUCCESS;
-    }
-    if args.claude_hook {
-        hooks::run(std::io::stdin().lock());
-        return ExitCode::SUCCESS;
-    }
     if args.list_ports {
         for p in serial::list_ports() {
             let mark = if p.is_board { "  <- Yoru?" } else { "" };
@@ -440,10 +422,9 @@ fn main() -> ExitCode {
             tts,
             agent,
             follow_up: !args.no_follow_up,
+            language: None,
         })),
-        // The alerts need the hooks in Claude Code's settings (the app's Display tab adds them).
-        claude_alerts: Arc::default(),
-        agents: Arc::default(),
+        confirmations: Arc::default(),
         timers: timers.clone(),
         follow_pointer: Arc::new(AtomicBool::new(!args.no_follow_pointer)),
         primary: Arc::default(),
@@ -526,8 +507,11 @@ fn main() -> ExitCode {
                         (n, Some(w)) => format!(", {n} frames lost -> {w}"),
                     }
                 ),
-                // The app's feed; every step would flood the terminal.
-                BridgeEvent::Agents { .. } => {}
+                BridgeEvent::Confirmations { cards } => {
+                    for card in cards {
+                        println!("{tag}asks: {} ({}): allow or deny on the board", card.tool, card.text);
+                    }
+                }
                 BridgeEvent::TimerFired { text, error: None, .. } => println!("{tag}timer: {text}"),
                 BridgeEvent::TimerFired { text, error: Some(e), .. } => println!("{tag}timer: {text} (not said: {e})"),
                 BridgeEvent::Notified { id, error: None } => println!("{tag}notification {id} on the board"),
@@ -537,8 +521,6 @@ fn main() -> ExitCode {
                         open_url(&url);
                     }
                 }
-                BridgeEvent::ClaudeAlert { text, error: None, .. } => println!("{tag}claude: {text}"),
-                BridgeEvent::ClaudeAlert { text, error: Some(e), .. } => eprintln!("{tag}claude: {text} (not given: {e})"),
                 BridgeEvent::Firmware { firmware } => match firmware {
                     BoardFirmware::Version { kind, version, protocol: 1, .. } => {
                         println!("{tag}board runs {kind} firmware {version}, which this version can't drive: reflash it from the app")
@@ -659,7 +641,7 @@ fn parse_span(s: &str) -> Option<u64> {
 }
 
 fn timer(language: Option<&str>, args: &[String]) -> ExitCode {
-    let language = language.unwrap_or(yoru_core::claude::alerts::system_language());
+    let language = language.unwrap_or(intents::system_language());
     let rest = |from: usize| args.get(from..).unwrap_or_default().join(" ");
     let first = args.first().map(String::as_str);
     let (tool, arguments) = match first {
@@ -1453,9 +1435,8 @@ fn parse_tool_args(raw: &[String]) -> Result<Value, String> {
 }
 
 fn summary(s: &Snapshot) -> String {
-    let claude = s.claude.as_ref().map(|c| format!(", Claude 5 h {}%", c.s_pct.map_or("—".into(), |p| format!("{p:.0}")))).unwrap_or_default();
     let timer = s.timer.as_ref().map(|_| ", a timer running").unwrap_or_default();
-    format!("snapshot {}{claude}{timer}", s.ts)
+    format!("snapshot {}{timer}", s.ts)
 }
 
 fn permission_hint(port: &str) -> String {

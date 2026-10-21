@@ -2,14 +2,12 @@
 //! Yoru's `main/metrics_parser.c`.
 //!
 //! Yoru shows no gauges: it reads only the computer's time and how long since
-//! the last input (`pet`: night brightness, and when it gets sleepy), the
-//! Claude plan's limits (`claude`, for the agents view) and the timer that
-//! ends first (`timer`). Firmware 0.10.0 takes a snapshot without CPU or GPU
+//! the last input (`pet`: night brightness, and when it gets sleepy) and the
+//! timer that ends first (`timer`). Firmware 0.10.0 takes a snapshot without CPU or GPU
 //! readings, as long as it has `pet`.
 
 use serde::{Deserialize, Serialize};
 
-use crate::claude::ClaudeMetrics;
 use crate::presence::Presence;
 use crate::timers::BoardTimer;
 
@@ -20,9 +18,6 @@ pub const SNAPSHOT_VERSION: u32 = 2;
 pub struct Snapshot {
     pub v: u32,
     pub ts: u64,
-    /// Claude Code usage; absent where Claude Code hasn't run.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude: Option<ClaudeMetrics>,
     /// The timer that ends first, set from the [`crate::Timers`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timer: Option<BoardTimer>,
@@ -35,7 +30,7 @@ impl Snapshot {
     /// An empty snapshot taken now.
     pub fn now() -> Self {
         let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        Self { v: SNAPSHOT_VERSION, ts, claude: None, timer: None, pet: None }
+        Self { v: SNAPSHOT_VERSION, ts, timer: None, pet: None }
     }
 
     /// The firmware drops snapshots without the computer's time.
@@ -47,11 +42,6 @@ impl Snapshot {
     pub fn to_payload(&self) -> Vec<u8> {
         serde_json::to_vec(self).expect("snapshot is always serializable")
     }
-}
-
-/// Through a string, so an `f32` reads `34.8` rather than `34.79999923706055`.
-pub fn short_floats(value: &impl Serialize) -> serde_json::Value {
-    serde_json::to_string(value).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(serde_json::Value::Null)
 }
 
 #[cfg(test)]

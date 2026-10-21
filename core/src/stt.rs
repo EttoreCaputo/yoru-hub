@@ -110,7 +110,7 @@ pub enum SttEngine {
 
 /// Where Whisper models are kept: `models/` in the data folder.
 pub fn models_dir() -> Option<PathBuf> {
-    crate::claude::data_dir().map(|d| d.join("models"))
+    crate::paths::data_dir().map(|d| d.join("models"))
 }
 
 /// The local model to transcribe in a cloud model's place when it hits its
@@ -334,9 +334,9 @@ pub(crate) fn multipart(wav: &[u8], fields: &[(&str, &str)]) -> io::Result<(Stri
 /// so while detecting only the names, which belong to neither.
 fn vocabulary_prompt(lang: &str) -> String {
     match lang {
-        "it" => "Yoru. Email, calendario, promemoria, timer, Claude Code.".into(),
-        "en" => "Yoru. Email, calendar, reminders, timers, Claude Code.".into(),
-        _ => "Yoru, Claude Code.".into(),
+        "it" => "Yoru. Email, calendario, promemoria, timer.".into(),
+        "en" => "Yoru. Email, calendar, reminders, timers.".into(),
+        _ => "Yoru.".into(),
     }
 }
 

@@ -585,6 +585,16 @@ pub fn asks_time(text: &str) -> bool {
         || has_pair(&w, &[("che", "or"), ("che", "giorn"), ("che", "data"), ("what", "time"), ("the", "time"), ("what", "day"), ("what", "date"), ("the", "date"), ("e", "oggi")])
 }
 
+/// `it` when the system speaks Italian, otherwise `en`.
+pub fn system_language() -> &'static str {
+    let italian = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+        .next()
+        .is_some_and(|v| v.starts_with("it"));
+    if italian { "it" } else { "en" }
+}
+
 /// `it` or `en`, whichever `text` looks more like (for text not heard but
 /// typed, which Whisper didn't label).
 pub fn guess_language(text: &str) -> &'static str {

@@ -15,6 +15,7 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 
 use super::{Client, CloudError, openai};
+use crate::stream::{self, Delta, OnDelta};
 
 /// A model on this computer that thinks as long as it likes can take minutes.
 const TIMEOUT: Duration = Duration::from_secs(600);
@@ -139,6 +140,38 @@ pub(super) fn chat(client: &Client, request: &Value) -> Result<Value, CloudError
     let sent = agent().post(url(client)).header("Content-Type", "application/json").send(&body[..]);
     let reply: Value = serde_json::from_slice(&openai::read(client, sent)?).map_err(|e| CloudError::Invalid { provider, why: e.to_string() })?;
     message(&reply).ok_or_else(|| CloudError::Invalid { provider, why: format!("no message in {}", reply.to_string().chars().take(300).collect::<String>()) })
+}
+
+/// [`chat`], streamed: a JSON object a line, its words handed to `on` as
+/// they come. A line's calls are whole, not in pieces.
+pub(super) fn chat_stream(client: &Client, request: &Value, on: OnDelta) -> Result<Value, CloudError> {
+    let provider = client.model.provider.name;
+    let mut body = chat_request(client, request);
+    body["stream"] = true.into();
+    let body = serde_json::to_vec(&body).map_err(|e| CloudError::Invalid { provider, why: e.to_string() })?;
+    let response = openai::open(client, agent().post(url(client)).header("Content-Type", "application/json").send(&body[..]))?;
+    let (mut content, mut calls) = (String::new(), Vec::new());
+    stream::lines(response.into_body().into_reader(), |line| {
+        if line.trim().is_empty() {
+            return Ok(true);
+        }
+        let chunk: Value = serde_json::from_str(line).map_err(|e| format!("bad line: {e}"))?;
+        if let Some(error) = chunk["error"].as_str() {
+            return Err(error.to_string());
+        }
+        if let Some(text) = chunk.pointer("/message/content").and_then(Value::as_str).filter(|t| !t.is_empty()) {
+            content.push_str(text);
+            on(Delta::Text(text));
+        }
+        if let Some(more) = chunk.pointer("/message/tool_calls").and_then(Value::as_array).filter(|c| !c.is_empty()) {
+            calls.extend(more.iter().cloned());
+            on(Delta::Tools);
+        }
+        Ok(chunk["done"].as_bool() != Some(true))
+    })
+    .map_err(|why| CloudError::Network { provider, why })?;
+    let reply = json!({"message": {"content": content, "tool_calls": calls}});
+    message(&reply).ok_or_else(|| CloudError::Invalid { provider, why: "no message".into() })
 }
 
 #[cfg(test)]

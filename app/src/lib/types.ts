@@ -141,30 +141,15 @@ export type ConnectorConfig = {
   enabled: boolean;
 };
 
-export type AgentState = "work" | "wait" | "done" | "idle";
-export type AgentStep = { kind: string; tool: string; text: string; at: number };
-export type AgentSession = {
+/** A card the assistant waits on before it acts. */
+export type Confirmation = {
   id: string;
-  project?: string;
-  state: AgentState;
-  task?: string;
-  waiting?: string;
-  steps: AgentStep[];
-  since: number;
-  updated: number;
-};
-export type Approval = {
-  id: string;
-  session: string;
-  project?: string;
   tool: string;
-  kind: string;
   text: string;
   detail?: string;
   asked: number;
   expires: number;
 };
-export type AgentsView = { sessions: AgentSession[]; approvals: Approval[] };
 
 export type TimerKind = "timer" | "work" | "break" | "reminder";
 export type TimerInfo = { id: number; kind: TimerKind; label?: string; total_s: number; left_s: number; state: "run" | "pause" | "ring"; ends_at?: string };
@@ -252,19 +237,6 @@ export type VoiceInfo = {
 export type AccountVoice = { voice_id: string; name: string; category: string; description: string | null };
 export type KeyCheck = { state: "valid" | "invalid" | "unknown"; error: string | null };
 
-export type ClaudeLink = { connected: boolean; chained: string | null; last_update_s: number | null; settings_path: string | null };
-export type HooksStatus = { connected: boolean; last_event_s: number | null; settings_path: string | null };
-export type AlertSettings = {
-  needs_you: boolean;
-  done: boolean;
-  done_after_s: number;
-  usage: boolean;
-  speak: boolean;
-  language: string;
-  approvals: boolean;
-  approval_wait_s: number;
-};
-export type ClaudeAlertsInfo = { settings: AlertSettings; hooks: HooksStatus; can_speak: boolean; last: { text: string; error: string | null; age_s: number } | null };
 export type McpInfo = { command: string | null; args: string[]; registered: boolean; config_path: string | null; hub_error: string | null };
 export type Onboarding = { done: boolean; tour_version: number };
 

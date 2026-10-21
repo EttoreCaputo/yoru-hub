@@ -22,7 +22,7 @@
   const BODY: Page[] = ["settings"];
 
   const tint = $derived(
-    store.asking || store.voice === "thinking" ? "think" : store.voice === "speaking" ? "done" : store.yoruApprovals.length || store.codeApprovals.length ? "wait" : null,
+    store.asking || store.voice === "thinking" ? "think" : store.voice === "speaking" ? "done" : store.confirmations.length ? "wait" : null,
   );
   const status = $derived.by(() => {
     if (store.boardState === "live") return { dot: "done", text: t.link.live };
@@ -35,7 +35,7 @@
 
   const badge = (p: Page): { n?: number; dot?: string } | null => {
     if (p === "inbox" && store.unread) return { n: store.unread };
-    if (p === "conversation" && store.yoruApprovals.length) return { dot: "wait" };
+    if (p === "conversation" && store.confirmations.length) return { dot: "wait" };
     if (p === "settings" && store.info && !store.info.ready) return { dot: "wrong" };
     if (p === "settings" && store.update) return { dot: "wait" };
     if (p === "connectors" && store.connectors.some((c) => c.enabled && (c.state === "needs_login" || c.state === "error"))) return { dot: "wait" };

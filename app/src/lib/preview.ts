@@ -8,9 +8,9 @@
 
 import type {
   AccountVoice,
-  AgentsView,
   AssistantInfo,
   ChatLine,
+  Confirmation,
   ConnectorConfig,
   ConnectorStatus,
   Notification,
@@ -97,7 +97,7 @@ let connectors: ConnectorStatus[] = [
 let inbox: Notification[] = [
   { id: "n5", source: "Linear", title: "YOR-142 assigned to you", text: "Marco moved \"Inbox on the board drops the last item\" to you, due Friday.", urgency: "high", url: "https://linear.app/", at: now() - 12 * MIN, read: false, by: "linear-mine" },
   { id: "n4", source: "Yoru", title: "Good morning", text: "Two meetings today, the first at 10:30 with Giulia. Three issues are waiting on you, one due Friday.", urgency: "normal", at: now() - 3 * 60 * MIN, read: false },
-  { id: "n3", source: "Claude Code", title: "yoru-app finished", text: "The build passed after 4 minutes.", urgency: "low", at: now() - 5 * 60 * MIN, read: true },
+  { id: "n3", source: "Calendar", title: "Dentist moved", text: "Thursday's appointment is now at 17:30.", urgency: "low", at: now() - 5 * 60 * MIN, read: true },
   { id: "n2", source: "Linear", title: "Comment on YOR-131", text: "Giulia: \"Looks good to me, merging tomorrow.\"", urgency: "normal", url: "https://linear.app/", at: now() - 26 * 60 * MIN, read: true, by: "linear-mine" },
   { id: "n1", source: "ESP32 news", title: "ESP-IDF 6.1.1 is out", text: "A fix for the USB-JTAG console dropping lines.", urgency: "low", url: "https://github.com/espressif/esp-idf/releases", at: now() - 50 * 60 * MIN, read: true, by: "esp-news" },
 ];
@@ -195,15 +195,7 @@ const info: AssistantInfo = {
   quiet_now: false,
 };
 
-let agents: AgentsView = {
-  sessions: [
-    { id: "s1", project: "yoru-app", state: "work", task: "Redo the Connectors page", steps: [{ kind: "edit", tool: "Edit", text: "src/lib/pages/Connectors.svelte", at: now() - 20000 }], since: now() - 4 * MIN, updated: now() - 20000 },
-    { id: "s2", project: "yoru", state: "wait", task: "Bump the firmware to 0.10.1", waiting: "Run idf.py flash?", steps: [], since: now() - MIN, updated: now() - MIN },
-  ],
-  approvals: [
-    { id: "a1", session: "s2", project: "yoru", tool: "Bash", kind: "run", text: "idf.py -p /dev/cu.usbmodem101 flash", detail: "Flash the new build", asked: now() - MIN, expires: now() + 8 * MIN },
-  ],
-};
+let confirmations: Confirmation[] = [];
 
 const timers: TimersInfo = {
   timers: [{ id: 1, kind: "timer", label: "Tea", total_s: 300, left_s: 184, state: "run", ends_at: "10:42" }],
@@ -288,7 +280,7 @@ function emit(event: string, payload: unknown) {
 
 const emitInbox = () => emit("inbox", inbox);
 const emitChat = () => emit("chat", chat);
-const emitAgents = () => emit("bridge", { kind: "agents", ...agents, target: null });
+const emitConfirmations = () => emit("bridge", { kind: "confirmations", cards: confirmations, target: null });
 const emitConnectors = () => emit("connectors", connectors);
 
 function addChat(line: Omit<ChatLine, "at">) {
@@ -304,9 +296,9 @@ async function ask(text: string) {
   let reply = "Nothing else new since this morning. YOR-142 is still the one due first, on Friday.";
   const actions = [{ tool: "get_inbox", ok: true, summary: "2 unread" }];
   if (/creat|crea|send|mand|scriv/i.test(text)) {
-    agents = { ...agents, approvals: [...agents.approvals, { id: "y1", session: "yoru", project: "Yoru", tool: "linear__create_issue", kind: "other", text: "Create issue \"Board inbox: swipe to dismiss\" in Yoru", detail: '{"team":"YOR","title":"Board inbox: swipe to dismiss"}', asked: now(), expires: now() + 90_000 }] };
-    emitAgents();
-    while (agents.approvals.some((a) => a.id === "y1")) await sleep(200);
+    confirmations = [...confirmations, { id: "y1", tool: "linear: create_issue", text: "Create issue \"Board inbox: swipe to dismiss\" in Yoru", detail: '{"team":"YOR","title":"Board inbox: swipe to dismiss"}', asked: now(), expires: now() + 90_000 }];
+    emitConfirmations();
+    while (confirmations.some((c) => c.id === "y1")) await sleep(200);
     reply = lastAnswer ? "Done: YOR-143, in Yoru's backlog." : "All right, I didn't create it.";
     actions.push({ tool: "linear__create_issue", ok: lastAnswer, summary: lastAnswer ? "created YOR-143" : "denied" });
   }
@@ -409,11 +401,11 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   cancel_login: () => undefined,
   logout_connector: (a) => patch(a.id, { signed_in: false, state: "needs_login" }),
   set_connector_secret: () => undefined,
-  claude_agents: () => agents,
-  claude_approve: (a) => {
+  confirmations: () => confirmations,
+  confirm: (a) => {
     lastAnswer = a.allow;
-    agents = { ...agents, approvals: agents.approvals.filter((x) => x.id !== a.id) };
-    emitAgents();
+    confirmations = confirmations.filter((x) => x.id !== a.id);
+    emitConfirmations();
     return true;
   },
   timers_info: () => timers,
@@ -453,17 +445,6 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
       await sleep(120);
     }
   },
-  claude_link: () => ({ connected: true, chained: null, last_update_s: 12, settings_path: "~/.claude/settings.json" }),
-  claude_connect: () => COMMANDS.claude_link({}),
-  claude_disconnect: () => ({ connected: false, chained: null, last_update_s: null, settings_path: "~/.claude/settings.json" }),
-  claude_alerts_info: () => ({
-    settings: { needs_you: true, done: true, done_after_s: 30, usage: true, speak: true, language: "it", approvals: true, approval_wait_s: 120 },
-    hooks: { connected: true, last_event_s: 40, settings_path: "~/.claude/settings.json" },
-    can_speak: true,
-    last: null,
-  }),
-  set_claude_alerts: (a) => ({ ...(COMMANDS.claude_alerts_info({}) as object), settings: a.settings }),
-  claude_hooks: () => COMMANDS.claude_alerts_info({}),
   mcp_info: () => ({ command: "/Applications/Yoru.app/Contents/MacOS/yoru-app", args: ["--mcp"], registered: true, config_path: "~/.claude.json", hub_error: null }),
   claude_mcp: () => COMMANDS.mcp_info({}),
   ui_language: () => null,

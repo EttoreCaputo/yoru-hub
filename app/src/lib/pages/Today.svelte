@@ -1,15 +1,15 @@
 <!--
   Today: Yoru in its black disc, what it has to say, the field to talk to it;
-  then what's unread and what comes next (cards waiting, timers, Claude
-  Code at work, the morning recap).
+  then what's unread and what comes next (cards waiting, timers, the
+  morning recap).
 -->
 <script lang="ts">
   import { call } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
   import type { VoiceState } from "../types";
-  import ApprovalCard from "../ui/ApprovalCard.svelte";
-  import Composer from "../ui/Composer.svelte";
+    import Composer from "../ui/Composer.svelte";
+  import ConfirmCard from "../ui/ConfirmCard.svelte";
   import NotificationRow from "../ui/NotificationRow.svelte";
   import { ago, clock } from "../ui/when";
   import YoruBoard from "../YoruBoard.svelte";
@@ -26,8 +26,7 @@
 
   // The mirror thinks while an answer is on its way, as the board does.
   const voice = $derived<VoiceState>(store.asking ? "thinking" : store.voice);
-  const working = $derived(store.agents.sessions.some((s) => s.state === "work"));
-  const badge = $derived(store.agents.approvals.length ? "wait" : working ? "work" : null);
+  const badge = $derived(store.confirmations.length ? "wait" : null);
   let reaction = $state<{ name: string; at: number } | null>(null);
   function poke() {
     reaction = { name: "happy", at: Date.now() };
@@ -36,10 +35,9 @@
 
   const unread = $derived(store.inbox.filter((n) => !n.read).slice(0, 5));
   const lastSaid = $derived([...store.chat].reverse().find((l) => l.from === "yoru"));
-  const sessions = $derived(store.agents.sessions.filter((s) => s.state === "work" || s.state === "wait"));
   const timers = $derived(store.timers?.timers ?? []);
   const recap = $derived(store.info?.settings.routines.recap ? store.info.settings.routines.recap_at : null);
-  const nothingNext = $derived(!store.agents.approvals.length && !sessions.length && !timers.length);
+  const nothingNext = $derived(!store.confirmations.length && !timers.length);
 
   const timerName = (kind: string) => (kind === "reminder" ? t.reminder : kind === "work" ? t.work : kind === "break" ? t.break : t.timer);
 </script>
@@ -61,9 +59,9 @@
     </div>
   </section>
 
-  {#if store.agents.approvals.length}
+  {#if store.confirmations.length}
     <section class="cards">
-      {#each store.agents.approvals as a (a.id)}<ApprovalCard approval={a} />{/each}
+      {#each store.confirmations as c (c.id)}<ConfirmCard card={c} />{/each}
     </section>
   {/if}
 
@@ -94,13 +92,6 @@
             <span class="dot {tm.state === 'ring' ? 'wait' : tm.state === 'run' ? 'think' : ''}"></span>
             <span class="what">{tm.label ?? timerName(tm.kind)}</span>
             <span class="mono dim">{tm.state === "ring" ? t.ringing : tm.state === "pause" ? t.paused : clock(tm.left_s)}</span>
-          </li>
-        {/each}
-        {#each sessions as s (s.id)}
-          <li>
-            <span class="dot {s.state === 'wait' ? 'wait' : 'think'}"></span>
-            <span class="what"><b>{s.project ?? "Claude Code"}</b> {s.task ?? ""}</span>
-            <span class="dim small">{t.session[s.state]}</span>
           </li>
         {/each}
         {#if recap}
@@ -227,10 +218,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .next .what b {
-    font-weight: 600;
-    margin-right: 4px;
   }
   .small {
     font-size: 12px;

@@ -40,12 +40,12 @@ pub struct BoardProfile {
     pub image_project: &'static str,
     /// The board tool that plays a short reaction by name.
     pub scene_tool: &'static str,
-    /// It shows permission requests with Allow and Deny (`show_approval`,
+    /// It shows the assistant's cards with Allow and Deny (`show_approval`,
     /// `hide_approval`) and answers with an `approval` notification.
     pub approvals: bool,
     /// Board tools only the host calls, kept from MCP clients and from the
-    /// assistant's model: a model has no business putting a permission card
-    /// or the agents' list on the screen.
+    /// assistant's model: a model has no business putting a card that asks
+    /// for the user's permission, or the inbox, on the screen.
     pub hub_only_tools: &'static [&'static str],
     /// The body the voice agent lives in, for its prompts.
     pub agent_body: &'static str,
@@ -68,14 +68,6 @@ const YORU: BoardProfile = BoardProfile {
     hub_only_tools: &[
         "show_approval",
         "hide_approval",
-        "set_agents",
-        "show_toast",
-        "show_question",
-        "hide_question",
-        "show_draft",
-        "hide_draft",
-        "set_chat",
-        "set_projects",
         "show_notification",
         "hide_notification",
         "clear_notifications",

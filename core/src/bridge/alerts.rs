@@ -1,6 +1,6 @@
-//! What the host says of its own accord, on a thread of its own: Claude Code
-//! alerts ([`crate::claude::alerts`]) and timers that are up, each once the
-//! board is out of any voice conversation.
+//! What the host says of its own accord, on a thread of its own: timers that
+//! are up and the assistant's notifications, each once the board is out of
+//! any voice conversation.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -11,8 +11,6 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 
 use crate::assistant::{InboxChange, Notification, Urgency};
-use crate::claude::ClaudeMetrics;
-use crate::claude::alerts::{self, Alert, AlertSettings, Alerts, HookEvent};
 use crate::link::Link;
 use crate::profile::BoardKind;
 use crate::timers::Fired;
@@ -21,11 +19,8 @@ use crate::voice::Speaker;
 use super::floor::Floor;
 use super::{BridgeConfig, BridgeEvent, EventSink, sleep_unless_stopped};
 
-/// What the alerts thread gets: a hook event (with when it came) or the
-/// Claude usage of a snapshot.
+/// What the alerts thread gets.
 pub(super) enum AlertInput {
-    Hook(HookEvent, Instant),
-    Metrics(ClaudeMetrics),
     /// A timer that's up, to be said.
     Timer(Fired),
     /// The assistant's inbox changed.
@@ -45,7 +40,7 @@ pub(super) struct AlertTarget {
 }
 
 /// The boards that are ready, each under its session's number, and the voice
-/// floor between them. Alerts and timers go to one board only
+/// floor between them. Timers and urgent notifications are said by one board only
 /// ([`Targets::speaker`]).
 #[derive(Default)]
 pub(super) struct Targets {
@@ -97,56 +92,30 @@ fn speaker(config: &BridgeConfig, targets: &Targets, origin: Option<&str>) -> Op
     Some((t.link.upgrade()?, t))
 }
 
-/// An alert waits this long at most for a voice conversation to end.
+/// Speaking waits this long at most for a voice conversation to end.
 const CONVERSATION_WAIT: Duration = Duration::from_secs(20);
 
 pub(super) fn alert_loop(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, rx: Receiver<AlertInput>, on_event: &EventSink) {
-    let mut alerts = Alerts::default();
     while !stop.load(Ordering::Relaxed) {
         let input = match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(input) => input,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => return,
         };
-        let settings = config.claude_alerts.lock().unwrap().clone();
-        if let AlertInput::Inbox(change) = &input {
-            match change {
-                InboxChange::New(n) => {
-                    let error = deliver_notification(config, stop, targets, n).err();
-                    on_event(BridgeEvent::Notified { id: n.id.clone(), error });
-                }
-                InboxChange::Removed(id) => mirror(targets, "hide_notification", json!({"id": id})),
-                InboxChange::Cleared => mirror(targets, "clear_notifications", json!({})),
+        match input {
+            AlertInput::Inbox(InboxChange::New(n)) => {
+                let error = deliver_notification(config, stop, targets, &n).err();
+                on_event(BridgeEvent::Notified { id: n.id.clone(), error });
             }
-            continue;
-        }
-        let alert = match &input {
-            AlertInput::Hook(event, at) => alerts.on_hook(event, &settings, *at),
-            AlertInput::Metrics(metrics) => alerts.on_metrics(metrics, &settings),
-            AlertInput::Inbox(_) => continue,
+            AlertInput::Inbox(InboxChange::Removed(id)) => mirror(targets, "hide_notification", json!({"id": id})),
+            AlertInput::Inbox(InboxChange::Cleared) => mirror(targets, "clear_notifications", json!({})),
             AlertInput::Timer(fired) => {
                 let text = fired.spoken();
-                let error = say_timer(config, stop, targets, fired).err();
-                on_event(BridgeEvent::TimerFired { fired: fired.clone(), text, error });
-                continue;
+                let error = say_timer(config, stop, targets, &fired).err();
+                on_event(BridgeEvent::TimerFired { fired, text, error });
             }
-        };
-        let Some(alert) = alert else { continue };
-        let error = give_alert(config, stop, targets, &settings, &alert).err();
-        let text = alert.words(&settings.language).spoken;
-        on_event(BridgeEvent::ClaudeAlert { alert, text, error });
+        }
     }
-}
-
-/// Wait for the board to be out of a conversation, then show and say `alert`.
-fn give_alert(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, settings: &AlertSettings, alert: &Alert) -> Result<(), String> {
-    let (link, AlertTarget { speaker, voice_state, .. }) = self::speaker(config, targets, None).ok_or("the board isn't connected")?;
-    let until = Instant::now() + CONVERSATION_WAIT;
-    while *voice_state.lock().unwrap() != "idle" && Instant::now() < until && !stop.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(250));
-    }
-    let tts = if settings.speak { config.voice.lock().unwrap().tts.clone() } else { None };
-    alerts::deliver(&link, &speaker, tts.as_deref(), alert, &settings.language)
 }
 
 /// Say what `fired` was for, after a chime or two, once the board is out of

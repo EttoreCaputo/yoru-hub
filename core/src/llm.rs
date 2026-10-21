@@ -16,8 +16,8 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,6 +26,7 @@ use serde_json::Value;
 use crate::cloud::{self, CloudError};
 use crate::models::{Kind, Model};
 use crate::sidecar::{self, Process};
+use crate::stream::{self, OnDelta};
 use crate::stt::models_dir;
 
 /// Loading a 4B model from a cold disk can take a while.
@@ -258,6 +259,43 @@ impl Llm {
         unreachable!()
     }
 
+    /// [`Llm::chat`], streamed: the words go to `on` as the model writes
+    /// them. A cloud model at its limits says so before any word, so the
+    /// local one can still answer in its place.
+    pub fn chat_stream(&self, request: &Value, on: OnDelta) -> Result<Value, LlmError> {
+        if let LlmConfig::Cloud(client) = &self.config {
+            match client.chat_stream(request, on) {
+                Err(e) if e.is_limit() && self.fallback.is_some() => {}
+                reply => return reply.map_err(LlmError::Cloud),
+            }
+        }
+        let mut request = request.clone();
+        request["stream"] = true.into();
+        let body = serde_json::to_vec(&request).map_err(|e| LlmError::Invalid(e.to_string()))?;
+        // A server that died since the last request gets one restart.
+        for attempt in 0..2 {
+            let addr = self.addr()?;
+            let sent = local_agent().post(format!("http://{addr}/v1/chat/completions")).header("Content-Type", "application/json").send(&body[..]);
+            match sent {
+                Ok(mut response) if response.status().is_success() => {
+                    return stream::chat_message(response.body_mut().as_reader(), on).map_err(LlmError::Invalid);
+                }
+                Ok(mut response) => {
+                    let text = response.body_mut().read_to_string().unwrap_or_default();
+                    return Err(LlmError::Invalid(format!("HTTP {}: {}", response.status().as_u16(), text.trim().chars().take(300).collect::<String>())));
+                }
+                Err(ureq::Error::ConnectionFailed) if attempt == 0 => {
+                    self.server.lock().unwrap().take();
+                }
+                Err(ureq::Error::Io(e)) if attempt == 0 && matches!(e.kind(), io::ErrorKind::ConnectionRefused | io::ErrorKind::ConnectionReset) => {
+                    self.server.lock().unwrap().take();
+                }
+                Err(e) => return Err(LlmError::Server(e.to_string())),
+            }
+        }
+        unreachable!()
+    }
+
     fn addr(&self) -> Result<SocketAddr, LlmError> {
         let mut server = self.server.lock().unwrap();
         if let Some(s) = server.as_mut() {
@@ -275,6 +313,12 @@ impl Llm {
         *server = Some(s);
         Ok(addr)
     }
+}
+
+/// For the server's streamed answers: [`sidecar::post`] reads a whole answer only.
+fn local_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(REQUEST_TIMEOUT)).build()))
 }
 
 fn start(config: &LocalLlm) -> Result<Process, LlmError> {

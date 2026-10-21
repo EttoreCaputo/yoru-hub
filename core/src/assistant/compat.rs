@@ -29,6 +29,7 @@ use serde_json::{Value, json};
 use super::{Action, Assistant, BOARD_ESSENTIALS, Brain, ExternalTool, Host, MAX_ROUNDS, Reply, Settings, board_extras, own_tools, schema_or_empty, select, tool_json};
 use crate::cloud::{self, CloudError, Client};
 use crate::models::Kind;
+use crate::stream::{Delta, OnDelta};
 use crate::timers::Timers;
 
 /// How much a request carries, by brain.
@@ -131,7 +132,7 @@ then load the ones you'll call with load_tools; the ones already loaded are in y
 - Tools that change something ask the user first; if they say no, accept it.
 - Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
 - Look after the memory unasked: save lasting facts about the user with remember as they come up, correct or merge lines with revise_memory, remove stale ones with forget. One short fact per line, no duplicates. The memory is in <memory>.
-- Reply in the user's language. Channel voice: one to three plain sentences a text-to-speech voice reads well: no markdown, lists, emoji, URLs, symbols or special characters; units and abbreviations written as they are said. Channel text: short Markdown is fine.
+- Always reply in the language the context line names (reply in: ...), even when the user speaks another one; without one, in the user's. Channel voice: one to three plain sentences a text-to-speech voice reads well: no markdown, lists, emoji, URLs, symbols or special characters; units and abbreviations written as they are said. Channel text: short Markdown is fine.
 - Friendly and to the point; never chatty or servile; don't end with offers of help."
     )
 }
@@ -265,16 +266,25 @@ fn request(brain: Brain, settings: &Settings, mut request: Value, max_tokens: u3
 
 /// One request. A tool call the model wrote badly (Groq's 400
 /// `tool_use_failed`) is asked again once.
-fn chat(client: &Client, request: &Value) -> Result<Value, String> {
-    match client.chat(request) {
-        Err(CloudError::Status { status: 400, message, .. }) if message.contains("tool") && message.contains("failed") => client.chat(request).map_err(|e| brain_error(&e)),
+/// With `on`, streamed to it: the error comes before any word, so asking
+/// again repeats none.
+fn chat(client: &Client, request: &Value, mut on: Option<&mut (dyn FnMut(Delta) + '_)>) -> Result<Value, String> {
+    let mut ask = || match on.as_deref_mut() {
+        Some(on) => client.chat_stream(request, on),
+        None => client.chat(request),
+    };
+    match ask() {
+        Err(CloudError::Status { status: 400, message, .. }) if message.contains("tool") && message.contains("failed") => ask().map_err(|e| brain_error(&e)),
         reply => reply.map_err(|e| brain_error(&e)),
     }
 }
 
 /// A turn on `brain`: `prompt` after `messages` (OpenAI's form), the tools
-/// run until the model answers in words.
-pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt: &str, settings: &Settings, host: &dyn Host) -> Result<Reply, String> {
+/// run until the model answers in words. `reminder` follows tool results:
+/// small models answer in their language rather than the prompt's. With
+/// `on`, each answer is streamed to it.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt: &str, reminder: &str, settings: &Settings, host: &dyn Host, mut on: Option<OnDelta>) -> Result<Reply, String> {
     let client = client(settings, brain)?;
     let budget = budget(brain);
     let started = Instant::now();
@@ -288,8 +298,9 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     // A follow-up ("and reply to it") still has the tools the conversation used.
     let mut loaded: Vec<&ExternalTool> = used.iter().filter_map(|n| findable.iter().find(|t| &t.name == n)).collect();
     loaded.drain(..loaded.len().saturating_sub(budget.loaded));
+    let language = a.reply_language(None).map(|l| format!("\n\nAlways reply in {}.", super::language_name(&l))).unwrap_or_default();
     let system = json!({"role": "system", "content": format!(
-        "{}\n\n<memory>\n{}\n</memory>",
+        "{}\n\n<memory>\n{}\n</memory>{language}",
         system_prompt(&settings.name, &services_line(&findable), searches_web(&external_tools)),
         a.memory.for_prompt_within(budget.memory_max)
     )});
@@ -299,7 +310,11 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
         let tools = tool_list(&board_tools, &loaded, !findable.is_empty(), &budget);
         let mut all = vec![system.clone()];
         all.extend(messages.iter().cloned());
-        let message = chat(&client, &request(brain, settings, json!({"messages": all, "tools": tools, "tool_choice": "auto"}), budget.max_tokens))?;
+        // Only in the request, not kept in the conversation.
+        if messages.last().is_some_and(|m| m["role"] == "tool") {
+            all.push(json!({"role": "system", "content": reminder}));
+        }
+        let message = chat(&client, &request(brain, settings, json!({"messages": all, "tools": tools, "tool_choice": "auto"}), budget.max_tokens), on.as_deref_mut())?;
         let calls = message["tool_calls"].as_array().cloned().unwrap_or_default();
         let text = clean(message["content"].as_str().unwrap_or_default());
         if calls.is_empty() {
@@ -446,7 +461,7 @@ mod tests {
         assert_eq!(first["model"], "openai/gpt-oss-120b");
         assert!(first["max_tokens"].as_u64().unwrap() >= u64::from(TIGHT.max_tokens));
         assert_eq!(first["messages"][0]["role"], "system");
-        assert!(first["messages"][1]["content"].as_str().unwrap().contains("channel: voice, language: it"));
+        assert!(first["messages"][1]["content"].as_str().unwrap().contains("channel: voice, reply in: Italian"));
         let names: Vec<&str> = first["tools"].as_array().unwrap().iter().filter_map(|t| t.pointer("/function/name").and_then(Value::as_str)).collect();
         // The services are named; none of their tools is loaded yet.
         assert!(names.contains(&"notify") && names.contains(&"find_tools") && names.contains(&"load_tools"));
@@ -546,11 +561,14 @@ mod tests {
         let first = requests.recv().unwrap();
         assert!(!names(&first).iter().any(|n| n.starts_with("gmail__")));
         let second = requests.recv().unwrap();
-        let listed = second["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+        let tool_result = |r: &Value| r["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "tool").unwrap()["content"].as_str().unwrap().to_string();
+        // The language is said again after a tool result.
+        assert_eq!(second["messages"].as_array().unwrap().last().unwrap()["content"], "Now answer the user in Italian.");
+        let listed = tool_result(&second);
         assert!(listed.contains("- gmail__search: Search mail") && listed.contains("load_tools"), "{listed}");
         assert!(!names(&second).iter().any(|n| n.starts_with("gmail__")));
         let third = requests.recv().unwrap();
-        let loaded = third["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+        let loaded = tool_result(&third);
         assert!(loaded.starts_with("loaded: gmail__search") && loaded.contains("no tool named gmail__nope"), "{loaded}");
         assert!(names(&third).contains(&"gmail__search".to_string()) && !names(&third).contains(&"gmail__send".to_string()));
     }

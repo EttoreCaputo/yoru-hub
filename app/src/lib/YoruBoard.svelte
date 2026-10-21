@@ -3,7 +3,7 @@
   creature of yoru/docs/CONCEPT.md in the black. A matte sphere, two dark
   pill eyes that slide towards the pointer, two floating hands that pop out
   for a gesture, a tint in its lower half and a halo for what the voice is
-  doing, and a badge for what Claude Code is doing. With no board it drifts
+  doing, and a badge (a card waiting for you). With no board it drifts
   off into a dim dot, as Yoru does when it falls asleep.
 
   The mirror only plays what it is given: `reaction` is a name from

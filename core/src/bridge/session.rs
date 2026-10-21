@@ -80,7 +80,7 @@ pub(super) fn run(
         let speaker = speaker.clone();
         let voice_state = voice_state.clone();
         let timers = config.timers.clone();
-        let agents = config.agents.clone();
+        let confirmations = config.confirmations.clone();
         let assistant = config.assistant.clone();
         Link::open(port, move |event| match event {
             LinkEvent::Log(line) => sink(BridgeEvent::BoardLog { line }),
@@ -113,7 +113,7 @@ pub(super) fn run(
             }
             LinkEvent::Notification { method, params } if method == "utterance_end" => receiving.lock().unwrap().end(&params),
             LinkEvent::Notification { method, params } if method == "playback_end" => speaker.playback_end(params),
-            LinkEvent::Notification { method, params } if method == "approval" => super::agents::on_notification(&agents, &params),
+            LinkEvent::Notification { method, params } if method == "approval" => super::confirm::on_notification(&confirmations, &params),
             LinkEvent::Notification { method, params } if method == "notification_action" => {
                 if let Some(assistant) = &assistant {
                     on_notification_action(assistant, &params, &sink);
@@ -136,7 +136,7 @@ pub(super) fn run(
         conversation_over: Box::new(move || floor.release(number)),
         timers: config.timers.clone(),
         assistant: config.assistant.clone(),
-        agents: config.agents.clone(),
+        confirmations: config.confirmations.clone(),
         voice_state: voice_state.clone(),
     });
     // The sampler samples while a session is open; this one waits for its next snapshot.

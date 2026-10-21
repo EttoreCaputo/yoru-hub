@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use super::statusline::{backup, parse_object, read_settings, write_settings};
+use super::{backup, parse_object, read_settings, write_settings};
 /// Our name in `mcpServers`.
 pub const NAME: &str = "yoru";
 /// `mcp::FLAG`, here without the `mcp` feature.
@@ -44,7 +44,7 @@ fn config_path() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(dir).join(".claude.json"));
     }
-    super::home_dir().map(|h| h.join(".claude.json"))
+    crate::paths::home_dir().map(|h| h.join(".claude.json"))
 }
 
 fn status_at(path: Option<PathBuf>) -> McpConfigStatus {

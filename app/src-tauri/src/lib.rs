@@ -18,17 +18,17 @@
 //! up by itself on first use (Python + virtualenv in its data folder); the
 //! session on that port is paused meanwhile so esptool can own it.
 //!
-//! The app can also point Claude Code's status line and hooks at itself
-//! (`main.rs` handles those invocations): Claude Code's sessions and
-//! permission requests reach the board, and its alerts are said.
+//! At start it takes out of Claude Code's settings the hooks and the status
+//! line older versions installed (`yoru_core::claude::cleanup`).
 //!
 //! Voice (opt-in): what the board hears after its wake word is transcribed
 //! by a whisper.cpp `whisper-server` sidecar (or a cloud model), answered by
 //! the assistant (or, without an Anthropic key, a local language model) and
 //! said through the board's speaker by Piper (or a cloud voice).
 //!
-//! The same binary with `--mcp` is an MCP server for Claude Code and Claude
-//! Desktop (`yoru_core::mcp`). It reaches the board through this app's
+//! The same binary with `--mcp` is an MCP server for any MCP client, Claude
+//! Code and Claude Desktop among them (`yoru_core::mcp`); the app can add it
+//! to Claude Code's config (`yoru_core::claude::mcpconfig`). It reaches the board through this app's
 //! [`Hub`], which lives as long as the app, across bridge restarts.
 
 mod assistant;
@@ -43,11 +43,7 @@ use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use yoru_core::agent;
-use yoru_core::claude::agents::{Agents, AgentsView, Decision};
-use yoru_core::claude::alerts::AlertSettings;
-use yoru_core::claude::hooks::{self, HooksStatus};
-use yoru_core::claude::mcpconfig;
-use yoru_core::claude::statusline::{self, LinkStatus};
+use yoru_core::claude::{cleanup, mcpconfig};
 use yoru_core::flasher::setup;
 use yoru_core::hardware::{self, Hardware, Recommendation};
 use yoru_core::cloud::elevenlabs::{self, AccountVoice};
@@ -60,7 +56,7 @@ use yoru_core::tts::{self, Engine, Tts, TtsConfig};
 use yoru_core::timers::{self, Pomodoro, ShowOn, TimerInfo, Timers};
 use yoru_core::voice::{self, Spoken, VoiceConfig};
 use yoru_core::assistant::watchers::Watchers;
-use yoru_core::assistant::{self as assistant_mod, Assistant};
+use yoru_core::assistant::{self as assistant_mod, Assistant, Confirmation, Confirmations};
 use yoru_core::{
     Agent, Board, BoardFirmware, BoardKind, BridgeConfig, BridgeEvent, ChipInfo, Esptool, FlashEvent, Hub, HubStatus, ImageInfo, Manager as BoardManager, ManagerEvent, PortInfo, Snapshot,
     Transport, firmware, keep_warm, mcp, serial, wifi,
@@ -91,14 +87,12 @@ struct Settings {
     /// USB, WiFi, or USB when plugged in and WiFi otherwise.
     #[serde(default)]
     transport: Transport,
-    /// The id of the board that says alerts, and that the UI and hub
+    /// The id of the board that says timers and urgent notifications, and that the UI and hub
     /// clients reach when several could.
     #[serde(default)]
     primary: Option<String>,
     #[serde(default)]
     voice: VoiceSettings,
-    #[serde(default)]
-    claude_alerts: AlertSettings,
     /// Yoru's eyes look about on their own instead of at the mouse pointer.
     #[serde(default)]
     ignore_pointer: bool,
@@ -226,8 +220,6 @@ struct Link {
     /// What the board said it runs, since it connected.
     firmware: Option<BoardFirmware>,
     logs: VecDeque<String>,
-    /// The latest Claude alert: what it said, why it didn't reach the board, when (Unix ms).
-    last_alert: Option<(String, Option<String>, u64)>,
     /// What the board's voice overlay shows (`idle` until it says otherwise).
     voice: Option<String>,
     transcripts: VecDeque<TranscriptEntry>,
@@ -265,8 +257,8 @@ impl Link {
             BridgeEvent::Firmware { firmware } => self.firmware = Some(firmware.clone()),
             // `AppState` keeps the timers; the assistant, the inbox.
             BridgeEvent::Wake { .. } | BridgeEvent::TimerFired { .. } | BridgeEvent::Notified { .. } | BridgeEvent::NotificationOpened { .. } => {}
-            // `AppState::agents` keeps the feed.
-            BridgeEvent::Agents { .. } => {}
+            // `AppState::confirmations` keeps the cards.
+            BridgeEvent::Confirmations { .. } => {}
             BridgeEvent::Transcript { id, transcript } => {
                 if self.transcripts.len() == TRANSCRIPTS {
                     self.transcripts.pop_front();
@@ -287,10 +279,6 @@ impl Link {
             // `AppState::stt_error` keeps the last error.
             BridgeEvent::Listening { .. } | BridgeEvent::Utterance { .. } | BridgeEvent::VoiceError { .. } => {}
             BridgeEvent::VoiceState { state } => self.voice = Some(state.clone()),
-            BridgeEvent::ClaudeAlert { text, error, .. } => {
-                let at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-                self.last_alert = Some((text.clone(), error.clone(), at));
-            }
             BridgeEvent::Disconnected { reason, .. } => {
                 self.kind = "offline";
                 self.message = Some(reason.clone());
@@ -399,12 +387,10 @@ struct AppState {
     esptool_dir: PathBuf,
     /// Handed to every bridge; `apply_voice` swaps what's in it.
     voice: Arc<Mutex<VoiceConfig>>,
-    /// Handed to every bridge.
-    claude_alerts: Arc<Mutex<AlertSettings>>,
     /// Handed to every bridge; kept in their own file.
     timers: Arc<Timers>,
-    /// Handed to every bridge: Claude Code's sessions and permission requests.
-    agents: Arc<Agents>,
+    /// Handed to every bridge and to the assistant's hosts: the cards it waits on.
+    confirmations: Arc<Confirmations>,
     /// Handed to every bridge.
     follow_pointer: Arc<AtomicBool>,
     /// Yoru the assistant: handed to every bridge.
@@ -493,7 +479,24 @@ fn apply_voice(state: &AppState) {
         agent.set_personality(&agent::personality_prompt(&settings.personality, &settings.personality_custom));
     }
     let dump_dir = settings.keep_recordings.then(voice::default_dump_dir).flatten();
-    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up };
+    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up, language: None };
+    apply_language(state);
+}
+
+/// The app's language (`it`, `en`): the one picked, else the system's.
+fn app_language(state: &AppState) -> String {
+    state.settings.lock().unwrap().ui_language.clone().unwrap_or_else(|| yoru_core::intents::system_language().into())
+}
+
+/// Have Yoru answer in the app's language, whatever language it hears.
+fn apply_language(state: &AppState) {
+    let language = app_language(state);
+    state.assistant.set_language(Some(&language));
+    let mut voice = state.voice.lock().unwrap();
+    if let Some(agent) = &voice.agent {
+        agent.set_language(Some(&language));
+    }
+    voice.language = Some(language);
 }
 
 /// `sidecar` shared, with its servers started again whenever they stop
@@ -1223,6 +1226,7 @@ fn set_ui_language(app: AppHandle, state: State<AppState>, language: Option<Stri
     };
     if changed {
         state.save_settings();
+        apply_language(&state);
     }
     *state.tray_labels.lock().unwrap() = tray;
     update_tray(&app);
@@ -1368,103 +1372,16 @@ fn claude_mcp(state: State<AppState>, connect: bool) -> Result<McpInfo, String> 
     Ok(mcp_info_of(&state))
 }
 
+/// The cards the assistant waits on.
 #[tauri::command]
-fn claude_link() -> LinkStatus {
-    statusline::status()
+fn confirmations(state: State<AppState>) -> Vec<Confirmation> {
+    state.confirmations.view()
 }
 
-/// Make this binary Claude Code's status line, chaining to the one it replaces.
+/// Answer card `id`; false when it's no longer waiting.
 #[tauri::command]
-fn claude_connect() -> Result<LinkStatus, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    statusline::connect(&exe).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn claude_disconnect() -> Result<LinkStatus, String> {
-    statusline::disconnect().map_err(|e| e.to_string())
-}
-
-#[derive(Serialize)]
-struct LastAlert {
-    text: String,
-    error: Option<String>,
-    age_s: u64,
-}
-
-#[derive(Serialize)]
-struct ClaudeAlertsInfo {
-    settings: AlertSettings,
-    hooks: HooksStatus,
-    /// The bridge can speak (voice on with spoken replies, and Piper ready).
-    can_speak: bool,
-    last: Option<LastAlert>,
-}
-
-fn claude_alerts_info_of(state: &AppState) -> ClaudeAlertsInfo {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-    let last = state.devices.lock().unwrap().host.last_alert.clone();
-    ClaudeAlertsInfo {
-        settings: state.claude_alerts.lock().unwrap().clone(),
-        hooks: hooks::status(),
-        can_speak: state.voice.lock().unwrap().tts.is_some(),
-        last: last.map(|(text, error, at)| LastAlert { text, error, age_s: now.saturating_sub(at) / 1000 }),
-    }
-}
-
-#[tauri::command]
-fn claude_alerts_info(state: State<AppState>) -> ClaudeAlertsInfo {
-    claude_alerts_info_of(&state)
-}
-
-#[tauri::command]
-fn set_claude_alerts(state: State<AppState>, settings: AlertSettings) -> ClaudeAlertsInfo {
-    *state.claude_alerts.lock().unwrap() = settings.clone();
-    state.settings.lock().unwrap().claude_alerts = settings;
-    state.save_settings();
-    claude_alerts_info_of(&state)
-}
-
-/// Add this binary to Claude Code's hooks, or take it out.
-#[tauri::command]
-fn claude_hooks(state: State<AppState>, connect: bool) -> Result<ClaudeAlertsInfo, String> {
-    if connect {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        hooks::connect(&exe).map_err(|e| e.to_string())?;
-    } else {
-        hooks::disconnect().map_err(|e| e.to_string())?;
-    }
-    Ok(claude_alerts_info_of(&state))
-}
-
-/// Give a sample "Claude needs you" the way a hook would.
-#[tauri::command]
-async fn test_claude_alert() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis());
-        // A session of its own, so it isn't taken for a repeat.
-        let event = serde_json::json!({
-            "hook_event_name": "Notification",
-            "notification_type": "permission_prompt",
-            "session_id": format!("yoru-test-{now}"),
-            "cwd": "/Yoru",
-        });
-        board().claude_hook(event).map(drop).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Claude Code's sessions and the permission requests waiting (Yoru's own too).
-#[tauri::command]
-fn claude_agents(state: State<AppState>) -> AgentsView {
-    state.agents.view()
-}
-
-/// Answer permission request `id`; false when it's no longer waiting.
-#[tauri::command]
-fn claude_approve(state: State<AppState>, id: String, allow: bool) -> bool {
-    state.agents.answer(&id, if allow { Decision::Allow } else { Decision::Deny })
+fn confirm(state: State<AppState>, id: String, allow: bool) -> bool {
+    state.confirmations.answer(&id, allow)
 }
 
 /// The Timers tab: what's running and where it shows.
@@ -1487,10 +1404,10 @@ fn timers_info(state: State<AppState>) -> TimersInfo {
     timers_info_of(&state)
 }
 
-/// Run one of `Timers::tools` (`set_timer`, `control_timer`, `update_timer`...), in the alerts' language.
+/// Run one of `Timers::tools` (`set_timer`, `control_timer`, `update_timer`...), in the app's language.
 #[tauri::command]
 fn timer_tool(state: State<AppState>, name: String, arguments: serde_json::Value) -> Result<TimersInfo, String> {
-    let language = state.claude_alerts.lock().unwrap().language.clone();
+    let language = app_language(&state);
     state.timers.call_tool(&name, &arguments, &language).ok_or_else(|| format!("unknown timer tool {name}"))??;
     Ok(timers_info_of(&state))
 }
@@ -1584,8 +1501,7 @@ fn start_bridge(app: &AppHandle, port: Option<String>) -> BoardManager {
         primary: state.primary.clone(),
         hub: state.hub.clone(),
         voice: state.voice.clone(),
-        claude_alerts: state.claude_alerts.clone(),
-        agents: state.agents.clone(),
+        confirmations: state.confirmations.clone(),
         timers: state.timers.clone(),
         follow_pointer: state.follow_pointer.clone(),
         assistant: Some(state.assistant.clone()),
@@ -1689,6 +1605,18 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Older versions put a hook and a status line in Claude Code's settings,
+/// with flags this binary no longer has: take them out, once.
+fn remove_claude_code_hooks() {
+    match cleanup::remove_legacy() {
+        Ok(removed) if removed.hooks > 0 || removed.status_line => {
+            eprintln!("Claude Code: removed Yoru's old hooks ({}) and status line ({})", removed.hooks, removed.status_line)
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("Claude Code: couldn't remove Yoru's old hooks and status line: {e}"),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     instances::wait_for_predecessor();
@@ -1703,6 +1631,7 @@ pub fn run() {
         .setup(|app| {
             // We hold the single instance now; older copies must let go of the port.
             instances::stop_strays();
+            remove_claude_code_hooks();
             check_hardware();
             if let Some(me) = instances::SelfBinary::capture(app.handle()) {
                 app.manage(me);
@@ -1722,7 +1651,6 @@ pub fn run() {
                 .unwrap_or_default();
             let port = settings.port.clone();
             let primary = Arc::new(Mutex::new(settings.primary.clone()));
-            let claude_alerts = Arc::new(Mutex::new(settings.claude_alerts.clone()));
             let follow_pointer = Arc::new(AtomicBool::new(!settings.ignore_pointer));
             let timers = Arc::new(Timers::open(timers::default_file()));
             let dir = assistant_mod::default_dir();
@@ -1743,9 +1671,8 @@ pub fn run() {
                 device_busy: AtomicBool::new(false),
                 esptool_dir,
                 voice: Arc::default(),
-                claude_alerts,
                 timers,
-                agents: Arc::default(),
+                confirmations: Arc::default(),
                 follow_pointer,
                 assistant: the_assistant,
                 watchers,
@@ -1783,7 +1710,7 @@ pub fn run() {
             status, list_ports, set_port, set_transport, boards,
             wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair,
             firmware_info, identify_board, flash_board,
-            claude_link, claude_connect, claude_disconnect, claude_alerts_info, set_claude_alerts, claude_hooks, test_claude_alert, claude_agents, claude_approve, mcp_info, claude_mcp,
+            confirmations, confirm, mcp_info, claude_mcp,
             voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine,
             board_voice, set_board_volume, set_board_wake_sound, play_board_sound, test_voice,
             yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu,

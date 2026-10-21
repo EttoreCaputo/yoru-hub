@@ -4,7 +4,7 @@ Decided on 2026-10-19. Yoru becomes a personal assistant that lives on the compu
 
 This repository (`yoru-hub`, formerly `companion-hub`) becomes Yoru's only host program. DualEye leaves it (DualEye keeps its own `host/`), and so does everything that was there only for the pet. The Yoru app (`../yoru-app`, the fork of coucou) stays in use until phase A2 works, then it is retired.
 
-Out of scope, on purpose: firmware 0.9's remote features on the host (drafts, session chats, new sessions) and the Mac-native parts of the Yoru app (pasting with Accessibility, bringing a terminal to the front, Parakeet, Apple's speech recognition). The board still works without them: its push-to-talk is an ordinary utterance.
+Out of scope, on purpose: firmware 0.9's remote features on the host (drafts, session chats, new sessions), following coding agents (see below) and the Mac-native parts of the Yoru app (pasting with Accessibility, bringing a terminal to the front, Parakeet, Apple's speech recognition). The board still works without them: its push-to-talk is an ordinary utterance.
 
 ## The parts
 
@@ -14,7 +14,7 @@ Out of scope, on purpose: firmware 0.9's remote features on the host (drafts, se
  (remote    │  (MCP client,    │  ▲                             │  (link: USB/WiFi)
   MCP, OAuth)│  OAuth, tokens) ▼  │                             │◄────────────►  Yoru
             │  watchers ──► triage ──► notifications ──────────►│
-            │  memory, timers, coding agents (Claude Code hooks)│
+            │  memory, timers                                   │
             │  MCP server (for Claude Code and others)          │
             └──────────── app (Tauri + Svelte), CLI ────────────┘
 ```
@@ -85,7 +85,12 @@ Files in the data folder that the agent reads at the start of a turn and keeps u
 
 ## Coding agents
 
-`claude/agents.rs`, `claude/hooks.rs` and `bridge/agents.rs` stay: Claude Code's sessions and permission requests on the board, as one more source of notifications. Only Claude Code for now.
+Removed on 2026-10-21: Yoru no longer follows Claude Code. The hooks, the status line, the sessions' feed, the permission requests answered from the board or the app, the alerts about Claude ("Claude needs you", "Claude is done", the plan's limits) and the transcripts' usage are gone, and so are the board tools and notifications that served them (`set_agents`, `show_toast`, `show_question`, `hide_question`, drafts, chats, new sessions, `answer`, `shortcut`, `to` on `utterance_start`).
+
+What stays:
+- Yoru's MCP server (`mcp.rs`), for any MCP client, and the button that adds it to Claude Code's config (`claude/mcpconfig.rs`). A client can make Yoru react, speak, notify you and set timers.
+- The Allow/Deny card (`show_approval`, `hide_approval`, the `approval` notification), now only for the assistant's own confirmations (`assistant/confirm.rs`, `bridge/confirm.rs`).
+- `claude/cleanup.rs`: at start the app takes out of Claude Code's settings.json the hooks (`"<exe>" --claude-hook`) and the status line (`"<exe>" --claude-statusline`) older versions installed, matching only Yoru's own executable (`yoru-app`, `yoru`), and puts back the status line it had replaced. Until then the app binary ends at once, silently, when run with either flag.
 
 ## The app: Yoru only, redone
 
@@ -93,7 +98,7 @@ Today the window is DualEye's: a home with the board's mirror and pills, and a s
 
 | Page | What is on it |
 |------|---------------|
-| Today | Yoru's mirror, small; what it told you today; what comes next (events, timers, sessions at work); a field to type or talk to it |
+| Today | Yoru's mirror, small; what it told you today; what comes next (events, timers); a field to type or talk to it |
 | Conversation | The chat with Yoru, text and voice, with the tools it used folded away and the confirmations it is waiting for |
 | Inbox | Every notification with its source, read or not, and its actions: open, reply, dismiss, "don't tell me about this again" (which goes into the memory) |
 | Connectors | A card per service: connected or not, Connect and Disconnect, what it may read and what it may do, its watchers and how often |

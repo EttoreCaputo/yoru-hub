@@ -1,19 +1,18 @@
 <!--
   A card waiting for Allow or Deny: something Yoru is about to do (send a
-  mail, create an event), or a Claude Code permission request. The same card
-  is on the board; whichever answers first wins.
+  mail, create an event). The same card is on the board; whichever answers
+  first wins.
 -->
 <script lang="ts">
   import { why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { Approval } from "../types";
+  import type { Confirmation } from "../types";
   import { clock } from "./when";
 
-  let { approval }: { approval: Approval } = $props();
-  const t = $derived(i18n.t.approval);
-  const yoru = $derived(approval.session === "yoru");
-  const left = $derived(Math.max(0, (approval.expires - store.now) / 1000));
+  let { card }: { card: Confirmation } = $props();
+  const t = $derived(i18n.t.card);
+  const left = $derived(Math.max(0, (card.expires - store.now) / 1000));
   let open = $state(false);
   let busy = $state(false);
   let error = $state("");
@@ -22,7 +21,7 @@
     busy = true;
     error = "";
     try {
-      await store.approve(approval.id, allow);
+      await store.confirm(card.id, allow);
     } catch (e) {
       error = why(e);
       busy = false;
@@ -30,17 +29,17 @@
   }
 </script>
 
-<article class="card" class:yoru>
+<article class="card">
   <header>
     <span class="dot wait"></span>
-    <span class="who">{yoru ? t.yoruAsks : t.codeAsks(approval.project ?? approval.session)}</span>
-    <span class="tool mono">{approval.tool}</span>
+    <span class="who">{t.yoruAsks}</span>
+    <span class="tool mono">{card.tool}</span>
     <span class="left faint">{t.expires(clock(left))}</span>
   </header>
-  <p class="what">{approval.text}</p>
-  {#if approval.detail}
+  <p class="what">{card.text}</p>
+  {#if card.detail}
     <button class="btn quiet small more" onclick={() => (open = !open)} aria-expanded={open}>{t.details}</button>
-    {#if open}<pre class="detail mono">{approval.detail}</pre>{/if}
+    {#if open}<pre class="detail mono">{card.detail}</pre>{/if}
   {/if}
   <div class="row actions">
     <button class="btn primary" disabled={busy} onclick={() => answer(true)}>{t.allow}</button>

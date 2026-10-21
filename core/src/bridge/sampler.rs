@@ -1,6 +1,5 @@
 //! The computer's side of the bridge, once for every board: each interval it
-//! reads Claude Code's usage, ticks the timers, notes the time and how present
-//! you are, and publishes the snapshot for the sessions to send. Timers fire
+//! ticks the timers, notes the time and how present you are, and publishes the snapshot for the sessions to send. Timers fire
 //! here, once, however many boards there are; what's up goes to the alerts
 //! thread to be said.
 //!
@@ -13,10 +12,9 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::claude::ClaudeUsage;
 use crate::snapshot::Snapshot;
 
-use super::alerts::{AlertInput, Targets};
+use super::alerts::AlertInput;
 use super::{BridgeConfig, sleep_unless_stopped};
 
 /// While no session is open, how often to look whether one has.
@@ -77,18 +75,12 @@ impl Drop for SessionOpen<'_> {
     }
 }
 
-/// What the sampler keeps from one snapshot to the next.
-pub(super) struct Sampler {
-    claude: Mutex<ClaudeUsage>,
-}
+/// The computer's side: the timers, the time and your presence.
+pub(super) struct Sampler;
 
 impl Sampler {
-    pub fn new(_config: &BridgeConfig) -> Self {
-        Self { claude: Mutex::new(ClaudeUsage::new()) }
-    }
-
     /// Sample every `config.interval` while a session is open, until `stop`.
-    pub fn run(&self, config: &BridgeConfig, stop: &AtomicBool, latest: &Latest, alert_tx: &Sender<AlertInput>, _targets: &Targets) {
+    pub fn run(&self, config: &BridgeConfig, stop: &AtomicBool, latest: &Latest, alert_tx: &Sender<AlertInput>) {
         let mut next = Instant::now();
         while !stop.load(Ordering::Relaxed) {
             if !latest.any_session() {
@@ -106,13 +98,9 @@ impl Sampler {
         }
     }
 
-    /// One snapshot of the computer, with what it set off: alerts and timers.
+    /// One snapshot of the computer, with the timers it set off.
     fn sample(&self, config: &BridgeConfig, alert_tx: &Sender<AlertInput>) -> Snapshot {
         let mut snapshot = Snapshot::now();
-        snapshot.claude = self.claude.lock().unwrap().sample();
-        if let Some(metrics) = &snapshot.claude {
-            let _ = alert_tx.send(AlertInput::Metrics(metrics.clone()));
-        }
         for fired in config.timers.tick() {
             let _ = alert_tx.send(AlertInput::Timer(fired));
         }

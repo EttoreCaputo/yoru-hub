@@ -18,12 +18,17 @@
 //! Speech goes to the board on `audio_down`, paced in real time a little
 //! ahead of the speaker, a sentence at a time: the first plays while the
 //! next is synthesized. The board says `playback_end` once it has played it.
+//! The answer is streamed ([`crate::stream`]): each sentence is spoken as
+//! soon as the model has written it (`Aloud`), and a voice that streams
+//! (ElevenLabs) is heard before it has made the whole sentence. While the
+//! model goes off to call a tool the board stops speaking and thinks; while
+//! the next sentence is late, silence keeps the board's stream open.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -38,6 +43,7 @@ use crate::intents::{self, Context};
 use crate::link::{Link, Tool};
 use crate::profile::BoardKind;
 use crate::protocol::Channel;
+use crate::stream::Delta;
 use crate::stt::Stt;
 use crate::timers::Timers;
 use crate::tts::{self, Tts};
@@ -202,6 +208,9 @@ pub struct VoiceConfig {
     /// After a spoken answer, listen for a few seconds more without the
     /// wake word.
     pub follow_up: bool,
+    /// The language every answer is in (`it`, `en`), the one picked in the
+    /// app; `None` answers in the one heard.
+    pub language: Option<String>,
 }
 
 /// Whisper's output for silence or noise rather than words.
@@ -212,7 +221,7 @@ fn is_non_speech(text: &str) -> bool {
 
 /// Where WAV dumps go by default: `voice/` in the data folder.
 pub fn default_dump_dir() -> Option<PathBuf> {
-    crate::claude::data_dir().map(|d| d.join("voice"))
+    crate::paths::data_dir().map(|d| d.join("voice"))
 }
 
 const STATE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -297,7 +306,7 @@ pub(crate) struct Session {
     /// Yoru the assistant, which answers when it can.
     pub assistant: Option<Arc<crate::Assistant>>,
     /// Where the assistant's actions are allowed or denied.
-    pub agents: Arc<crate::claude::agents::Agents>,
+    pub confirmations: Arc<crate::assistant::Confirmations>,
     /// What the board's eyes show, from its `voice_state`.
     pub voice_state: Arc<Mutex<String>>,
 }
@@ -426,51 +435,245 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
     // "Stop" or "5 more minutes" for an alarm needs no language model: the rules, at once.
     let alarm = session.timers.is_ringing() || session.timers.dismissed_within(ALARM_FOLLOW_UP);
     let quick = alarm && intents::understand(text, language, &Context { alarm, ..Context::default() }).calls.iter().any(|(t, _)| matches!(t.as_str(), "control_timer" | "update_timer"));
-    let assistant = session.assistant.as_ref().filter(|a| !quick && a.is_ready());
-    let answer = assistant.and_then(|a| match a.respond(text, Some(language), crate::assistant::Channel::Voice, &VoiceHost { link, session }) {
-        Ok(reply) => Some((reply.text, reply.actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect(), true, "assistant")),
-        // Its free limits ran out: say so and when, rather than a worse answer.
-        Err(e) if a.limited().is_some() => {
-            sink(BridgeEvent::VoiceError { message: e });
-            a.limited().map(|limit| (crate::assistant::limit_line(&limit, language), Vec::new(), true, "assistant"))
+    // The models answer in the language picked; the rules only understand the one heard.
+    let heard = language;
+    let language = config.language.as_deref().unwrap_or(heard);
+    let tts = config.tts.as_deref();
+    let (said, to_say) = mpsc::channel();
+    thread::scope(|scope| {
+        // The answer is spoken as the brain writes it, a sentence at a time.
+        let talker = tts.map(|tts| scope.spawn(move || talk(link, session, tts, to_say, thinking)));
+        let mut aloud = Aloud::new(said, language);
+        let assistant = session.assistant.as_ref().filter(|a| !quick && a.is_ready());
+        let answer = assistant.and_then(|a| match a.respond_aloud(text, Some(heard), crate::assistant::Channel::Voice, &VoiceHost { link, session }, &mut |d| aloud.add(d)) {
+            Ok(reply) => Some((reply.text, reply.actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect(), true, "assistant", language)),
+            // Its free limits ran out: say so and when, rather than a worse answer.
+            Err(e) if a.limited().is_some() => {
+                sink(BridgeEvent::VoiceError { message: e });
+                a.limited().map(|limit| (crate::assistant::limit_line(&limit, language), Vec::new(), true, "assistant", language))
+            }
+            // Half an answer was already said: no second one over it.
+            Err(e) if aloud.has_spoken() => {
+                sink(BridgeEvent::VoiceError { message: e });
+                Some((aloud.text().to_string(), Vec::new(), true, "assistant", language))
+            }
+            Err(e) => {
+                sink(BridgeEvent::VoiceError { message: format!("{e}; answering without the assistant") });
+                None
+            }
+        });
+        let agent = config.agent.as_ref().filter(|_| !quick && answer.is_none());
+        let answer = answer.or_else(|| {
+            agent.and_then(|agent| match agent.respond_aloud(text, language, &BoardToolbox { link, session, language }, &mut |d| aloud.add(d)) {
+                Ok(turn) => Some((turn.reply, turn.actions.iter().map(action_line).collect(), true, "llm", language)),
+                Err(e) if aloud.has_spoken() => {
+                    sink(BridgeEvent::VoiceError { message: e.to_string() });
+                    Some((aloud.text().to_string(), Vec::new(), true, "llm", language))
+                }
+                Err(e) => {
+                    sink(BridgeEvent::VoiceError { message: format!("{e}; answering with the rules instead") });
+                    None
+                }
+            })
+        });
+        let (reply, actions, understood, by, language) = answer.unwrap_or_else(|| {
+            let (reply, actions, understood) = rules(link, session, text, heard);
+            (reply, actions, understood, "rules", heard)
+        });
+        // A reply that wasn't written as it came (the rules', "Done.", a
+        // limit), or whose last words weren't: said whole now.
+        if !aloud.finish() {
+            aloud.say_all(&reply, language);
         }
-        Err(e) => {
-            sink(BridgeEvent::VoiceError { message: format!("{e}; answering without the assistant") });
-            None
+        drop(aloud);
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        sink(BridgeEvent::Reply { id, text: reply.clone(), language: language.to_string(), actions, understood, by: by.into(), elapsed_ms });
+        let Some(talker) = talker else { return Next::State("idle") };
+        match talker.join().unwrap_or_else(|_| Err("the voice stopped".into())) {
+            Ok(Some(spoken)) => {
+                let next = match spoken.reason.as_str() {
+                    "done" => Next::Spoken,
+                    "barge_in" => Next::Interrupted,
+                    // Stopped or replaced by someone else: they say what's next.
+                    _ => Next::State("idle"),
+                };
+                sink(BridgeEvent::Spoken { id, spoken });
+                next
+            }
+            Ok(None) => Next::State("idle"),
+            Err(e) => {
+                sink(BridgeEvent::VoiceError { message: e });
+                Next::State("error")
+            }
         }
-    });
-    let agent = config.agent.as_ref().filter(|_| !quick && answer.is_none());
-    let answer = answer.or_else(|| agent.and_then(|agent| match agent.respond(text, language, &BoardToolbox { link, session, language }) {
-        Ok(turn) => Some((turn.reply, turn.actions.iter().map(action_line).collect(), true, "llm")),
-        Err(e) => {
-            sink(BridgeEvent::VoiceError { message: format!("{e}; answering with the rules instead") });
-            None
+    })
+}
+
+/// What the voice is to say, in order.
+pub(crate) enum Said {
+    /// A sentence, and the language it's in.
+    Sentence(String, String),
+    /// The brain went off to call tools: the board stops speaking and
+    /// shows it thinks until the next sentence.
+    Pause,
+}
+
+/// Speak what comes on `said` until it ends, a stream on the board for each
+/// stretch between pauses; the board thinks during a pause. The reply as
+/// it was heard (`None`: nothing to say). Stops at a barge-in.
+fn talk(link: &Link, session: &Session, tts: &Tts, said: Receiver<Said>, thinking: &mut StillThinking) -> Result<Option<Spoken>, String> {
+    let said = Mutex::new(said);
+    let mut whole: Option<Spoken> = None;
+    loop {
+        let first = match said.lock().unwrap().recv() {
+            Ok(Said::Sentence(s, l)) => (s, l),
+            Ok(Said::Pause) => continue,
+            Err(_) => return Ok(whole),
+        };
+        thinking.stop();
+        let (spoken, paused) = session.speaker.speak_segment(link, tts, first, &said)?;
+        let spoken = match whole.take() {
+            Some(before) => Spoken {
+                text: format!("{} {}", before.text, spoken.text),
+                first_audio_ms: before.first_audio_ms,
+                played_ms: before.played_ms + spoken.played_ms,
+                underruns: before.underruns + spoken.underruns,
+                lost: before.lost + spoken.lost,
+                reason: spoken.reason,
+            },
+            None => spoken,
+        };
+        let done = spoken.reason == "done";
+        whole = Some(spoken);
+        if !done {
+            return Ok(whole);
         }
-    }));
-    let (reply, actions, understood, by) = answer.unwrap_or_else(|| {
-        let (reply, actions, understood) = rules(link, session, text, language);
-        (reply, actions, understood, "rules")
-    });
-    let elapsed_ms = started.elapsed().as_millis() as u64;
-    sink(BridgeEvent::Reply { id, text: reply.clone(), language: language.to_string(), actions, understood, by: by.into(), elapsed_ms });
-    let Some(tts) = config.tts.as_deref() else { return Next::State("idle") };
-    thinking.stop();
-    match session.speaker.speak(link, tts, &reply, language) {
-        Ok(spoken) => {
-            let next = match spoken.reason.as_str() {
-                "done" => Next::Spoken,
-                "barge_in" => Next::Interrupted,
-                // Stopped or replaced by someone else: they say what's next.
-                _ => Next::State("idle"),
-            };
-            sink(BridgeEvent::Spoken { id, spoken });
-            next
-        }
-        Err(e) => {
-            sink(BridgeEvent::VoiceError { message: e });
-            Next::State("error")
+        if paused {
+            set_state(link, "thinking");
+            *thinking = StillThinking::start(session);
         }
     }
+}
+
+/// What a brain writes ([`Delta`]), made into sentences for [`talk`] as it
+/// comes. Its thinking (`<think>…</think>`) is left out, and a round that
+/// starts like a tool call written as text (`<tool_call>`, `{"name": …`) is
+/// held back until it turns out to be words: then it's said at the end.
+struct Aloud {
+    said: Sender<Said>,
+    language: String,
+    /// The round's words so far, raw.
+    round: String,
+    /// Bytes of the round's [`visible`] words already said.
+    sent: usize,
+    /// All that was said.
+    text: String,
+    /// Something was said since the last tool call.
+    fresh: bool,
+}
+
+impl Aloud {
+    fn new(said: Sender<Said>, language: &str) -> Self {
+        Self { said, language: language.to_string(), round: String::new(), sent: 0, text: String::new(), fresh: false }
+    }
+
+    fn add(&mut self, delta: Delta) {
+        match delta {
+            Delta::Text(t) => {
+                self.round.push_str(t);
+                self.say_sentences(false);
+            }
+            Delta::Tools => {
+                // What came before the call is said, unless it was the call.
+                if !held(&visible(&self.round, true)) {
+                    self.say_sentences(true);
+                }
+                self.round.clear();
+                self.sent = 0;
+                self.fresh = false;
+                let _ = self.said.send(Said::Pause);
+            }
+        }
+    }
+
+    /// The brain is done: the rest is said. Whether the last round said anything.
+    fn finish(&mut self) -> bool {
+        self.say_sentences(true);
+        self.fresh
+    }
+
+    fn has_spoken(&self) -> bool {
+        !self.text.is_empty()
+    }
+
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// `text`, written all at once, in `language`.
+    fn say_all(&mut self, text: &str, language: &str) {
+        for s in tts::sentences(&tts::speakable(text, language)) {
+            self.push(s, language.to_string());
+        }
+    }
+
+    /// The round's whole sentences not said yet, or, when `all`, everything left.
+    fn say_sentences(&mut self, all: bool) {
+        let visible = visible(&self.round, all);
+        if !all && held(&visible) {
+            return;
+        }
+        while self.sent < visible.len() {
+            let rest = &visible[self.sent..];
+            let end = match tts::sentence_end(rest) {
+                Some(end) => end,
+                None if all => rest.len(),
+                None => return,
+            };
+            self.sent += end;
+            let sentence = tts::speakable(&rest[..end], &self.language);
+            if sentence.chars().any(char::is_alphanumeric) {
+                self.push(sentence, self.language.clone());
+            }
+        }
+    }
+
+    fn push(&mut self, sentence: String, language: String) {
+        if !self.text.is_empty() {
+            self.text.push(' ');
+        }
+        self.text.push_str(&sentence);
+        self.fresh = true;
+        let _ = self.said.send(Said::Sentence(sentence, language));
+    }
+}
+
+/// The words of `raw` a voice may say: no thinking (one not closed yet
+/// hides the rest) and, unless the text is `done`, no tag still being
+/// written at its end, which may open a thought. What it returns only
+/// grows as `raw` does.
+fn visible(raw: &str, done: bool) -> String {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+    let mut out = String::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find(OPEN) {
+        out.push_str(&rest[..start]);
+        match rest[start..].find(CLOSE) {
+            Some(end) => rest = &rest[start + end + CLOSE.len()..],
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    if !done && let Some(lt) = out.rfind('<').filter(|&lt| !out[lt..].contains('>')) {
+        out.truncate(lt);
+    }
+    out
+}
+
+/// Words that start like a tool call written as text rather than an answer.
+fn held(visible: &str) -> bool {
+    visible.trim_start().starts_with(['<', '{'])
 }
 
 /// "set_face: left: rings", "set_face failed: …"
@@ -510,7 +713,7 @@ const ALARM_FOLLOW_UP: Duration = Duration::from_secs(20);
 
 /// Board tools the voice agent doesn't get: muted by voice, the board
 /// couldn't be unmuted by voice; the sounds are toys, not worth a tool; and
-/// the host's own (cards, the agents' list, the inbox).
+/// the host's own (the assistant's cards, the inbox).
 fn not_by_voice(name: &str) -> bool {
     matches!(name, "set_mic" | "play_sound") || BoardKind::hub_only(name)
 }
@@ -614,8 +817,7 @@ impl crate::assistant::Host for VoiceHost<'_> {
     }
 
     fn confirm(&self, title: &str, text: &str, detail: &str) -> Option<bool> {
-        use crate::claude::agents::Decision;
-        self.session.agents.confirm(title, text, Some(detail), crate::assistant::CONFIRM_WAIT).map(|d| d == Decision::Allow)
+        self.session.confirmations.ask(title, text, Some(detail), crate::assistant::CONFIRM_WAIT)
     }
 }
 
@@ -623,6 +825,9 @@ impl crate::assistant::Host for VoiceHost<'_> {
 const PLAY_FRAME: usize = 1024;
 /// How far ahead of the speaker the host keeps the board's buffer.
 const PLAY_LEAD: Duration = Duration::from_millis(500);
+/// Sound the board has left when silence goes out to fill a wait: the
+/// board ends a stream that goes dry for 1.5 s (`STARVED_MS`).
+const KEEP_FED: Duration = Duration::from_millis(150);
 /// Past the end of the audio, how long to wait for `playback_end`.
 const PLAY_GRACE: Duration = Duration::from_secs(3);
 
@@ -670,30 +875,76 @@ impl Speaker {
     /// Synthesize `text` in `language` and play it, a sentence at a time.
     /// Returns once the board has played it.
     pub fn speak(&self, link: &Link, tts: &Tts, text: &str, language: &str) -> Result<Spoken, String> {
+        let mut sentences = tts::sentences(&tts::speakable(text, language)).into_iter();
+        let Some(first) = sentences.next() else { return Ok(Spoken { text: text.to_string(), first_audio_ms: 0, played_ms: 0, reason: "done".into(), underruns: 0, lost: 0 }) };
+        let (tx, rx) = mpsc::channel();
+        for s in sentences {
+            let _ = tx.send(Said::Sentence(s, language.to_string()));
+        }
+        drop(tx);
+        let (spoken, _) = self.speak_segment(link, tts, (first, language.to_string()), &Mutex::new(rx))?;
+        Ok(Spoken { text: text.to_string(), ..spoken })
+    }
+
+    /// Play `first` and the sentences after it in `said` as one stream on the
+    /// board, each synthesized while the one before plays, until a
+    /// [`Said::Pause`] (`true`) or the end. Returns once the board played it.
+    fn speak_segment(&self, link: &Link, tts: &Tts, first: (String, String), said: &Mutex<Receiver<Said>>) -> Result<(Spoken, bool), String> {
         let started = Instant::now();
-        let (tx, rx) = mpsc::sync_channel::<Result<Vec<i16>, String>>(2);
-        let sentences = tts::sentences(&tts::speakable(text, language));
+        let (tx, rx) = mpsc::sync_channel::<Result<Vec<i16>, String>>(8);
         thread::scope(|scope| {
-            scope.spawn(move || {
-                for s in sentences {
-                    let audio = tts.synthesize(&s, language).map_err(|e| e.to_string());
-                    let failed = audio.is_err();
-                    if tx.send(audio).is_err() || failed {
-                        return;
+            let synth = scope.spawn(move || {
+                let (mut text, mut next) = (String::new(), Some(first));
+                loop {
+                    let (sentence, language) = match next.take() {
+                        Some(s) => s,
+                        None => match said.lock().unwrap().recv() {
+                            Ok(Said::Sentence(s, l)) => (s, l),
+                            Ok(Said::Pause) => return (text, true),
+                            Err(_) => return (text, false),
+                        },
+                    };
+                    let mut gone = false;
+                    let audio = tts.synthesize_into(&sentence, &language, &mut |samples| gone |= tx.send(Ok(samples)).is_err());
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(&sentence);
+                    // The board stopped playing it: say no more.
+                    if gone {
+                        return (text, false);
+                    }
+                    if let Err(e) = audio {
+                        let _ = tx.send(Err(e.to_string()));
+                        return (text, false);
                     }
                 }
             });
             let mut first_audio_ms = None;
-            let played = self.play(link, rx.into_iter().inspect(|_| {
+            let played = self.play_from(link, rx, &mut || {
                 first_audio_ms.get_or_insert(started.elapsed().as_millis() as u64);
-            }))?;
-            Ok(Spoken { text: text.to_string(), first_audio_ms: first_audio_ms.unwrap_or(0), ..played })
+            });
+            let (text, paused) = synth.join().unwrap_or_default();
+            Ok((Spoken { text, first_audio_ms: first_audio_ms.unwrap_or(0), ..played? }, paused))
         })
     }
 
     /// Stream audio to the board as it comes, paced in real time, then wait
     /// for the board to finish playing it.
     pub fn play(&self, link: &Link, audio: impl IntoIterator<Item = Result<Vec<i16>, String>>) -> Result<Spoken, String> {
+        let (tx, rx) = mpsc::channel();
+        for chunk in audio {
+            let _ = tx.send(chunk);
+        }
+        drop(tx);
+        self.play_from(link, rx, &mut || {})
+    }
+
+    /// [`Speaker::play`] from `audio`, a channel that may be slow to fill:
+    /// while it waits, silence keeps the board's buffer from running dry,
+    /// or the board would end the stream as starved. `first` is called with
+    /// the first sound.
+    fn play_from(&self, link: &Link, audio: Receiver<Result<Vec<i16>, String>>, first: &mut dyn FnMut()) -> Result<Spoken, String> {
         let mut id = self.playing.lock().unwrap();
         *id = id.wrapping_add(1);
         let id = *id;
@@ -727,17 +978,36 @@ impl Speaker {
             link.send(Channel::AudioDown, &frame)
         };
         let mut cut_short = false;
-        for chunk in audio {
+        loop {
             if self.has_ended(id) {
                 cut_short = true;
                 break;
             }
+            // Once it plays, wait only until the board is about to run dry.
+            let dry = clock.map(|c| c + Duration::from_micros(sent * 1_000_000 / SAMPLE_RATE as u64));
+            let chunk = match dry {
+                None => audio.recv().map_err(|_| RecvTimeoutError::Disconnected),
+                Some(dry) => audio.recv_timeout(dry.saturating_duration_since(Instant::now()).saturating_sub(KEEP_FED)),
+            };
             match chunk {
-                Ok(samples) => pending.extend(samples),
-                Err(e) => {
+                Ok(Ok(samples)) => {
+                    if !samples.is_empty() && clock.is_none() {
+                        first();
+                    }
+                    pending.extend(samples);
+                }
+                Ok(Err(e)) => {
                     failure = Some(e);
                     break;
                 }
+                Err(RecvTimeoutError::Timeout) => {
+                    // The next sentence is late: a pause, not an end.
+                    pending.resize(pending.len().max(PLAY_FRAME), 0);
+                    send(&pending, false, &mut clock, &mut sent).map_err(|e| e.to_string())?;
+                    pending.clear();
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
             }
             while pending.len() > PLAY_FRAME && !cut_short {
                 let rest = pending.split_off(PLAY_FRAME);
@@ -841,6 +1111,64 @@ pub fn audio_frame(id: u8, seq: u16, samples: &[i16]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What `deltas` make `Aloud` say, and whether its last round said anything.
+    fn said(deltas: &[Delta]) -> (Vec<String>, bool) {
+        let (tx, rx) = mpsc::channel();
+        let mut aloud = Aloud::new(tx, "it");
+        for d in deltas {
+            aloud.add(*d);
+        }
+        let fresh = aloud.finish();
+        drop(aloud);
+        let lines = rx
+            .into_iter()
+            .map(|s| match s {
+                Said::Sentence(s, _) => s,
+                Said::Pause => "|".into(),
+            })
+            .collect();
+        (lines, fresh)
+    }
+
+    #[test]
+    fn sentences_are_said_as_they_are_written() {
+        let (tx, rx) = mpsc::channel();
+        let mut aloud = Aloud::new(tx, "it");
+        aloud.add(Delta::Text("La protesta è sospesa"));
+        assert!(rx.try_recv().is_err());
+        aloud.add(Delta::Text(" da oggi. Il confronto"));
+        assert!(matches!(rx.try_recv(), Ok(Said::Sentence(s, _)) if s == "La protesta è sospesa da oggi."));
+        aloud.add(Delta::Text(" è il 27."));
+        assert!(rx.try_recv().is_err());
+        assert!(aloud.finish());
+        assert!(matches!(rx.try_recv(), Ok(Said::Sentence(s, _)) if s == "Il confronto è il 27."));
+    }
+
+    #[test]
+    fn thinking_is_not_said() {
+        let deltas = [Delta::Text("<thi"), Delta::Text("nk>Devo cercare. Poi rispondo.</th"), Delta::Text("ink>\n\nEcco la risposta di oggi.")];
+        assert_eq!(said(&deltas).0, ["Ecco la risposta di oggi."]);
+        assert!(said(&[Delta::Text("Ok, ci penso su. <think>E se invece")]).0 == ["Ok, ci penso su."]);
+    }
+
+    #[test]
+    fn a_call_written_as_text_is_not_said() {
+        let call = "<tool_call><function=set_face><parameter=face>rings</parameter></function></tool_call>";
+        let (lines, fresh) = said(&[Delta::Text(call), Delta::Tools]);
+        assert_eq!((lines, fresh), (vec!["|".to_string()], false));
+        // Words that only looked like one are said at the end.
+        assert_eq!(said(&[Delta::Text("{ok} va bene. Fatto per oggi.")]).0, ["ok va bene.", "Fatto per oggi."]);
+    }
+
+    #[test]
+    fn words_before_a_tool_are_said_then_a_pause() {
+        let (lines, fresh) = said(&[Delta::Text("Cerco le notizie"), Delta::Tools, Delta::Text("In Calabria la protesta è sospesa.")]);
+        assert_eq!(lines, ["Cerco le notizie", "|", "In Calabria la protesta è sospesa."]);
+        assert!(fresh);
+        // Nothing after the last tool: the reply is said whole instead.
+        assert!(!said(&[Delta::Text("Un attimo che controllo."), Delta::Tools]).1);
+    }
 
     #[test]
     fn a_refused_utterance_is_not_captured() {

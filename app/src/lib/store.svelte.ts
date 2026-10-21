@@ -1,6 +1,6 @@
 // What the window knows, kept current by the Rust side's events: the board,
-// the assistant (inbox, conversation, settings), Claude Code's sessions and
-// the cards waiting for an answer, the connectors and the watchers.
+// the assistant (inbox, conversation, settings, the cards waiting for an
+// answer), the connectors and the watchers.
 //
 // Pages read it and call its methods; the Rust side stays the source of
 // truth, so every change goes there and comes back as an event or a reply.
@@ -9,14 +9,13 @@ import { call, inPreview, on, why } from "./api";
 import { BUNDLED_VERSION } from "./bundled";
 import { changelog, updateFor, type Update } from "./updates";
 import type {
-  AgentsView,
-  Approval,
   AssistantInfo,
   AssistantSettings,
   BoardFirmware,
   BoardState,
   BridgeEvent,
   ChatLine,
+  Confirmation,
   ConnectorStatus,
   FlashEvent,
   Gaze,
@@ -74,7 +73,8 @@ class Store {
   /** A question typed and not answered yet. */
   asking = $state<string | null>(null);
   askError = $state("");
-  agents = $state<AgentsView>({ sessions: [], approvals: [] });
+  /** The cards the assistant waits on, oldest first. */
+  confirmations = $state<Confirmation[]>([]);
   timers = $state<TimersInfo | null>(null);
   connectors = $state<ConnectorStatus[]>([]);
   connectorsError = $state("");
@@ -84,9 +84,6 @@ class Store {
   onboarding = $state<Onboarding | null>(null);
 
   unread = $derived(this.inbox.filter((n) => !n.read).length);
-  /** The cards Yoru itself is waiting on (its session is `yoru`), and Claude Code's. */
-  yoruApprovals = $derived(this.agents.approvals.filter((a) => a.session === "yoru"));
-  codeApprovals = $derived(this.agents.approvals.filter((a) => a.session !== "yoru"));
 
   #started = false;
 
@@ -106,19 +103,19 @@ class Store {
 
   async #load() {
     const quiet = <T>(p: Promise<T>) => p.catch(() => undefined);
-    const [status, info, inbox, chat, agents, onboarding] = await Promise.all([
+    const [status, info, inbox, chat, confirmations, onboarding] = await Promise.all([
       quiet(call<Status>("status")),
       quiet(call<AssistantInfo>("assistant_info")),
       quiet(call<Notification[]>("inbox")),
       quiet(call<ChatLine[]>("chat")),
-      quiet(call<AgentsView>("claude_agents")),
+      quiet(call<Confirmation[]>("confirmations")),
       quiet(call<Onboarding>("onboarding")),
     ]);
     if (status) this.#applyStatus(status);
     if (info) this.info = info;
     if (inbox) this.inbox = inbox;
     if (chat) this.chat = chat;
-    if (agents) this.agents = agents;
+    if (confirmations) this.confirmations = confirmations;
     if (onboarding) this.onboarding = onboarding;
     void this.refreshConnectors();
     void this.refreshWatchers();
@@ -163,8 +160,8 @@ class Store {
       case "voice_state":
         this.voice = e.state as VoiceState;
         break;
-      case "agents":
-        this.agents = { sessions: e.sessions as AgentsView["sessions"], approvals: e.approvals as Approval[] };
+      case "confirmations":
+        this.confirmations = e.cards as Confirmation[];
         break;
       case "timer_fired":
         void this.refreshTimers();
@@ -215,9 +212,9 @@ class Store {
     }
   }
 
-  async approve(id: string, allow: boolean) {
-    await call<boolean>("claude_approve", { id, allow });
-    this.agents = { ...this.agents, approvals: this.agents.approvals.filter((a) => a.id !== id) };
+  async confirm(id: string, allow: boolean) {
+    await call<boolean>("confirm", { id, allow });
+    this.confirmations = this.confirmations.filter((c) => c.id !== id);
   }
 
   async saveSettings(change: (s: AssistantSettings) => void) {

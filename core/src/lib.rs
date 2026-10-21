@@ -8,9 +8,9 @@
 //! no bridge runs), and [`Esptool`] identifies and flashes the board.
 //! [`firmware`] reads the version of a flash image and of the board's
 //! firmware. The voice ([`voice`], [`Stt`], [`Tts`]) and the [`Agent`] answer
-//! what Yoru hears; [`Timers`] keeps timers and reminders, [`ClaudeUsage`]
-//! and [`claude`] follow Claude Code. The CLI and the Tauri app are thin
-//! shells over this.
+//! what Yoru hears; [`Timers`] keeps timers and reminders. [`claude`]
+//! adds Yoru's MCP server (`mcp`) to Claude Code. The CLI and the Tauri app
+//! are thin shells over this.
 
 pub mod agent;
 pub mod assistant;
@@ -29,6 +29,7 @@ pub mod intents;
 pub mod link;
 pub mod llm;
 pub mod models;
+pub(crate) mod paths;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod pointer;
@@ -38,6 +39,7 @@ pub mod protocol;
 pub mod serial;
 pub(crate) mod sidecar;
 pub mod snapshot;
+pub mod stream;
 pub mod stt;
 pub mod timers;
 pub mod tts;
@@ -47,7 +49,6 @@ pub mod wifi;
 pub use agent::{Agent, Toolbox, Turn};
 pub use assistant::Assistant;
 pub use bridge::{Bridge, BridgeConfig, BridgeEvent, Manager, ManagerEvent, Transport};
-pub use claude::{ClaudeMetrics, ClaudeState, ClaudeUsage};
 pub use firmware::{BoardFirmware, ImageInfo};
 pub use flasher::{ChipInfo, Esptool, FlashEvent};
 pub use hardware::{Hardware, Recommendation};

@@ -1,27 +1,27 @@
 // No console window next to the app in Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use yoru_core::claude::{hooks, statusline};
 use yoru_core::mcp;
 
+/// What older versions put in Claude Code's settings, as a hook and as the
+/// status line. The app takes those out at start (`claude::cleanup`); until
+/// then Claude Code may still run them, and they must end at once, silently,
+/// rather than open the app.
+const RETIRED_FLAGS: [&str; 2] = ["--claude-hook", "--claude-statusline"];
+
 fn main() {
-    // Claude Code runs us as its status line command, as a hook and as an MCP server;
-    // handle those before the single-instance check would hand them to the
-    // running app.
+    // An MCP client runs us as its server; handle that before the
+    // single-instance check would hand it to the running app.
     match std::env::args().nth(1).as_deref() {
-        Some(statusline::FLAG) => {
-            statusline::run(std::io::stdin().lock(), std::io::stdout().lock());
-            return;
-        }
-        Some(hooks::FLAG) => {
-            hooks::run(std::io::stdin().lock());
-            return;
-        }
         Some(mcp::FLAG) => {
             if let Err(e) = mcp::serve_stdio(None) {
                 eprintln!("yoru mcp: {e}");
                 std::process::exit(1);
             }
+            return;
+        }
+        Some(flag) if RETIRED_FLAGS.contains(&flag) => {
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
             return;
         }
         _ => {}

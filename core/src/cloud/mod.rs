@@ -41,6 +41,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::models::Kind;
+use crate::stream::OnDelta;
 
 /// How a [`Provider`] is talked to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -362,7 +363,7 @@ pub fn list_models(provider: &'static Provider) -> Result<Vec<String>, CloudErro
 }
 
 fn keys_file() -> Option<PathBuf> {
-    crate::claude::data_dir().map(|d| d.join("keys.json"))
+    crate::paths::data_dir().map(|d| d.join("keys.json"))
 }
 
 fn saved_keys() -> BTreeMap<String, String> {
@@ -524,6 +525,17 @@ impl Client {
         })
     }
 
+    /// [`Client::chat`], streamed: the words go to `on` as the model writes
+    /// them. An error before the first word (a limit, a bad request) is
+    /// returned like [`Client::chat`]'s, nothing having gone to `on`.
+    pub fn chat_stream(&self, request: &Value, on: OnDelta) -> Result<Value, CloudError> {
+        self.limited(|| match self.model.provider.api {
+            Api::OpenAi if self.model.provider.id == OLLAMA.id => ollama::chat_stream(self, request, on),
+            Api::OpenAi => openai::chat_stream(self, request, on),
+            Api::ElevenLabs | Api::Anthropic => Err(self.unsupported("chat")),
+        })
+    }
+
     /// Transcribe a WAV, in `language` (`it`, `en`) or whichever it hears (`None`).
     pub fn transcribe(&self, wav: &[u8], language: Option<&str>, prompt: &str) -> Result<TranscriptionReply, CloudError> {
         self.limited(|| match self.model.provider.api {
@@ -539,6 +551,19 @@ impl Client {
             Api::OpenAi => openai::speak(self, text),
             Api::ElevenLabs => elevenlabs::speak(self, text, language),
             Api::Anthropic => Err(self.unsupported("speech")),
+        })
+    }
+
+    /// Whether [`Client::speak_stream`] works: the voice sends its sound as it makes it.
+    pub fn streams_speech(&self) -> bool {
+        self.model.provider.api == Api::ElevenLabs
+    }
+
+    /// [`Client::speak`], streamed: 16 kHz samples to `out` as they come.
+    pub fn speak_stream(&self, text: &str, language: Option<&str>, out: &mut dyn FnMut(Vec<i16>)) -> Result<(), CloudError> {
+        self.limited(|| match self.model.provider.api {
+            Api::ElevenLabs => elevenlabs::speak_stream(self, text, language, out),
+            Api::OpenAi | Api::Anthropic => Err(self.unsupported("streamed speech")),
         })
     }
 

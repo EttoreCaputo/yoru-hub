@@ -77,7 +77,7 @@ impl Engine {
 
     /// Where its virtualenv lives: `piper/` in the data folder.
     pub fn dir(self) -> Option<PathBuf> {
-        crate::claude::data_dir().map(|d| d.join(self.key()))
+        crate::paths::data_dir().map(|d| d.join(self.key()))
     }
 
     /// The virtualenv's interpreter: `COMPANION_PIPER_PYTHON`, or the one
@@ -340,46 +340,67 @@ impl Tts {
 
     /// Speak `text` in `language`: 16 kHz mono samples.
     pub fn synthesize(&self, text: &str, language: &str) -> Result<Vec<i16>, TtsError> {
+        let mut all = Vec::new();
+        self.synthesize_into(text, language, &mut |samples| all.extend(samples))?;
+        Ok(all)
+    }
+
+    /// [`Tts::synthesize`], the samples to `out` as they come: a voice that
+    /// streams (ElevenLabs) is heard before it has said the whole of `text`.
+    /// Once some sound went out, a cloud voice that fails isn't stood in for:
+    /// the downloaded voice would start the sentence over.
+    pub fn synthesize_into(&self, text: &str, language: &str, out: &mut dyn FnMut(Vec<i16>)) -> Result<(), TtsError> {
         // Piper fails on text it makes no sound for.
         if !text.chars().any(char::is_alphanumeric) {
-            return Ok(Vec::new());
+            return Ok(());
         }
         let mut voice = self.voice_for(language).ok_or_else(|| TtsError::new(Engine::Piper, "no voice downloaded"))?.to_string();
         if let Some(client) = self.config.clients.get(&voice) {
             let fallback = self.config.fallbacks.get(language);
             match fallback {
                 Some(f) if self.resting(&voice) => voice = f.clone(),
-                _ => match self.speak_cloud(client, text, language) {
-                    Ok(spoken) => {
-                        self.failed.lock().unwrap().remove(&voice);
-                        return Ok(spoken);
-                    }
-                    // Whatever went wrong, the downloaded voice answers.
-                    Err(e) => match fallback {
-                        Some(f) => {
+                _ => {
+                    let mut heard = false;
+                    match self.speak_cloud(client, text, language, &mut |samples| {
+                        heard |= !samples.is_empty();
+                        out(samples);
+                    }) {
+                        Ok(()) => {
+                            self.failed.lock().unwrap().remove(&voice);
+                            return Ok(());
+                        }
+                        // Whatever went wrong, the downloaded voice answers.
+                        Err(e) => {
+                            let Some(f) = fallback else { return Err(TtsError::cloud(e)) };
                             self.cloud_failed(&voice, &e);
+                            if heard {
+                                return Err(TtsError::cloud(e));
+                            }
                             voice = f.clone();
                         }
-                        None => return Err(TtsError::cloud(e)),
-                    },
-                },
+                    }
+                }
             }
         }
         let wav = self.request(text, &voice)?;
         let engine = Model::by_id(&voice).and_then(Model::engine).unwrap_or(Engine::Piper);
         let (rate, samples) = parse_wav(&wav).ok_or_else(|| TtsError::new(engine, "not a 16-bit mono WAV"))?;
-        Ok(resample(&samples, rate, SAMPLE_RATE))
+        out(resample(&samples, rate, SAMPLE_RATE));
+        Ok(())
     }
 
-    /// `text` spoken by a cloud voice, a piece at a time.
-    fn speak_cloud(&self, client: &cloud::Client, text: &str, language: &str) -> Result<Vec<i16>, CloudError> {
-        let mut out = Vec::new();
+    /// `text` spoken by a cloud voice, a piece at a time, streamed when the voice can.
+    fn speak_cloud(&self, client: &cloud::Client, text: &str, language: &str, out: &mut dyn FnMut(Vec<i16>)) -> Result<(), CloudError> {
         for piece in cloud::chunks(text, client.model.model.max_chars) {
+            if client.streams_speech() {
+                client.speak_stream(&piece, Some(language), out)?;
+                continue;
+            }
             let wav = client.speak(&piece, Some(language))?;
             let (rate, samples) = parse_wav(&wav).ok_or_else(|| CloudError::Invalid { provider: client.model.provider.name, why: "not a 16-bit mono WAV".into() })?;
-            out.extend(resample(&samples, rate, SAMPLE_RATE));
+            out(resample(&samples, rate, SAMPLE_RATE));
         }
-        Ok(out)
+        Ok(())
     }
 
     fn request(&self, text: &str, voice: &str) -> Result<Vec<u8>, TtsError> {
@@ -503,19 +524,41 @@ pub fn resample(input: &[i16], from: u32, to: u32) -> Vec<i16> {
 /// `text` in sentences, so the first can be spoken while the next is
 /// synthesized. Very short pieces stay with the one before.
 pub fn sentences(text: &str) -> Vec<String> {
-    const MIN_CHARS: usize = 12;
     let mut out: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         current.push(c);
-        let ends = matches!(c, '.' | '!' | '?' | ';' | '\n') && chars.peek().is_none_or(|n| n.is_whitespace());
+        let ends = ends_sentence(c) && chars.peek().is_none_or(|n| n.is_whitespace());
         if ends {
-            push_sentence(&mut out, &mut current, MIN_CHARS);
+            push_sentence(&mut out, &mut current, MIN_SENTENCE_CHARS);
         }
     }
     push_sentence(&mut out, &mut current, 0);
     out
+}
+
+/// Shorter than this, a piece of text isn't a sentence of its own.
+const MIN_SENTENCE_CHARS: usize = 12;
+
+fn ends_sentence(c: char) -> bool {
+    matches!(c, '.' | '!' | '?' | ';' | '\n')
+}
+
+/// Where the first sentence of `text`, which is still being written, ends
+/// (a byte offset): only once what follows has begun, so "3." of "3.5"
+/// isn't taken for an end. Like [`sentences`], a very short one goes on to
+/// the next end.
+pub fn sentence_end(text: &str) -> Option<usize> {
+    let mut chars = text.char_indices().peekable();
+    let mut count = 0;
+    while let Some((i, c)) = chars.next() {
+        count += 1;
+        if ends_sentence(c) && count >= MIN_SENTENCE_CHARS && chars.peek().is_some_and(|(_, n)| n.is_whitespace()) {
+            return Some(i + c.len_utf8());
+        }
+    }
+    None
 }
 
 /// `text` as a voice can read it. The model is asked for plain sentences
@@ -706,6 +749,15 @@ mod tests {
         assert_eq!(sentences("Fatto. La faccia rings è a sinistra! E poi?"), ["Fatto. La faccia rings è a sinistra!", "E poi?"]);
         assert_eq!(sentences("It's 3.5 degrees warmer. Done"), ["It's 3.5 degrees warmer.", "Done"]);
         assert!(sentences("  ").is_empty());
+    }
+
+    #[test]
+    fn a_sentence_ends_once_the_next_begins() {
+        assert_eq!(sentence_end("It's 3."), None);
+        assert_eq!(sentence_end("It's 3.5 degrees warmer."), None);
+        assert_eq!(sentence_end("It's 3.5 degrees warmer. D"), Some(24));
+        // Too short on its own: it goes on to the next.
+        assert_eq!(sentence_end("Fatto. La faccia è a sinistra! E"), Some(31));
     }
 
     #[test]

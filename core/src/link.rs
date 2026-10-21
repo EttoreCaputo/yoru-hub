@@ -337,7 +337,7 @@ const MAX_TOOL_PAGES: usize = 16;
 /// Where the last tool list of a `kind` board is kept, for when it doesn't
 /// answer: one file per kind, since their tools differ.
 pub(crate) fn tools_cache_file(kind: BoardKind) -> Option<std::path::PathBuf> {
-    crate::claude::data_dir().map(|d| tools_cache_in(&d, kind))
+    crate::paths::data_dir().map(|d| tools_cache_in(&d, kind))
 }
 
 /// [`tools_cache_file`] in folder `dir`.

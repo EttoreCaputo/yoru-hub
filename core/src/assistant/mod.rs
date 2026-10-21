@@ -16,7 +16,7 @@
 //! the ones a request needs are loaded. It calls them until it answers in
 //! words. A connector tool that changes something (sends a mail, creates an
 //! event) asks first, on the board's card and in the app, through
-//! [`Host::confirm`].
+//! [`Host::confirm`] ([`Confirmations`]).
 //!
 //! On OpenAI, Groq and Ollama ([`compat`]) the turn is OpenAI's function
 //! calling instead, with web search only through the Tavily connector, and
@@ -33,6 +33,7 @@
 //! or old conversation starts over instead of being trimmed.
 
 pub mod compat;
+pub mod confirm;
 pub mod external;
 pub mod inbox;
 pub mod memory;
@@ -51,8 +52,10 @@ use serde_json::{Value, json};
 
 use crate::cloud::{self, CloudError, anthropic};
 use crate::link::Tool;
+use crate::stream::OnDelta;
 use crate::timers::Timers;
 
+pub use confirm::{Confirmation, Confirmations};
 pub use external::{ExternalTool, ExternalTools};
 pub use inbox::{Inbox, InboxChange, Notification, Urgency};
 pub use memory::Memory;
@@ -277,6 +280,9 @@ pub struct Assistant {
     /// "Do not disturb" until then (Unix ms), on top of the quiet hours; not
     /// kept across launches, on purpose.
     quiet_until: Mutex<Option<u64>>,
+    /// The language every reply is in (`it`, `en`), the one picked in the
+    /// app; `None` follows the user's.
+    language: Mutex<Option<String>>,
 }
 
 impl std::fmt::Debug for Assistant {
@@ -287,7 +293,7 @@ impl std::fmt::Debug for Assistant {
 
 /// Where the assistant keeps its files: the data folder.
 pub fn default_dir() -> Option<PathBuf> {
-    crate::claude::data_dir()
+    crate::paths::data_dir()
 }
 
 impl Assistant {
@@ -307,6 +313,7 @@ impl Assistant {
             log: Mutex::new(log),
             listeners: Mutex::default(),
             quiet_until: Mutex::default(),
+            language: Mutex::default(),
             dir,
         }
     }
@@ -382,9 +389,33 @@ impl Assistant {
         self.log_changed();
     }
 
-    /// Answer `text`, said to the board or typed, in the conversation.
+    /// Reply in `language` (`it`, `en`) whatever the user speaks; `None`
+    /// replies in theirs.
+    pub fn set_language(&self, language: Option<&str>) {
+        *self.language.lock().unwrap() = language.map(str::to_string);
+    }
+
+    /// The language replies are in: the [one set](Self::set_language), else `heard`.
+    fn reply_language(&self, heard: Option<&str>) -> Option<String> {
+        self.language.lock().unwrap().clone().or(heard.map(str::to_string))
+    }
+
+    /// Answer `text`, said to the board or typed (in `language`, when known), in the conversation.
     pub fn respond(&self, text: &str, language: Option<&str>, channel: Channel, host: &dyn Host) -> Result<Reply, String> {
+        self.respond_with(text, language, channel, host, None)
+    }
+
+    /// [`Assistant::respond`], streamed: the words go to `on` as the model
+    /// writes them, raw (a thinking model's `<think>` left in), and
+    /// [`crate::stream::Delta::Tools`] when it calls a tool. The voice speaks them as they come.
+    pub fn respond_aloud(&self, text: &str, language: Option<&str>, channel: Channel, host: &dyn Host, on: OnDelta) -> Result<Reply, String> {
+        self.respond_with(text, language, channel, host, Some(on))
+    }
+
+    fn respond_with(&self, text: &str, language: Option<&str>, channel: Channel, host: &dyn Host, on: Option<OnDelta>) -> Result<Reply, String> {
         let _turn = self.turn.lock().unwrap();
+        let language = self.reply_language(language);
+        let language = language.as_deref();
         self.add_line("you", text, channel, Vec::new());
         let settings = self.settings();
         let brain = settings.brain();
@@ -397,7 +428,7 @@ impl Assistant {
             }
             std::mem::take(&mut conversation.messages)
         };
-        let result = self.run(&mut messages, &with_context(text, language, channel), &settings, &settings.effort, host);
+        let result = self.run(&mut messages, &with_context(text, language, channel), language, channel, &settings, &settings.effort, host, on);
         {
             let mut conversation = self.conversation.lock().unwrap();
             // A failed turn leaves a question without an answer: start over next time.
@@ -419,36 +450,41 @@ impl Assistant {
         let prompt = format!(
             "{}\n\n<task>\n{task}\n</task>\n\nThis is a job you do on your own, not a conversation: nobody is reading your answer. \
              Tell the user what is worth telling with notify; if nothing is, don't notify. End with one short line saying what you did.",
-            context_line(None, Channel::Text)
+            context_line(self.reply_language(None).as_deref(), Channel::Text)
         );
-        self.run(&mut Vec::new(), &prompt, &settings, &settings.task_effort, host)
+        self.run(&mut Vec::new(), &prompt, self.reply_language(None).as_deref(), Channel::Text, &settings, &settings.task_effort, host, None)
     }
 
-    /// `prompt` after `messages`, with the settings' brain: the model and the
-    /// tools until the model answers in words.
-    fn run(&self, messages: &mut Vec<Value>, prompt: &str, settings: &Settings, effort: &str, host: &dyn Host) -> Result<Reply, String> {
+    /// `prompt` after `messages` (to be answered in `language`, when known), with the settings' brain: the model and the
+    /// tools until the model answers in words. With `on`, streamed to it.
+    #[allow(clippy::too_many_arguments)]
+    fn run(&self, messages: &mut Vec<Value>, prompt: &str, language: Option<&str>, channel: Channel, settings: &Settings, effort: &str, host: &dyn Host, on: Option<OnDelta>) -> Result<Reply, String> {
         match settings.brain() {
             Some(Brain::Anthropic) => {
                 messages.push(json!({"role": "user", "content": [{"type": "text", "text": prompt}]}));
-                self.run_claude(messages, settings, effort, host)
+                self.run_claude(messages, settings, effort, host, on)
             }
-            Some(brain) => compat::run(self, brain, messages, prompt, settings, host),
+            Some(brain) => compat::run(self, brain, messages, prompt, &reminder(language, channel), settings, host, on),
             None => Err(NO_BRAIN.into()),
         }
     }
 
     /// A turn on Claude.
-    fn run_claude(&self, messages: &mut Vec<Value>, settings: &Settings, effort: &str, host: &dyn Host) -> Result<Reply, String> {
+    fn run_claude(&self, messages: &mut Vec<Value>, settings: &Settings, effort: &str, host: &dyn Host, mut on: Option<OnDelta>) -> Result<Reply, String> {
         let key = anthropic::api_key().ok_or("no Anthropic API key: add one in Settings (or set ANTHROPIC_API_KEY)")?;
         let started = Instant::now();
         let external = self.external();
         let external_tools = external.as_ref().map(|e| e.tools()).unwrap_or_default();
         let board_tools = host.board_tools();
         let tools = self.tool_list(settings, &board_tools, &external_tools);
-        let system = json!([
+        let mut system = json!([
             {"type": "text", "text": system_prompt(&settings.name), "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": format!("<memory>\n{}\n</memory>", self.memory.for_prompt())},
         ]);
+        // After the cached part: a change of language keeps the cache.
+        if let Some(l) = self.reply_language(None) {
+            system.as_array_mut().unwrap().push(json!({"type": "text", "text": format!("Always reply in {}.", language_name(&l))}));
+        }
         let mut actions = Vec::new();
         let mut model = settings.model.clone();
         for _ in 0..MAX_ROUNDS {
@@ -462,7 +498,11 @@ impl Assistant {
                 "output_config": {"effort": effort},
                 "cache_control": {"type": "ephemeral"},
             });
-            let response = anthropic::messages(&key, &body).map_err(|e| e.to_string())?;
+            let response = match on.as_deref_mut() {
+                Some(on) => anthropic::messages_stream(&key, &body, on),
+                None => anthropic::messages(&key, &body),
+            }
+            .map_err(|e| e.to_string())?;
             if let Some(m) = response["model"].as_str() {
                 model = m.to_string();
             }
@@ -583,7 +623,8 @@ impl Assistant {
             }
             _ => {}
         }
-        if let Some(result) = self.timers.call_tool(name, input, crate::claude::alerts::system_language()) {
+        let language = self.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
+        if let Some(result) = self.timers.call_tool(name, input, &language) {
             return result;
         }
         if board.iter().any(|t| t.name == name) {
@@ -687,7 +728,8 @@ only for what can't wait). Be sparing: one good notification beats five. Title: 
 text: one or two sentences with what the user needs to decide whether to look.
 
 # How you talk
-- Reply in the language the user speaks (the context line says which, when known).
+- Always reply in the language the context line names (reply in: ...), even when the user speaks or writes in another one; \
+notifications and inbox lines are in it too. Without one, reply in the user's language.
 - When the request was spoken (channel: voice), your reply is said aloud: plain sentences a text-to-speech voice reads well: \
 no markdown, no lists, no emoji, no URLs, no symbols or special characters (* # / & @ | < > [ ] {{ }} ° or arrows); \
 write units and abbreviations as they are said (20 gradi, not 20°C); one to three sentences.
@@ -774,7 +816,7 @@ fn schema_or_empty(schema: &Value) -> Value {
     if schema.get("type").is_some() { schema.clone() } else { json!({"type": "object", "properties": {}}) }
 }
 
-/// The request with what the model can't know: the time, the language, the channel.
+/// The request with what the model can't know: the time, the channel, the language to reply in.
 fn with_context(text: &str, language: Option<&str>, channel: Channel) -> String {
     format!("{}\n\n{text}", context_line(language, channel))
 }
@@ -785,8 +827,27 @@ fn context_line(language: Option<&str>, channel: Channel) -> String {
         Channel::Voice => "voice",
         Channel::Text => "text",
     };
-    let language = language.map(|l| format!(", language: {l}")).unwrap_or_default();
+    let language = language.map(|l| format!(", reply in: {}", language_name(l))).unwrap_or_default();
     format!("[now: {now}, channel: {channel}{language}]")
+}
+
+/// What a model is told again after tool results, whose language (often
+/// English) and lists it otherwise carries into the answer.
+fn reminder(language: Option<&str>, channel: Channel) -> String {
+    let language = language.map(|l| format!("in {}", language_name(l))).unwrap_or_else(|| "in the user's language".into());
+    match channel {
+        Channel::Voice => format!("Now answer the user {language}, in one to three plain sentences said aloud: no markdown, lists, URLs or symbols."),
+        Channel::Text => format!("Now answer the user {language}."),
+    }
+}
+
+/// `it` and `en` by name, which a model follows more surely than a code.
+pub fn language_name(code: &str) -> &str {
+    match code {
+        "it" => "Italian",
+        "en" => "English",
+        other => other,
+    }
 }
 
 /// The text blocks of an answer, joined.
@@ -975,7 +1036,7 @@ mod tests {
         let first = requests.recv().unwrap();
         assert_eq!(first["model"], DEFAULT_MODEL);
         assert_eq!(first["fallbacks"], "default");
-        assert!(first["messages"][0]["content"][0]["text"].as_str().unwrap().contains("channel: voice, language: it"));
+        assert!(first["messages"][0]["content"][0]["text"].as_str().unwrap().contains("channel: voice, reply in: Italian"));
         // The second request carries the whole first answer back, thinking included, then the result.
         let second = requests.recv().unwrap();
         assert_eq!(second["messages"][1]["content"][0]["type"], "thinking");
@@ -987,7 +1048,7 @@ mod tests {
     fn helpers() {
         assert_eq!(summarize(&json!({"to": "a@b.c", "subject": "Hi", "n": 2, "deep": {"x": 1}})), "to: a@b.c; subject: Hi; n: 2");
         assert_eq!(text_of(&json!([{"type": "thinking", "thinking": ""}, {"type": "text", "text": "Ciao "}, {"type": "text", "text": "Ettore"}])), "Ciao Ettore");
-        assert!(with_context("ciao", Some("it"), Channel::Voice).contains("channel: voice, language: it"));
+        assert!(with_context("ciao", Some("it"), Channel::Voice).contains("channel: voice, reply in: Italian"));
         assert_eq!(schema_or_empty(&Value::Null)["type"], "object");
     }
 }

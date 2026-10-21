@@ -21,6 +21,7 @@ use crate::intents;
 use crate::link::Tool;
 use crate::llm::{Llm, LlmError};
 use crate::profile::BoardKind;
+use crate::stream::{self, Delta, OnDelta};
 
 /// Rounds of tool calls before the model has to answer.
 const MAX_ROUNDS: usize = 4;
@@ -67,7 +68,7 @@ Your character shapes how you talk, never what you do: a request is always carri
 {companion}
 
 # How to reply
-- Work out which language the user is speaking and always reply in that same language.
+- {language}
 - Your words are spoken aloud: no markdown, lists, emoji, symbols or stage directions.
 - Keep it short: one or two sentences, three at most for a joke or a story. Long answers are tiring to listen to.";
 
@@ -195,8 +196,20 @@ fn faces_section(tools: &[Value]) -> String {
     )
 }
 
-/// [`SYSTEM_PROMPT`] for a `kind` board, with a personality and the tools (OpenAI-style functions).
-fn system_prompt(personality: &str, tools: &[Value], kind: BoardKind) -> String {
+/// The reply language's rule: the one picked (`it`, `en`), else the user's.
+fn language_rule(language: Option<&str>) -> String {
+    match language {
+        Some(l) => {
+            let name = crate::assistant::language_name(l);
+            format!("Always reply in {name}, even when the user speaks another language: every word you say is in {name}.")
+        }
+        None => "Work out which language the user is speaking and always reply in that same language.".into(),
+    }
+}
+
+/// [`SYSTEM_PROMPT`] for a `kind` board, with a personality, the reply
+/// language (`None`: the user's) and the tools (OpenAI-style functions).
+fn system_prompt(personality: &str, language: Option<&str>, tools: &[Value], kind: BoardKind) -> String {
     let list: Vec<String> = tools
         .iter()
         .map(|t| {
@@ -210,6 +223,7 @@ fn system_prompt(personality: &str, tools: &[Value], kind: BoardKind) -> String 
         .replace("{character}", personality)
         .replace("{tools}", &list.join("\n"))
         .replace("{faces}", &faces_section(tools))
+        .replace("{language}", &language_rule(language))
 }
 
 /// Where the agent's tools come from, and what runs them.
@@ -261,6 +275,8 @@ pub struct Agent {
     memory: Mutex<Memory>,
     /// The personality's part of the system prompt.
     personality: Mutex<String>,
+    /// The language every reply is in (`it`, `en`); `None` follows the user's.
+    language: Mutex<Option<String>>,
     /// The server has the system prompt and the tools in its cache.
     primed: AtomicBool,
 }
@@ -278,7 +294,7 @@ pub fn is_read_only(tool: &str) -> bool {
 
 impl Agent {
     pub fn new(llm: std::sync::Arc<Llm>) -> Self {
-        Self { llm, memory: Mutex::default(), personality: Mutex::new(personality_prompt("", "")), primed: AtomicBool::new(false) }
+        Self { llm, memory: Mutex::default(), personality: Mutex::new(personality_prompt("", "")), language: Mutex::default(), primed: AtomicBool::new(false) }
     }
 
     /// Talk with this personality ([`personality_prompt`]) from the next transcript on.
@@ -291,9 +307,19 @@ impl Agent {
         }
     }
 
+    /// Reply in `language` (`it`, `en`) whatever the user speaks; `None` replies in theirs.
+    pub fn set_language(&self, language: Option<&str>) {
+        let mut current = self.language.lock().unwrap();
+        if current.as_deref() != language {
+            *current = language.map(str::to_string);
+            // Another prompt: the server's cache has the old one.
+            self.primed.store(false, Ordering::Relaxed);
+        }
+    }
+
     /// The system prompt every request starts with, for these tools on a `kind` board.
     pub fn system_prompt(&self, tools: &[Value], kind: BoardKind) -> String {
-        system_prompt(&self.personality.lock().unwrap(), tools, kind)
+        system_prompt(&self.personality.lock().unwrap(), self.language.lock().unwrap().as_deref(), tools, kind)
     }
 
     /// Have the server read the system prompt and the tools, which every
@@ -356,6 +382,14 @@ impl Agent {
 
     /// Answer `text` (heard in `language`, `it` or `en`), calling tools on the way.
     pub fn respond(&self, text: &str, language: &str, toolbox: &dyn Toolbox) -> Result<Turn, LlmError> {
+        self.respond_aloud(text, language, toolbox, &mut stream::ignore)
+    }
+
+    /// [`Agent::respond`], the words handed to `on` as the model writes
+    /// them, raw (thinking and markup left in): the voice speaks them as
+    /// they come. A round that turns out to call tools ends with
+    /// [`Delta::Tools`], calls written as text too.
+    pub fn respond_aloud(&self, text: &str, language: &str, toolbox: &dyn Toolbox, on: OnDelta) -> Result<Turn, LlmError> {
         let started = Instant::now();
         let tools: Vec<Value> = toolbox.tools().iter().map(function).chain([time_tool()]).collect();
         let mut messages = vec![json!({"role": "system", "content": self.system_prompt(&tools, toolbox.kind())})];
@@ -395,7 +429,7 @@ impl Agent {
                 "chat_template_kwargs": {"enable_thinking": false},
             });
             let asked = Instant::now();
-            let message = self.llm.chat(&request)?;
+            let message = self.llm.chat_stream(&request, on)?;
             llm_ms += asked.elapsed().as_millis() as u64;
             rounds += 1;
             let mut content = message["content"].as_str().unwrap_or_default();
@@ -406,6 +440,9 @@ impl Agent {
                     // Not in the history as text, or it writes them so again.
                     content = "";
                 }
+            }
+            if !calls.is_empty() {
+                on(Delta::Tools);
             }
             if calls.is_empty() {
                 reply = spoken(content, language);
@@ -576,7 +613,7 @@ mod tests {
     #[test]
     fn personality_goes_in_the_prompt() {
         let tools = [time_tool()];
-        let prompt = system_prompt(&personality_prompt("butler", ""), &tools, BoardKind::Yoru);
+        let prompt = system_prompt(&personality_prompt("butler", ""), None, &tools, BoardKind::Yoru);
         assert!(prompt.contains("Ambrogio") && !prompt.contains("{character}") && !prompt.contains("{companion}"));
         assert!(!prompt.contains("{body}"));
         assert!(prompt.contains("- get_time: The current local time") && !prompt.contains("{tools}"));
@@ -588,9 +625,17 @@ mod tests {
 
     #[test]
     fn the_body_follows_the_board() {
-        let prompt = system_prompt(&personality_prompt("", ""), &[time_tool()], BoardKind::Yoru);
+        let prompt = system_prompt(&personality_prompt("", ""), None, &[time_tool()], BoardKind::Yoru);
         assert!(prompt.contains("matte sphere") && !prompt.contains("{body}"));
         assert!(!QUIP_PROMPT.replace("{body}", BoardKind::Yoru.profile().agent_body).contains("{body}"));
+    }
+
+    #[test]
+    fn replies_in_the_language_picked() {
+        let forced = system_prompt(&personality_prompt("", ""), Some("it"), &[time_tool()], BoardKind::Yoru);
+        assert!(forced.contains("Always reply in Italian") && !forced.contains("{language}"));
+        let free = system_prompt(&personality_prompt("", ""), None, &[time_tool()], BoardKind::Yoru);
+        assert!(free.contains("reply in that same language"));
     }
 
     #[test]

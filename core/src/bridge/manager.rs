@@ -1,6 +1,6 @@
 //! Several boards at once: the [`Manager`] finds them, on USB and on WiFi,
 //! runs a session for each on a thread of its own, and shares the sampler,
-//! the alerts and the hub between them.
+//! the alerts, the assistant's cards and the hub between them.
 //!
 //! - **Finding them.** Every Espressif device on USB is a candidate, and so is
 //!   every board paired for WiFi ([`crate::wifi`]); `transport` narrows that
@@ -21,7 +21,7 @@
 //! other boards carry on.
 //!
 //! Events carry the session they come from ([`ManagerEvent`]); the host's own
-//! (alerts, timers, the voice's start-up) carry none.
+//! (notifications, timers, the voice's start-up) carry none.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -32,14 +32,13 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::claude::alerts as claude_alerts;
 use crate::link::Hello;
 use crate::profile::BoardKind;
 use crate::serial;
 use crate::wifi;
 
-use super::agents;
 use super::alerts::{self, AlertInput, Targets};
+use super::confirm;
 use super::sampler::{Latest, Sampler};
 use super::{BridgeConfig, BridgeEvent, EventSink, Transport, session, sleep_unless_stopped, warm_up_voice};
 
@@ -191,14 +190,6 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
     let (alert_tx, alert_rx) = mpsc::channel::<AlertInput>();
     let targets = Targets::default();
     if let Some(hub) = &config.hub {
-        let tx = Mutex::new(alert_tx.clone());
-        let feed = config.agents.clone();
-        hub.set_claude_hook(Some(Arc::new(move |json| {
-            feed.on_hook(&json);
-            if let Some(event) = claude_alerts::parse_hook(&json) {
-                let _ = tx.lock().unwrap().send(AlertInput::Hook(event, Instant::now()));
-            }
-        })));
         hub.set_timers(Some(config.timers.clone()));
         hub.set_primary(Some(config.primary.clone()));
         hub.set_assistant(config.assistant.clone());
@@ -209,28 +200,25 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
             let _ = tx.lock().unwrap().send(AlertInput::Inbox(change));
         })));
     }
-    let views = agents::listen(config);
+    let cards = confirm::listen(config);
     let latest = Latest::default();
-    let sampler = Sampler::new(config);
     let shared = Shared { config, stop, latest: &latest, targets: &targets, sink: &sink, host: &host, control };
     thread::scope(|scope| {
         let _ = thread::Builder::new()
             .name("yoru-alerts".into())
             .spawn_scoped(scope, || alerts::alert_loop(config, stop, &targets, alert_rx, &host));
         let _ = thread::Builder::new()
-            .name("yoru-agents".into())
-            .spawn_scoped(scope, || agents::agents_loop(stop, &targets, views, &host));
+            .name("yoru-confirm".into())
+            .spawn_scoped(scope, || confirm::confirm_loop(stop, &targets, cards, &host));
         let _ = thread::Builder::new()
             .name("yoru-sampler".into())
-            .spawn_scoped(scope, || sampler.run(config, stop, &latest, &alert_tx, &targets));
+            .spawn_scoped(scope, || Sampler.run(config, stop, &latest, &alert_tx));
         manage(scope, &shared, max_boards);
     });
     if let Some(assistant) = &config.assistant {
         assistant.inbox.set_delivery(None);
     }
     if let Some(hub) = &config.hub {
-        hub.set_claude_hook(None);
-        hub.set_claude_permission(None);
         hub.set_timers(None);
         hub.set_primary(None);
         hub.set_assistant(None);

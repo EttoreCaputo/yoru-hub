@@ -13,7 +13,6 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use yoru_core::claude::statusline;
 use yoru_core::mcp;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, UpdateKind};
 use tauri::{AppHandle, Manager};
@@ -80,8 +79,8 @@ pub fn start_hidden() -> bool {
 
 /// Terminate other processes of this app that are not the single instance:
 /// copies from builds without the plugin, which would hold the port forever.
-/// The MCP server and the status line helper run the same binary; they are
-/// Claude Code's, and go through the running app rather than the port.
+/// The MCP server runs the same binary; it belongs to an MCP client, and goes
+/// through the running app rather than the port.
 pub fn stop_strays() {
     let Ok(me) = std::env::current_exe() else { return };
     let Some(name) = me.file_name().map(|n| n.to_owned()) else { return };
@@ -92,7 +91,7 @@ pub fn stop_strays() {
         .processes()
         .iter()
         .filter(|(pid, p)| Some(**pid) != own && p.exe().and_then(|e| e.file_name()) == Some(name.as_os_str()))
-        .filter(|(_, p)| !p.cmd().iter().any(|arg| arg == mcp::FLAG || arg == statusline::FLAG))
+        .filter(|(_, p)| !p.cmd().iter().any(|arg| arg == mcp::FLAG))
         .map(|(pid, p)| {
             if p.kill_with(Signal::Term).is_none() {
                 p.kill();

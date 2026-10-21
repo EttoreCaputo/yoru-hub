@@ -7,6 +7,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use super::{Client, CloudError, TranscriptionReply};
+use crate::stream::{self, OnDelta};
 
 /// An assistant's turn with tools takes longer than a voice command's.
 const TIMEOUT: Duration = Duration::from_secs(60);
@@ -32,12 +33,21 @@ fn authorized<B>(client: &Client, request: ureq::RequestBuilder<B>) -> ureq::Req
 /// The body of a successful answer, or the error it stands for.
 pub(super) fn read(client: &Client, sent: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Vec<u8>, CloudError> {
     let provider = client.model.provider.name;
+    let mut response = open(client, sent)?;
+    response.body_mut().with_config().limit(32 * 1024 * 1024).read_to_vec().map_err(|e| CloudError::Network { provider, why: e.to_string() })
+}
+
+/// A successful answer, its body still to read (a stream), or the error it stands for.
+pub(super) fn open(client: &Client, sent: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<ureq::http::Response<ureq::Body>, CloudError> {
+    let provider = client.model.provider.name;
     let mut response = sent.map_err(|e| CloudError::Network { provider, why: e.to_string() })?;
     let status = response.status().as_u16();
+    if (200..300).contains(&status) {
+        return Ok(response);
+    }
     let retry_after = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<f64>().ok()).map(Duration::from_secs_f64);
-    let body = response.body_mut().with_config().limit(32 * 1024 * 1024).read_to_vec().map_err(|e| CloudError::Network { provider, why: e.to_string() })?;
+    let body = response.body_mut().with_config().limit(1024 * 1024).read_to_vec().map_err(|e| CloudError::Network { provider, why: e.to_string() })?;
     match status {
-        200..=299 => Ok(body),
         401 | 403 => Err(CloudError::BadKey { provider }),
         429 => {
             let (wait, per_day) = limit_of(&error_message(&body));
@@ -141,6 +151,17 @@ pub(super) fn chat(client: &Client, request: &Value) -> Result<Value, CloudError
         provider: client.model.provider.name,
         why: format!("no message in {}", reply.to_string().chars().take(300).collect::<String>()),
     })
+}
+
+/// [`chat`], streamed: the words go to `on` as the model writes them.
+pub(super) fn chat_stream(client: &Client, request: &Value, on: OnDelta) -> Result<Value, CloudError> {
+    let provider = client.model.provider.name;
+    let mut body = chat_request(client, request);
+    body["stream"] = true.into();
+    let body = serde_json::to_vec(&body).map_err(|e| CloudError::Invalid { provider, why: e.to_string() })?;
+    let sent = authorized(client, agent().post(url(client, "/chat/completions"))).header("Content-Type", "application/json").send(&body[..]);
+    let response = open(client, sent)?;
+    stream::chat_message(response.into_body().into_reader(), on).map_err(|why| CloudError::Network { provider, why })
 }
 
 pub(super) fn transcribe(client: &Client, wav: &[u8], language: Option<&str>, prompt: &str) -> Result<TranscriptionReply, CloudError> {

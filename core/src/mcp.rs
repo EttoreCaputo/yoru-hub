@@ -4,8 +4,8 @@
 //! The board's tools are passed through as the firmware describes them in
 //! `tools/list`, so a new firmware tool shows up without a host change. The
 //! board is reached through [`Board`]: the running app or `yoru` bridge,
-//! or the port opened for each call. `get_claude_usage` reads Claude Code's
-//! usage on this computer, `speak` talks through the board's speaker with
+//! or the port opened for each call. `notify` posts to the assistant's inbox,
+//! `speak` talks through the board's speaker with
 //! the bridge's text-to-speech, and the timers run on the host. What the client is told
 //! about the board comes from its kind's [`BoardProfile`](crate::BoardProfile).
 //!
@@ -34,13 +34,10 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData, Peer, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{Value, json};
 
-use crate::claude::ClaudeUsage;
-use crate::claude::alerts;
 use crate::timers::Timers;
 use crate::hub::{Board, BoardInfo};
 use crate::link::{self, CallError, Tool, ToolResult};
 use crate::profile::BoardKind;
-use crate::snapshot::short_floats;
 
 /// The argument that turns the app binary into the MCP server.
 pub const FLAG: &str = "--mcp";
@@ -50,8 +47,7 @@ const ABOUT_ANY_BOARD: &str = "The board is Yoru, the user's personal assistant 
 connected to this computer. Its tools say what it can do.";
 
 /// What the client is told about the host's own tools, whatever the board.
-const HOST_INSTRUCTIONS: &str = "get_claude_usage reads Claude Code's usage on this computer, and works without the board. \
-notify puts a notification in the user's inbox (the Yoru app and the board): use it when a long task finishes or needs the user. \
+const HOST_INSTRUCTIONS: &str = "notify puts a notification in the user's inbox (the Yoru app and the board): use it when a long task finishes or needs the user. \
 speak says a short sentence out loud through the board's speaker, in Italian or English. \
 set_timer, set_reminder, pomodoro, control_timer, update_timer and get_timers run timers on the host: the board rings when one is up \
 (they need the Yoru app or `yoru` running to ring).";
@@ -60,8 +56,6 @@ set_timer, set_reminder, pomodoro, control_timer, update_timer and get_timers ru
 const SEVERAL_BOARDS: &str = "Several boards are connected: list_boards names them. \
 Board tools and speak take `board`, a board's id or kind; without it a call goes to the only board with that tool, or the primary one.";
 
-/// A bridge sample older than this is not "current"; sample here instead.
-const FRESH: Duration = Duration::from_secs(5);
 /// While the board's tools are unknown, look for them this often.
 const WATCH: Duration = Duration::from_secs(10);
 
@@ -70,7 +64,7 @@ const WATCH: Duration = Duration::from_secs(10);
 pub fn serve_stdio(port: Option<String>) -> io::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async {
-        let server = CompanionMcp::new(Board::new(port, &format!("yoru-mcp/{}", env!("CARGO_PKG_VERSION"))), crate::claude::data_dir());
+        let server = CompanionMcp::new(Board::new(port, &format!("yoru-mcp/{}", env!("CARGO_PKG_VERSION"))), crate::paths::data_dir());
         // The instructions name the board: learn its kind before the client asks.
         let probe = server.clone();
         let _ = tokio::task::spawn_blocking(move || probe.refresh_kind()).await;
@@ -98,7 +92,6 @@ struct Inner {
     listed: Mutex<Option<(Vec<Tool>, bool)>>,
     /// The boards attached to the bridge, as last asked.
     boards: Mutex<Vec<BoardInfo>>,
-    claude: Mutex<Option<ClaudeUsage>>,
 }
 
 impl CompanionMcp {
@@ -110,7 +103,6 @@ impl CompanionMcp {
                 kind: Mutex::default(),
                 listed: Mutex::default(),
                 boards: Mutex::default(),
-                claude: Mutex::default(),
             }),
         }
     }
@@ -248,10 +240,6 @@ impl CompanionMcp {
                 Ok(boards) => json_result(json!({"boards": boards})),
                 Err(e) => text_result(&format!("No board can be reached: {e}."), true),
             }),
-            "get_claude_usage" => Ok(match self.claude_usage() {
-                Some(usage) => json_result(usage),
-                None => text_result("No Claude Code usage on this computer: Claude Code has not run here, or keeps its data elsewhere (CLAUDE_CONFIG_DIR).", false),
-            }),
             "speak" => {
                 let text = arguments.get("text").and_then(Value::as_str).unwrap_or("");
                 if text.trim().is_empty() {
@@ -267,7 +255,7 @@ impl CompanionMcp {
                 Err(e) => text_result(&format!("Yoru couldn't take the notification: {e}."), true),
             }),
             name if Timers::tools().iter().any(|t| t.name == name) => {
-                let language = arguments.get("language").and_then(Value::as_str).unwrap_or(alerts::system_language()).to_string();
+                let language = arguments.get("language").and_then(Value::as_str).unwrap_or(crate::intents::system_language()).to_string();
                 Ok(match self.inner.board.timer_tool(name, &arguments, &language) {
                     Ok(text) if name == "get_timers" => json_result(serde_json::from_str(&text).unwrap_or(Value::String(text))),
                     Ok(text) => text_result(&text, false),
@@ -281,12 +269,6 @@ impl CompanionMcp {
                 Err(e) => Ok(text_result(&format!("The {} can't run {name}: {e}.", self.board_name()), true)),
             },
         }
-    }
-
-    fn claude_usage(&self) -> Option<Value> {
-        let from_bridge = self.inner.board.bridge_snapshot().filter(|(_, age)| *age < FRESH).and_then(|(s, _)| s.claude);
-        let usage = from_bridge.or_else(|| self.inner.claude.lock().unwrap().get_or_insert_with(ClaudeUsage::new).sample())?;
-        Some(short_floats(&usage))
     }
 }
 
@@ -328,15 +310,6 @@ fn host_tools() -> Vec<Value> {
         })
     });
     let mut tools = vec![
-        json!({
-            "name": "get_claude_usage",
-            "title": "Claude Code usage",
-            "description": "Claude Code usage on this computer: tokens in the current 5-hour window (tok) and today, \
-                            share of the plan's 5-hour (s_pct) and weekly (w_pct) limits used, minutes until the window resets (left_min), \
-                            whether Claude is working, idle or asleep, and the latest model.",
-            "inputSchema": no_args,
-            "annotations": {"readOnlyHint": true, "openWorldHint": false},
-        }),
         json!({
             "name": "notify",
             "title": "Notify the user through Yoru",

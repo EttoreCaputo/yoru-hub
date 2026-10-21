@@ -18,8 +18,6 @@
 //! | `tools/list`, `tools/call`, `media/...`, `wifi/...` | Passed to the board as they are |
 //! | `host/snapshot` | `{"snapshot": Snapshot or null, "age_ms"}`: the bridge's latest sample |
 //! | `host/say` `{"text","language"?}` | How it was spoken, once played |
-//! | `host/claude_hook` (a Claude Code hook's JSON) | `{"taken"}`: whether a bridge takes alerts |
-//! | `host/claude_permission` (a `PermissionRequest` hook's JSON) | `{"decision": "allow" \| "deny" \| null}`, once answered in the app or on the board; `null` at once without a bridge or with approvals off |
 //! | `host/timers` `{"name","arguments","language"?}` | `{"text","is_error"}`: a [`Timers::tools`] tool, run on the bridge's timers |
 //! | `host/notify` `{"title","text"?,"urgency"?,"source"?,"url"?}` | `{"id"}`: a notification in the assistant's inbox, delivered to the board |
 //!
@@ -43,8 +41,6 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::claude::agents::Decision;
-use crate::claude::alerts::MAX_APPROVAL_WAIT_S;
 use crate::link::{CallError, Hello, Link, Tool, ToolResult};
 use crate::profile::BoardKind;
 use crate::serial;
@@ -74,7 +70,7 @@ const SETTINGS_TOOLS: [&str; 2] = ["set_face", "set_rotation"];
 
 /// Where a running hub says how to reach it.
 pub fn hub_file() -> Option<PathBuf> {
-    crate::claude::data_dir().map(|d| d.join("hub.json"))
+    crate::paths::data_dir().map(|d| d.join("hub.json"))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -169,10 +165,6 @@ struct Shared {
     /// The id of the primary board, from the bridge's config.
     primary: Mutex<Option<Arc<Mutex<Option<String>>>>>,
     snapshot: Mutex<Option<(Snapshot, Instant)>>,
-    /// Takes Claude Code's hook events, while a bridge runs.
-    claude_hook: Mutex<Option<HookFn>>,
-    /// Answers Claude Code's permission requests, while a bridge runs.
-    claude_permission: Mutex<Option<PermissionFn>>,
     /// The bridge's timers, while it runs.
     timers: Mutex<Option<Arc<Timers>>>,
     /// The assistant, whose inbox `host/notify` posts to, while a bridge runs.
@@ -221,8 +213,6 @@ impl Hub {
             unavailable: Mutex::new("the bridge has not found the board yet".into()),
             primary: Mutex::default(),
             snapshot: Mutex::default(),
-            claude_hook: Mutex::default(),
-            claude_permission: Mutex::default(),
             timers: Mutex::default(),
             assistant: Mutex::default(),
             clients: AtomicUsize::new(0),
@@ -285,16 +275,6 @@ impl Hub {
     /// Where the id of the primary board is kept; `None` without a bridge.
     pub(crate) fn set_primary(&self, primary: Option<Arc<Mutex<Option<String>>>>) {
         *self.shared.primary.lock().unwrap() = primary;
-    }
-
-    /// What `host/claude_hook` hands its event to; `None` without a bridge.
-    pub(crate) fn set_claude_hook(&self, hook: Option<HookFn>) {
-        *self.shared.claude_hook.lock().unwrap() = hook;
-    }
-
-    /// What `host/claude_permission` asks; `None` without a bridge.
-    pub(crate) fn set_claude_permission(&self, ask: Option<PermissionFn>) {
-        *self.shared.claude_permission.lock().unwrap() = ask;
     }
 
     /// The assistant `host/notify` posts to; `None` without a bridge.
@@ -472,12 +452,6 @@ fn pick(boards: &[BoardInfo], wanted: Option<&str>, has_tool: impl Fn(usize) -> 
 /// Speak `text` (in `language`, or the one it looks like) and return how it went.
 pub(crate) type SayFn = Arc<dyn Fn(&str, Option<&str>) -> Result<Value, String> + Send + Sync>;
 
-/// Take a Claude Code hook's JSON; it must not wait on the board.
-pub(crate) type HookFn = Arc<dyn Fn(Value) + Send + Sync>;
-
-/// Hold a `PermissionRequest` hook's JSON until it is answered, or give up.
-pub(crate) type PermissionFn = Arc<dyn Fn(Value) -> Option<Decision> + Send + Sync>;
-
 fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i64, String)> {
     // Which board, for the hub only: the board itself isn't told.
     let wanted = params.as_object_mut().and_then(|p| p.remove("board")).and_then(|b| b.as_str().map(str::to_string));
@@ -496,20 +470,6 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
         }
         "host/boards" => return Ok(json!(shared.infos())),
         "host/hello" => return Ok(serde_json::to_value(&shared.pick(wanted, None)?.hello).unwrap_or(Value::Null)),
-        "host/claude_hook" => {
-            let hook = shared.claude_hook.lock().unwrap().clone();
-            let taken = hook.is_some();
-            if let Some(hook) = hook {
-                hook(params);
-            }
-            return Ok(json!({"taken": taken}));
-        }
-        "host/claude_permission" => {
-            // Each client has its own thread: this one may wait minutes.
-            let ask = shared.claude_permission.lock().unwrap().clone();
-            let decision = ask.and_then(|ask| ask(params));
-            return Ok(json!({"decision": decision}));
-        }
         "host/timers" => {
             let timers = shared.timers.lock().unwrap().clone().ok_or((NO_BOARD, "the bridge isn't running".to_string()))?;
             let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
@@ -856,27 +816,6 @@ impl Board {
         job(&|method, params, timeout| link.call(method, params, timeout))
     }
 
-    /// Hand a Claude Code hook's JSON to the running bridge, for its alerts.
-    /// Only through the hub: without a bridge there is nobody to tell.
-    pub fn claude_hook(&self, event: Value) -> Result<Value, CallError> {
-        let mut slot = self.hub.lock().unwrap();
-        let hub = self.hub_client(&mut slot).ok_or_else(|| CallError::Unavailable("the Yoru app isn't running".into()))?;
-        *self.route.lock().unwrap() = Some(Route::Hub);
-        hub.request("host/claude_hook", event)
-    }
-
-    /// Hand a `PermissionRequest` hook's JSON to the running bridge and wait
-    /// for the answer from the app or the board: `None` leaves it to Claude
-    /// Code's own dialog.
-    pub fn claude_permission(&self, event: Value) -> Result<Option<Decision>, CallError> {
-        let mut slot = self.hub.lock().unwrap();
-        let hub = self.hub_client(&mut slot).ok_or_else(|| CallError::Unavailable("the app isn't running".into()))?;
-        *self.route.lock().unwrap() = Some(Route::Hub);
-        let wait = Duration::from_secs(u64::from(MAX_APPROVAL_WAIT_S) + 10);
-        let reply = hub.request_waiting("host/claude_permission", event, wait)?;
-        Ok(serde_json::from_value(reply["decision"].clone()).unwrap_or(None))
-    }
-
     /// Run timer tool `name` ([`Timers::tools`]) on the running bridge's
     /// timers; without a bridge, on the ones kept on disk, which ring once
     /// the app or `yoru` runs again. `Err` is the tool's failure, as text.
@@ -1026,28 +965,6 @@ mod tests {
         let (got, age) = board.bridge_snapshot().unwrap();
         assert_eq!(got, snap);
         assert!(age < Duration::from_secs(1));
-    }
-
-    #[test]
-    fn claude_hooks_reach_the_bridge() {
-        let (dir, hub) = hub();
-        let board = Board::with_hub_file(None, "test", Some(dir.path().join("hub.json")));
-        assert_eq!(board.claude_hook(json!({"hook_event_name": "Stop"})).unwrap()["taken"], false);
-        let got = Arc::new(Mutex::new(None));
-        let sink = got.clone();
-        hub.set_claude_hook(Some(Arc::new(move |v| *sink.lock().unwrap() = Some(v))));
-        assert_eq!(board.claude_hook(json!({"hook_event_name": "Stop"})).unwrap()["taken"], true);
-        assert_eq!(got.lock().unwrap().as_ref().unwrap()["hook_event_name"], "Stop");
-    }
-
-    #[test]
-    fn permission_requests_wait_for_the_bridge() {
-        let (dir, hub) = hub();
-        let board = Board::with_hub_file(None, "test", Some(dir.path().join("hub.json")));
-        let request = json!({"hook_event_name": "PermissionRequest", "tool_name": "Bash"});
-        assert_eq!(board.claude_permission(request.clone()).unwrap(), None);
-        hub.set_claude_permission(Some(Arc::new(|v: Value| (v["tool_name"] == "Bash").then_some(Decision::Deny))));
-        assert_eq!(board.claude_permission(request).unwrap(), Some(Decision::Deny));
     }
 
     fn info(id: &str, kind: BoardKind) -> BoardInfo {
