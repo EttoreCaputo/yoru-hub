@@ -60,6 +60,8 @@ npm run tauri dev           # the real app, hot reload on UI changes
 npm run tauri build         # release build + installers, in target/release/bundle/
 ```
 
+On a Mac, build with `tools/build_app.sh` instead (same arguments): it signs the app with your Apple Development certificate. The keychain then recognises it from one build to the next and stops asking for the login password after one "Always Allow"; a build signed ad hoc (as the release workflow's) is a new app to it every time.
+
 The voice sidecars (whisper.cpp's and llama.cpp's servers) are built by `tools/build_sidecars.sh` and bundled with `--config src-tauri/tauri.sidecars.conf.json`.
 
 ## Checks

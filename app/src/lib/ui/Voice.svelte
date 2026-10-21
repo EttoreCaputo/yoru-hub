@@ -7,7 +7,7 @@
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { BoardVoice, ModelInfo, VoiceInfo, VoiceSettings } from "../types";
+  import type { AccountVoice, BoardVoice, ModelInfo, VoiceInfo, VoiceSettings } from "../types";
   import Toggle from "./Toggle.svelte";
 
   let { wakeWord }: { wakeWord: string | null } = $props();
@@ -30,6 +30,16 @@
     const id = setInterval(read, 700);
     return () => clearInterval(id);
   });
+
+  // The ElevenLabs account's voices aren't in the catalog: ask for them
+  // once its key is there. They speak any language, so each one fits both.
+  let account = $state<AccountVoice[]>([]);
+  const elevenKey = $derived(!!info?.providers.find((p) => p.id === "elevenlabs")?.key);
+  $effect(() => {
+    if (!elevenKey) return void (account = []);
+    call<AccountVoice[]>("elevenlabs_voices").then((v) => (account = v), (e) => (error = why(e)));
+  });
+  const accountId = (v: AccountVoice) => `elevenlabs:voice/${v.voice_id}`;
 
   async function set(change: Partial<VoiceSettings>) {
     if (!info) return;
@@ -109,6 +119,13 @@
             <div class="how">
               <select value={s.voices[lang] ?? ""} onchange={(e) => set({ voices: { ...s.voices, [lang]: e.currentTarget.value } })} aria-label={t.voiceFor(lang)}>
                 {#each voicesFor(lang) as m (m.id)}<option value={m.id}>{label(m)}</option>{/each}
+                {#if account.length}
+                  <optgroup label="ElevenLabs">
+                    {#each account as a (a.voice_id)}<option value={accountId(a)}>{a.name}{a.category ? ` · ${a.category}` : ""}</option>{/each}
+                  </optgroup>
+                {:else if s.voices[lang]?.startsWith("elevenlabs:voice/")}
+                  <option value={s.voices[lang]}>ElevenLabs · {s.voices[lang].slice("elevenlabs:voice/".length)}</option>
+                {/if}
               </select>
               {#if v && !v.installed && !v.provider}
                 {#if dl?.[0] === v.id}

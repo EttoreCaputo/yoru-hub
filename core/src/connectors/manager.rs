@@ -87,7 +87,7 @@ impl Connectors {
     /// connector, with secrets in the system keychain. `events` is called
     /// from the runtime's threads.
     pub fn open(data_dir: PathBuf, events: impl Fn(ConnectorEvent) + Send + Sync + 'static) -> Result<Self, ConnectorError> {
-        Self::open_with_secrets(data_dir, Arc::new(Keychain), events)
+        Self::open_with_secrets(data_dir, Arc::new(Keychain::default()), events)
     }
 
     /// As [`Self::open`], with secrets kept somewhere else (tests use

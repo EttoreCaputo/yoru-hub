@@ -2,8 +2,12 @@
 //! client secret, and the named secrets local servers read from their
 //! environment (`{"secret": "GITHUB_TOKEN"}`).
 //!
-//! Everything is under one keychain service, [`SERVICE`], one entry per
-//! account:
+//! Everything is one keychain item, [`VAULT`] under the service
+//! [`SERVICE`]: a JSON map from account to value, read once per run. One
+//! item, not one per account, because macOS asks for the login password
+//! for each item an app reads (until "Always Allow"), and again after an
+//! update changes the app's signature. Items from before, one per account,
+//! move into it the first time they are read. The accounts:
 //!
 //! | account               | what                                             |
 //! |-----------------------|--------------------------------------------------|
@@ -16,7 +20,7 @@
 //! [`SecretStore`] hides the keychain so tests (and a caller without one)
 //! can keep secrets in memory.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,6 +30,10 @@ use super::ConnectorError;
 
 /// The keychain service every entry is under.
 pub const SERVICE: &str = "it.bytebusters.yoru.connectors";
+
+/// The one item holding every secret. Ids have no `.` and no account ends
+/// in `.json`, so it can't be an account of its own.
+pub const VAULT: &str = "vault.json";
 
 /// A sign-in left half done is forgotten after this long.
 const STATE_TTL_SECS: u64 = 15 * 60;
@@ -40,34 +48,116 @@ pub trait SecretStore: Send + Sync {
 }
 
 /// The system keychain: Keychain Services on macOS, the Credential Manager
-/// on Windows, the Secret Service on Linux.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Keychain;
+/// on Windows, the Secret Service on Linux. Every secret in the one
+/// [`VAULT`] item, kept in memory after the first read.
+#[derive(Debug, Default)]
+pub struct Keychain {
+    /// The lock is held across keychain calls, so a run that has to ask
+    /// the user asks once, not once per caller.
+    state: Mutex<VaultState>,
+}
+
+#[derive(Debug, Default)]
+struct VaultState {
+    /// `None` until read.
+    vault: Option<HashMap<String, String>>,
+    /// Accounts already looked for among the old items this run.
+    legacy_checked: HashSet<String>,
+}
+
+type Vault = HashMap<String, String>;
 
 impl Keychain {
     fn entry(account: &str) -> Result<keyring::Entry, ConnectorError> {
         keyring::Entry::new(SERVICE, account).map_err(keychain_error)
     }
+
+    fn read_vault() -> Result<Vault, ConnectorError> {
+        match Self::entry(VAULT)?.get_password() {
+            // One that doesn't parse is an error, not empty: saving over it
+            // would lose every secret.
+            Ok(json) => serde_json::from_str(&json).map_err(|e| ConnectorError::Keychain(format!("{VAULT}: {e}"))),
+            Err(keyring::Error::NoEntry) => Ok(Vault::new()),
+            Err(e) => Err(keychain_error(e)),
+        }
+    }
+
+    fn write_vault(vault: &Vault) -> Result<(), ConnectorError> {
+        let json = serde_json::to_string(vault).map_err(|e| ConnectorError::Keychain(e.to_string()))?;
+        Self::entry(VAULT)?.set_password(&json).map_err(keychain_error)
+    }
+
+    /// Change the vault: read again first, since the CLI may have written
+    /// it since, and saved only when `f` changed something.
+    fn modify(&self, f: impl FnOnce(&mut Vault) -> bool) -> Result<(), ConnectorError> {
+        let mut state = self.state.lock().unwrap();
+        let mut vault = Self::read_vault()?;
+        if f(&mut vault) {
+            Self::write_vault(&vault)?;
+        }
+        state.vault = Some(vault);
+        Ok(())
+    }
+
+    /// An account's value from before the vault, moved into it.
+    fn take_legacy(&self, account: &str) -> Result<Option<String>, ConnectorError> {
+        let entry = Self::entry(account)?;
+        let value = match entry.get_password() {
+            Ok(value) => value,
+            Err(keyring::Error::NoEntry) => return Ok(None),
+            Err(e) => return Err(keychain_error(e)),
+        };
+        // What the vault has wins: an old item left behind is older.
+        let mut current = value.clone();
+        self.modify(|vault| match vault.get(account) {
+            Some(v) => {
+                current = v.clone();
+                false
+            }
+            None => {
+                vault.insert(account.to_string(), value);
+                true
+            }
+        })?;
+        // Moved: the old item would only ask for the password again. If it
+        // stays, it is read and dropped again on a later run.
+        let _ = entry.delete_credential();
+        Ok(Some(current))
+    }
 }
 
 impl SecretStore for Keychain {
     fn get(&self, account: &str) -> Result<Option<String>, ConnectorError> {
-        match Self::entry(account)?.get_password() {
-            Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(keychain_error(e)),
+        {
+            let mut state = self.state.lock().unwrap();
+            if state.vault.is_none() {
+                state.vault = Some(Self::read_vault()?);
+            }
+            if let Some(value) = state.vault.as_ref().and_then(|v| v.get(account)) {
+                return Ok(Some(value.clone()));
+            }
+            if !state.legacy_checked.insert(account.to_string()) {
+                return Ok(None);
+            }
         }
+        self.take_legacy(account)
     }
 
     fn set(&self, account: &str, value: &str) -> Result<(), ConnectorError> {
-        Self::entry(account)?.set_password(value).map_err(keychain_error)
+        self.modify(|vault| vault.insert(account.to_string(), value.to_string()).as_deref() != Some(value))
     }
 
     fn delete(&self, account: &str) -> Result<(), ConnectorError> {
-        match Self::entry(account)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(keychain_error(e)),
+        self.modify(|vault| vault.remove(account).is_some())?;
+        // Not looked for yet: an old item may still be there.
+        let unchecked = self.state.lock().unwrap().legacy_checked.insert(account.to_string());
+        if unchecked {
+            match Self::entry(account)?.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => {}
+                Err(e) => return Err(keychain_error(e)),
+            }
         }
+        Ok(())
     }
 }
 
