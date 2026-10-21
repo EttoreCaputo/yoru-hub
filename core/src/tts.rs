@@ -518,6 +518,130 @@ pub fn sentences(text: &str) -> Vec<String> {
     out
 }
 
+/// `text` as a voice can read it. The model is asked for plain sentences
+/// when it is heard, but Markdown, links, emoji and symbols still slip
+/// through, and a voice spells them out or stumbles on them.
+pub fn speakable(text: &str, language: &str) -> String {
+    let mut out = String::new();
+    for line in text.lines().map(|l| speakable_line(l, language)).filter(|l| !l.is_empty()) {
+        // A list item or a heading has no full stop: each line is a sentence.
+        if !out.is_empty() {
+            if !out.ends_with(is_mark) {
+                out.push('.');
+            }
+            out.push(' ');
+        }
+        out.push_str(&line);
+    }
+    out
+}
+
+fn speakable_line(line: &str, language: &str) -> String {
+    let line = without_urls(&link_texts(without_markers(line)));
+    let mut out = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            c if c.is_alphanumeric() || c.is_whitespace() || is_mark(c) => out.push(c),
+            '\'' | '’' | '(' | ')' | '%' | '€' | '$' | '£' | '-' => out.push(c),
+            '–' | '—' => out.push(','),
+            '…' => out.push('.'),
+            '&' => out.push_str(&format!(" {} ", word(language, "and"))),
+            '°' => {
+                // "20°C" is said "20 degrees".
+                if chars.peek().is_some_and(|n| matches!(n, 'C' | 'F')) {
+                    chars.next();
+                }
+                out.push_str(&format!(" {}", word(language, "degrees")));
+            }
+            // * _ # ` ~ | / \ < > [ ] { } = + @ ", arrows, emoji.
+            _ => out.push(' '),
+        }
+    }
+    tidy(&out.replace(" - ", ", "))
+}
+
+fn is_mark(c: char) -> bool {
+    matches!(c, '.' | ',' | ';' | ':' | '!' | '?')
+}
+
+/// Heading, quote and list markers at the start of a line.
+fn without_markers(line: &str) -> &str {
+    let mut line = line.trim();
+    loop {
+        let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let rest = if line.starts_with(['#', '>']) {
+            line.trim_start_matches(['#', '>'])
+        } else if let Some(rest) = ["- ", "* ", "+ ", "• "].iter().find_map(|m| line.strip_prefix(m)) {
+            rest
+        } else if digits > 0 && (line[digits..].starts_with(". ") || line[digits..].starts_with(") ")) {
+            &line[digits + 2..]
+        } else {
+            return line;
+        };
+        line = rest.trim_start();
+    }
+}
+
+/// `[text](url)` as its text.
+fn link_texts(line: &str) -> String {
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(open) = rest.find('[') {
+        let Some(close) = rest[open..].find("](").map(|i| open + i) else { break };
+        let Some(end) = rest[close..].find(')').map(|i| close + i) else { break };
+        out.push_str(&rest[..open]);
+        out.push_str(&rest[open + 1..close]);
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn without_urls(line: &str) -> String {
+    let is_url = |w: &str| {
+        let w = w.trim_start_matches(['(', '<']);
+        w.starts_with("http://") || w.starts_with("https://") || w.starts_with("www.")
+    };
+    line.split(' ').filter(|w| !is_url(w)).collect::<Vec<_>>().join(" ")
+}
+
+/// One space between words, none before punctuation, no punctuation twice
+/// (but "..." stays).
+fn tidy(text: &str) -> String {
+    let mut out = String::new();
+    for word in text.split_whitespace() {
+        if !out.is_empty() && !word.starts_with(is_mark) {
+            out.push(' ');
+        }
+        for c in word.chars() {
+            let doubled = out.ends_with(is_mark) && !(c == '.' && out.ends_with('.'));
+            if is_mark(c) && (out.is_empty() || doubled) {
+                continue;
+            }
+            out.push(c);
+        }
+    }
+    out.trim().to_string()
+}
+
+/// The few words [`speakable`] puts in place of a symbol.
+fn word(language: &str, what: &str) -> &'static str {
+    let lang = language.get(..2).unwrap_or(language);
+    match (what, lang) {
+        ("and", "it") => "e",
+        ("and", "es") => "y",
+        ("and", "fr") => "et",
+        ("and", "de") => "und",
+        ("and", _) => "and",
+        (_, "it") => "gradi",
+        (_, "es") => "grados",
+        (_, "fr") => "degrés",
+        (_, "de") => "Grad",
+        _ => "degrees",
+    }
+}
+
 fn push_sentence(out: &mut Vec<String>, current: &mut String, min: usize) {
     let s = current.trim();
     if s.is_empty() {
@@ -582,5 +706,15 @@ mod tests {
         assert_eq!(sentences("Fatto. La faccia rings è a sinistra! E poi?"), ["Fatto. La faccia rings è a sinistra!", "E poi?"]);
         assert_eq!(sentences("It's 3.5 degrees warmer. Done"), ["It's 3.5 degrees warmer.", "Done"]);
         assert!(sentences("  ").is_empty());
+    }
+
+    #[test]
+    fn speakable_drops_markdown_and_symbols() {
+        assert_eq!(speakable("**Fatto!** Ho messo il timer 🎉", "it"), "Fatto! Ho messo il timer");
+        assert_eq!(speakable("## Oggi\n- riunione alle 14:30\n- palestra & spesa", "it"), "Oggi. riunione alle 14:30. palestra e spesa");
+        assert_eq!(speakable("Fuori ci sono 20°C, vedi [il meteo](https://meteo.it) o https://x.y", "it"), "Fuori ci sono 20 gradi, vedi il meteo o");
+        assert_eq!(speakable("1. `email` → Marco / Luca", "en"), "email Marco Luca");
+        assert_eq!(speakable("It's 3.5 degrees — warmer... Done", "en"), "It's 3.5 degrees, warmer... Done");
+        assert_eq!(speakable("L'espresso costa 1,20 €", "it"), "L'espresso costa 1,20 €");
     }
 }

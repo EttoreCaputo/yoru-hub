@@ -137,6 +137,7 @@ pub(super) fn run(
         timers: config.timers.clone(),
         assistant: config.assistant.clone(),
         agents: config.agents.clone(),
+        voice_state: voice_state.clone(),
     });
     // The sampler samples while a session is open; this one waits for its next snapshot.
     let _open = latest.open_session();

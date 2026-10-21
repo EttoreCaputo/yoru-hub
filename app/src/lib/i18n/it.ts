@@ -246,7 +246,7 @@ const it: Messages = {
 
   memory: {
     title: "Memoria",
-    lede: "Quello che Yoru sa di te. Lo legge all'inizio di ogni risposta e lo arricchisce quando gli chiedi di ricordare qualcosa.",
+    lede: "Quello che Yoru sa di te. Lo legge all'inizio di ogni risposta e lo tiene aggiornato da solo mentre parlate: aggiunge quello che dura, corregge quello che è cambiato e toglie quello che non è più vero.",
     save: "Salva",
     saved: "Salvato",
     unsaved: "Modifiche non salvate",

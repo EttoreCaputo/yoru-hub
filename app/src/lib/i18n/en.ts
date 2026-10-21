@@ -245,7 +245,7 @@ const en = {
 
   memory: {
     title: "Memory",
-    lede: "What Yoru knows about you. It reads this at the start of every turn and adds to it when you tell it to remember something.",
+    lede: "What Yoru knows about you. It reads this at the start of every turn and keeps it up to date on its own as you talk: it adds what lasts, corrects what changed and removes what is no longer true.",
     save: "Save",
     saved: "Saved",
     unsaved: "Unsaved changes",

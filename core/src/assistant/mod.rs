@@ -11,7 +11,7 @@
 //! new ([`watchers`]), the morning recap ([`routines`]).
 //!
 //! How a turn goes: the model gets Yoru's own tools (`notify`, `remember`,
-//! `forget`, `get_inbox`, the timers), the board's, web search (a server
+//! `forget`, `revise_memory`, `get_inbox`, the timers), the board's, web search (a server
 //! tool), and the connectors' tools deferred behind tool search, so only
 //! the ones a request needs are loaded. It calls them until it answers in
 //! words. A connector tool that changes something (sends a mail, creates an
@@ -565,6 +565,7 @@ impl Assistant {
             }
             "remember" => return self.memory.remember(input["section"].as_str().unwrap_or("notes"), input["text"].as_str().unwrap_or_default()),
             "forget" => return self.memory.forget(input["text"].as_str().unwrap_or_default()),
+            "revise_memory" => return self.memory.revise(input["old"].as_str().unwrap_or_default(), input["text"].as_str().unwrap_or_default()),
             "get_inbox" => {
                 let items: Vec<Value> = self
                     .inbox
@@ -667,8 +668,11 @@ Your board's settings (brightness, volume, wake word, its menu, the other settin
 - Use the tools instead of guessing: read the mail, the calendar or the web when the answer depends on them. Never invent facts about the user's data.
 - Tools that change something (send, create, delete, reply) ask the user first; if they say no, accept it.
 - When something is too long to say aloud (a list, a summary, details), say the gist and put the details in the inbox with notify.
-- Keep the memory up to date: when the user tells you something lasting about themselves, what matters to them, or what they want to hear about \
-(or not), save it with remember; remove what is no longer true with forget. The memory is in <memory> below.
+- Look after the memory on your own, without being asked: whenever what the user says shows something lasting about them (who they are, \
+the people, projects and habits that matter to them, what they want to hear about or not), save it with remember. When it contradicts or \
+refines what is there, correct the line with revise_memory; when it is no longer true, remove it with forget. Keep it tidy: one fact per \
+short line, in the right section, no duplicates (merge them), nothing passing (a one-off errand is a timer or a note, not a memory). \
+Don't announce every change; mention it briefly only when the user would want to know. The memory is in <memory> below.
 - Timers and reminders run on this computer and ring on your board.
 
 # Notifying
@@ -679,8 +683,9 @@ text: one or two sentences with what the user needs to decide whether to look.
 
 # How you talk
 - Reply in the language the user speaks (the context line says which, when known).
-- When the request was spoken (channel: voice), your reply is said aloud: plain sentences, no markdown, no lists, no emoji, no URLs; \
-one to three sentences.
+- When the request was spoken (channel: voice), your reply is said aloud: plain sentences a text-to-speech voice reads well: \
+no markdown, no lists, no emoji, no URLs, no symbols or special characters (* # / & @ | < > [ ] {{ }} ° or arrows); \
+write units and abbreviations as they are said (20 gradi, not 20°C); one to three sentences.
 - When it was typed (channel: text), you may be longer and use short Markdown.
 - You are friendly and to the point, with a light touch of warmth; never chatty, never servile. Don't end with offers of help."
     )
@@ -719,6 +724,15 @@ tell (what they want to be told about), quiet (what they don't want to hear abou
             "name": "forget",
             "description": "Remove the memory lines that contain this text.",
             "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+        }),
+        json!({
+            "name": "revise_memory",
+            "description": "Rewrite the one memory line that contains `old`: a fact that changed, a line made clearer, or two lines merged into one (revise one, forget the other).",
+            "input_schema": {
+                "type": "object",
+                "properties": {"old": {"type": "string", "description": "Text from the line to change"}, "text": {"type": "string", "description": "The new line, short"}},
+                "required": ["old", "text"],
+            },
         }),
         json!({
             "name": "get_inbox",

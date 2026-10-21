@@ -1,6 +1,6 @@
 //! What Yoru knows about you: a Markdown file (`memory.md` in the data
 //! folder) the assistant reads at the start of each conversation and writes
-//! with its `remember` and `forget` tools. You read and edit the same file
+//! with its `remember`, `revise_memory` and `forget` tools. You read and edit the same file
 //! in the app's Memory page.
 //!
 //! The file is a few sections (`## About you`, `## What matters to you`,
@@ -102,6 +102,31 @@ impl Memory {
         Ok(format!("forgot {removed} line(s)"))
     }
 
+    /// Rewrite the one line that contains `needle` (case-insensitive) as
+    /// `line`: a fact that changed, or two lines merged into one, keep their
+    /// place in the file.
+    pub fn revise(&self, needle: &str, line: &str) -> Result<String, String> {
+        let needle = needle.trim().to_lowercase();
+        if needle.len() < 3 {
+            return Err("say more precisely which line to change".into());
+        }
+        let line: String = line.trim().replace('\n', " ").chars().take(MAX_LINE).collect();
+        if line.is_empty() {
+            return Err("nothing to write: use forget to remove the line".into());
+        }
+        let mut text = self.text.lock().unwrap();
+        let matches = |l: &&str| l.starts_with("- ") && l.to_lowercase().contains(&needle);
+        match text.lines().filter(matches).count() {
+            0 => return Err("nothing like that is in the memory: use remember".into()),
+            1 => {}
+            n => return Err(format!("{n} lines match: say more precisely which one")),
+        }
+        let revised: Vec<String> = text.lines().map(|l| if matches(&l) { format!("- {line}") } else { l.to_string() }).collect();
+        *text = revised.join("\n") + "\n";
+        self.save(&text).map_err(|e| e.to_string())?;
+        Ok("revised".into())
+    }
+
     fn save(&self, text: &str) -> io::Result<()> {
         let Some(file) = &self.file else { return Ok(()) };
         if let Some(dir) = file.parent() {
@@ -157,6 +182,19 @@ mod tests {
         assert_eq!(memory.forget("bank").unwrap(), "forgot 1 line(s)");
         assert!(!Memory::open(Some(file)).text().contains("bank"));
         assert!(memory.remember("nope", "x").is_err());
+    }
+
+    #[test]
+    fn revises_one_line_in_place() {
+        let memory = Memory::open(None);
+        memory.remember("about", "Lives in Rome").unwrap();
+        memory.remember("about", "Works on ESP32 boards").unwrap();
+        memory.remember("notes", "Likes ESP32 dev kits").unwrap();
+        assert!(memory.revise("esp32", "x").unwrap_err().starts_with("2 lines match"));
+        assert!(memory.revise("Paris", "x").is_err());
+        memory.revise("rome", "Lives in Milan since 2026").unwrap();
+        let text = memory.text();
+        assert!(!text.contains("Rome") && text.find("- Lives in Milan since 2026").unwrap() < text.find("- Works on ESP32").unwrap(), "{text}");
     }
 
     #[test]

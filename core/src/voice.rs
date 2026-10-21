@@ -224,6 +224,57 @@ fn set_state(link: &Link, state: &str) {
         let _ = link.call("voice/state", json!({"state": "idle"}), STATE_TIMEOUT);
     }
 }
+
+/// The board drops a `thinking` nobody renews within 30 s (a host that went
+/// away); a slow model (Ollama) can take longer, so it's renewed this often.
+const THINKING_EVERY: Duration = Duration::from_secs(10);
+
+/// Renews the board's `thinking` until stopped or dropped.
+struct StillThinking {
+    done: Arc<(Mutex<bool>, Condvar)>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl StillThinking {
+    fn start(session: &Session) -> Self {
+        let done = Arc::new((Mutex::new(false), Condvar::new()));
+        let (link, state) = (session.link.clone(), session.voice_state.clone());
+        let thread = {
+            let done = done.clone();
+            thread::Builder::new().name("yoru-thinking".into()).spawn(move || loop {
+                let (lock, cv) = &*done;
+                let over = cv.wait_timeout_while(lock.lock().unwrap(), THINKING_EVERY, |over| !*over).unwrap().0;
+                if *over {
+                    return;
+                }
+                drop(over);
+                // Only while it still is: not over the wake word's listening.
+                if *state.lock().unwrap() != "thinking" {
+                    continue;
+                }
+                let Some(link) = link.upgrade() else { return };
+                let _ = link.call("voice/state", json!({"state": "thinking"}), STATE_TIMEOUT);
+            })
+        };
+        Self { done, thread: thread.ok() }
+    }
+
+    /// Before the answer plays, so a renewal never lands over `speaking`.
+    fn stop(&mut self) {
+        *self.done.0.lock().unwrap() = true;
+        self.done.1.notify_all();
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+impl Drop for StillThinking {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 const TOOL_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// What the voice thread shares with the bridge's session.
@@ -247,6 +298,8 @@ pub(crate) struct Session {
     pub assistant: Option<Arc<crate::Assistant>>,
     /// Where the assistant's actions are allowed or denied.
     pub agents: Arc<crate::claude::agents::Agents>,
+    /// What the board's eyes show, from its `voice_state`.
+    pub voice_state: Arc<Mutex<String>>,
 }
 
 /// What the link's reader hands the pipeline.
@@ -303,7 +356,8 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             continue;
         }
         let Some(link) = session.link.upgrade() else { break };
-        // The board shows thinking meanwhile.
+        // The board shows thinking meanwhile, however long the model takes.
+        let mut thinking = StillThinking::start(session);
         let follow_up = utterance.trigger == "follow_up";
         let transcript = match &config.stt {
             // Voice is off or its model isn't usable: say so rather than drop the words.
@@ -328,9 +382,10 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             },
         };
         let next = match transcript {
-            Ok(t) => respond(&link, session, &config, sink, utterance.id, &t.text, &t.language),
+            Ok(t) => respond(&link, session, &config, sink, utterance.id, &t.text, &t.language, &mut thinking),
             Err(state) => Next::State(state),
         };
+        thinking.stop();
         let over = match next {
             Next::State(state) => {
                 set_state(&link, state);
@@ -365,7 +420,8 @@ enum Next {
 }
 
 /// Act on the words and answer.
-fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSink, id: u8, text: &str, language: &str) -> Next {
+#[allow(clippy::too_many_arguments)]
+fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSink, id: u8, text: &str, language: &str, thinking: &mut StillThinking) -> Next {
     let started = Instant::now();
     // "Stop" or "5 more minutes" for an alarm needs no language model: the rules, at once.
     let alarm = session.timers.is_ringing() || session.timers.dismissed_within(ALARM_FOLLOW_UP);
@@ -398,6 +454,7 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
     let elapsed_ms = started.elapsed().as_millis() as u64;
     sink(BridgeEvent::Reply { id, text: reply.clone(), language: language.to_string(), actions, understood, by: by.into(), elapsed_ms });
     let Some(tts) = config.tts.as_deref() else { return Next::State("idle") };
+    thinking.stop();
     match session.speaker.speak(link, tts, &reply, language) {
         Ok(spoken) => {
             let next = match spoken.reason.as_str() {
@@ -615,7 +672,7 @@ impl Speaker {
     pub fn speak(&self, link: &Link, tts: &Tts, text: &str, language: &str) -> Result<Spoken, String> {
         let started = Instant::now();
         let (tx, rx) = mpsc::sync_channel::<Result<Vec<i16>, String>>(2);
-        let sentences = tts::sentences(text);
+        let sentences = tts::sentences(&tts::speakable(text, language));
         thread::scope(|scope| {
             scope.spawn(move || {
                 for s in sentences {

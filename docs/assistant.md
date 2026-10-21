@@ -73,7 +73,7 @@ The first run's brain step offers both, with their keys; its optional second par
 
 ## Memory
 
-Files in the data folder that the agent reads at the start of a turn and writes with `remember`: who you are, what matters to you (people, projects, topics), what to tell you and what not, and what it has already told you. You read and edit them in the app.
+Files in the data folder that the agent reads at the start of a turn and keeps up to date on its own as you talk (`remember`, `revise_memory`, `forget`): who you are, what matters to you (people, projects, topics), what to tell you and what not, and what it has already told you. You read and edit them in the app.
 
 ## Proactive: watchers, triage, notifications
 
