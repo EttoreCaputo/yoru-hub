@@ -1,6 +1,7 @@
 <!--
-  The board on the desk: how it's reached, its firmware (and updating it), its
-  WiFi, its voice, and the settings it keeps itself.
+  The board on the desk, as a page of Settings: how it's reached, its firmware
+  (and updating it), its WiFi, and the settings it keeps itself. Its voice is
+  in Settings' voice page, with the cloud voices' keys.
 -->
 <script lang="ts">
   import { call, why } from "../api";
@@ -8,9 +9,8 @@
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
   import type { PortInfo, Transport, WifiInfo, WifiNetwork, YoruSetting, YoruSettings } from "../types";
-  import Toggle from "../ui/Toggle.svelte";
   import { boldParts } from "../updates";
-  import Voice from "../ui/Voice.svelte";
+  import Toggle from "./Toggle.svelte";
 
   const t = $derived(i18n.t.board);
   const live = $derived(store.link === "connected");
@@ -85,7 +85,6 @@
     );
   });
   const rows = $derived(table ? Object.entries(table).filter((e): e is [string, YoruSetting] => typeof e[1] === "object" && e[1] !== null && "value" in e[1]) : []);
-  const wakeWord = $derived(typeof table?.wake_word === "string" ? table.wake_word : null);
   async function setSetting(name: string, value: number) {
     const s = table?.[name];
     if (typeof s !== "object") return;
@@ -106,14 +105,7 @@
   const running = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
 </script>
 
-<div class="page">
-  <div class="page-head">
-    <div>
-      <h1>{t.title}</h1>
-      <p class="lede">{t.lede}</p>
-    </div>
-  </div>
-
+<div>
   <h2 class="section-title">{t.connection}</h2>
   <section class="panel">
     {#if !live}
@@ -205,9 +197,6 @@
       {#if wifiError || wifi?.error}<p class="error-text">{wifiError || wifi?.error}</p>{/if}
     </section>
   {/if}
-
-  <h2 class="section-title">{t.voice}</h2>
-  <Voice {wakeWord} />
 
   {#if live}
     <h2 class="section-title">{t.settings}</h2>

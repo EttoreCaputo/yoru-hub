@@ -15,12 +15,11 @@
     connectors: "M9 7V4M15 7V4M7 7h10v4a5 5 0 0 1-10 0zM12 16v4",
     routines: "M12 7v5l3 2M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z",
     memory: "M6 4h9l3 3v13H6zM9 10h6M9 14h6",
-    yoru: "M12 5.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM10.5 11v2M13.5 11v2",
     settings: "M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4",
   };
   const MOON = "M4 13a8 8 0 0 0 15 3.5A8 8 0 0 1 9 5a8 8 0 0 0-5 8Z";
   const MAIN: Page[] = ["today", "conversation", "inbox", "connectors", "routines", "memory"];
-  const BODY: Page[] = ["yoru", "settings"];
+  const BODY: Page[] = ["settings"];
 
   const tint = $derived(
     store.asking || store.voice === "thinking" ? "think" : store.voice === "speaking" ? "done" : store.yoruApprovals.length || store.codeApprovals.length ? "wait" : null,
@@ -37,8 +36,8 @@
   const badge = (p: Page): { n?: number; dot?: string } | null => {
     if (p === "inbox" && store.unread) return { n: store.unread };
     if (p === "conversation" && store.yoruApprovals.length) return { dot: "wait" };
-    if (p === "yoru" && store.update) return { dot: "wait" };
     if (p === "settings" && store.info && !store.info.ready) return { dot: "wrong" };
+    if (p === "settings" && store.update) return { dot: "wait" };
     if (p === "connectors" && store.connectors.some((c) => c.enabled && (c.state === "needs_login" || c.state === "error"))) return { dot: "wait" };
     return null;
   };

@@ -354,6 +354,62 @@ label.stack {
   background: color-mix(in srgb, var(--wait) 12%, transparent);
 }
 
+/* Tiles to pick one from: the brains, the voices, the languages. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.tile {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  padding: 14px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--rim);
+  background: var(--ink);
+  color: var(--pearl);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 180ms,
+    background 180ms,
+    box-shadow 180ms;
+}
+.tile:hover {
+  background: var(--ink-2);
+}
+.tile b {
+  font: 600 15px/1.2 var(--display);
+}
+.tile > span:not(.tag) {
+  color: var(--haze);
+  font-size: 12px;
+}
+.tile .tag {
+  justify-self: start;
+  margin-top: 6px;
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, transparent);
+}
+.tile.on {
+  border-color: color-mix(in srgb, var(--c) 60%, transparent);
+  background: color-mix(in srgb, var(--c) 9%, var(--ink));
+  box-shadow: 0 0 30px -12px var(--c);
+}
+.tile:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.tile:disabled:hover {
+  background: var(--ink);
+}
+.tile .tag.dim {
+  color: var(--haze);
+  background: var(--ink-3);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
