@@ -391,6 +391,8 @@ const it: Messages = {
     ollamaPick: "Scegli un modello",
     ollamaNone: "Ollama non ha ancora modelli: scaricane uno, per esempio ollama pull qwen3:8b",
     ollamaRefresh: "Aggiorna",
+    ollamaThink: "Ragiona prima di rispondere",
+    ollamaThinkHint: "Per i modelli che lo sanno fare (lfm2.5, qwen3): più lento, più sveglio, e senza limite di durata. Spento, un modello che ragiona comunque tiene i pensieri per sé.",
     ollamaGet: "Modelli con strumenti",
     claudeModel: "Modello di Claude",
     groqModel: "Modello di Groq",

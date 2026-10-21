@@ -30,7 +30,7 @@ fn authorized<B>(client: &Client, request: ureq::RequestBuilder<B>) -> ureq::Req
 }
 
 /// The body of a successful answer, or the error it stands for.
-fn read(client: &Client, sent: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Vec<u8>, CloudError> {
+pub(super) fn read(client: &Client, sent: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Vec<u8>, CloudError> {
     let provider = client.model.provider.name;
     let mut response = sent.map_err(|e| CloudError::Network { provider, why: e.to_string() })?;
     let status = response.status().as_u16();

@@ -26,6 +26,7 @@
 
 pub mod anthropic;
 pub mod elevenlabs;
+mod ollama;
 mod openai;
 
 use std::collections::BTreeMap;
@@ -513,9 +514,11 @@ impl Client {
 
     /// A chat completion: OpenAI's request (`messages`, `tools`, sampling);
     /// the first choice's message. Settings only llama.cpp knows are left
-    /// out, and the model's [`CloudModel::params`] added.
+    /// out, and the model's [`CloudModel::params`] added. Ollama's goes
+    /// through its own API ([`ollama`]), where `think` works.
     pub fn chat(&self, request: &Value) -> Result<Value, CloudError> {
         self.limited(|| match self.model.provider.api {
+            Api::OpenAi if self.model.provider.id == OLLAMA.id => ollama::chat(self, request),
             Api::OpenAi => openai::chat(self, request),
             Api::ElevenLabs | Api::Anthropic => Err(self.unsupported("chat")),
         })

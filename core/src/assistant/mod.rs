@@ -143,6 +143,10 @@ pub struct Settings {
     pub task_effort: String,
     /// Search the web when a question needs it.
     pub web_search: bool,
+    /// Let a model on Ollama that can think do it, as long as it likes. Off,
+    /// one that thinks anyway (lfm2.5) still does, inside its answer, and
+    /// its thoughts are cut out.
+    pub think: bool,
     pub routines: routines::Routines,
 }
 
@@ -175,6 +179,7 @@ impl Default for Settings {
             effort: "medium".into(),
             task_effort: "low".into(),
             web_search: true,
+            think: true,
             routines: routines::Routines::default(),
         }
     }

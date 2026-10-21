@@ -390,6 +390,8 @@ const en = {
     ollamaPick: "Pick a model",
     ollamaNone: "Ollama has no models yet: pull one, e.g. ollama pull qwen3:8b",
     ollamaRefresh: "Refresh",
+    ollamaThink: "Think before answering",
+    ollamaThinkHint: "For models that can (lfm2.5, qwen3): slower, smarter, and no limit on how long. Off, a model that thinks anyway keeps its thoughts to itself.",
     ollamaGet: "Models with tools",
     claudeModel: "Claude's model",
     groqModel: "Groq's model",

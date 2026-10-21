@@ -175,6 +175,7 @@ const info: AssistantInfo = {
     effort: "medium",
     task_effort: "low",
     web_search: true,
+    think: true,
     routines: { recap: true, recap_at: "08:30", recap_weekdays_only: true, recap_task: "", quiet: true, quiet_from: "22:30", quiet_to: "07:30" },
   },
   ready: !noKey,

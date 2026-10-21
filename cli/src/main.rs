@@ -233,7 +233,7 @@ enum Command {
     /// The assistant's settings: `settings` prints them, `settings KEY VALUE`
     /// changes one (name, provider: anthropic, openai, groq, ollama or auto;
     /// model: Claude's; openai_model, groq_model, ollama_model; effort,
-    /// task_effort, web_search: Claude only; recap,
+    /// task_effort, web_search: Claude only; think: Ollama only; recap,
     /// recap_at, recap_weekdays_only, quiet, quiet_from, quiet_to)
     Settings {
         key: Option<String>,

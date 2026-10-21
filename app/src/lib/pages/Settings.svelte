@@ -318,6 +318,10 @@
           <button class="btn small" onclick={() => call("open_key_page", { provider: "ollama" })}>{t.ollamaGet}</button>
         </div>
       </div>
+      <div class="setting">
+        <div class="what"><b>{t.ollamaThink}</b><span class="dim">{t.ollamaThinkHint}</span></div>
+        <div class="how"><Toggle checked={s.think} label={t.ollamaThink} onchange={(on) => store.saveSettings((x) => (x.think = on))} /></div>
+      </div>
     </section>
 
     <h2 class="section-title">{t.howItThinks}</h2>

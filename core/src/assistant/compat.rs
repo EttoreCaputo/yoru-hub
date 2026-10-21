@@ -241,13 +241,26 @@ fn used_tools(messages: &[Value]) -> Vec<String> {
     used
 }
 
-/// A thinking model's text without its thoughts, when it leaves them in.
+/// A thinking model's text without its thoughts, when it leaves them in;
+/// thoughts that never closed take the rest with them.
 fn clean(text: &str) -> String {
     let text = match (text.find("<think>"), text.find("</think>")) {
         (Some(start), Some(end)) if end > start => format!("{}{}", &text[..start], &text[end + "</think>".len()..]),
+        (Some(start), None) => text[..start].to_string(),
         _ => text.to_string(),
     };
     text.trim().to_string()
+}
+
+/// `request` with its limit, or, on Ollama, with no limit and the
+/// settings' `think`: a model on this computer may think as long as it likes.
+fn request(brain: Brain, settings: &Settings, mut request: Value, max_tokens: u32) -> Value {
+    if brain == Brain::Ollama {
+        request["think"] = settings.think.into();
+    } else {
+        request["max_tokens"] = max_tokens.into();
+    }
+    request
 }
 
 /// One request. A tool call the model wrote badly (Groq's 400
@@ -286,7 +299,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
         let tools = tool_list(&board_tools, &loaded, !findable.is_empty(), &budget);
         let mut all = vec![system.clone()];
         all.extend(messages.iter().cloned());
-        let message = chat(&client, &json!({"messages": all, "tools": tools, "tool_choice": "auto", "max_tokens": budget.max_tokens}))?;
+        let message = chat(&client, &request(brain, settings, json!({"messages": all, "tools": tools, "tool_choice": "auto"}), budget.max_tokens))?;
         let calls = message["tool_calls"].as_array().cloned().unwrap_or_default();
         let text = clean(message["content"].as_str().unwrap_or_default());
         if calls.is_empty() {
@@ -379,7 +392,7 @@ pub(super) fn complete_json(settings: &Settings, brain: Brain, prompt: &str, sch
     } else {
         (format!("{prompt}\n\nAnswer with JSON only, matching this schema:\n{schema}"), json!({"type": "json_object"}))
     };
-    let request = json!({"messages": [{"role": "user", "content": prompt}], "response_format": format, "max_tokens": budget(brain).json_max_tokens});
+    let request = request(brain, settings, json!({"messages": [{"role": "user", "content": prompt}], "response_format": format}), budget(brain).json_max_tokens);
     let message = client.chat(&request).map_err(|e| brain_error(&e))?;
     Ok(clean(message["content"].as_str().unwrap_or_default()))
 }
@@ -509,6 +522,7 @@ mod tests {
         assert!(messages.iter().filter(|m| m["role"] == "tool").all(|m| m["content"].as_str().unwrap().chars().count() < 700));
         assert_eq!(used_tools(&messages), ["tool2", "tool3", "tool4", "tool5"]);
         assert_eq!(clean("<think>hmm</think> Ciao"), "Ciao");
+        assert_eq!(clean("<think>hmm, cut off"), "");
     }
 
     #[test]
@@ -601,7 +615,8 @@ mod tests {
     #[test]
     fn openai_and_ollama_take_the_same_turn() {
         let _env = crate::assistant::tests::ENV.lock().unwrap_or_else(|e| e.into_inner());
-        let (url, requests) = fake_server(vec![answer(json!({"role": "assistant", "content": "Ciao!"})), answer(json!({"role": "assistant", "content": "Eccomi."}))]);
+        let ollama = (200, json!({"message": {"role": "assistant", "content": "Eccomi.", "thinking": "Mi saluta."}}));
+        let (url, requests) = fake_server(vec![answer(json!({"role": "assistant", "content": "Ciao!"})), ollama]);
         // SAFETY: only these tests read these variables, under ENV.
         unsafe {
             std::env::set_var("OPENAI_BASE_URL", &url);
@@ -623,8 +638,10 @@ mod tests {
         a.set_settings(Settings { provider: Some(Brain::Ollama), ollama_model: "qwen3:8b".into(), ..Settings::default() }).unwrap();
         assert!(a.is_ready());
         assert_eq!(a.respond("Ciao", Some("it"), Channel::Text, &NoBoard).unwrap().model, "ollama:qwen3:8b");
+        // Through Ollama's own API: thinking on, no limit.
         let second = requests.recv().unwrap();
-        assert_eq!((second["model"].as_str(), second["max_tokens"].as_u64()), (Some("qwen3:8b"), Some(u64::from(TIGHT.max_tokens))));
+        assert_eq!((second["model"].as_str(), second["think"].as_bool()), (Some("qwen3:8b"), Some(true)));
+        assert!(second.get("options").is_none());
         unsafe {
             std::env::remove_var("OPENAI_BASE_URL");
             std::env::remove_var("OPENAI_API_KEY");

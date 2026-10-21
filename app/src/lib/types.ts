@@ -48,6 +48,8 @@ export type AssistantSettings = {
   effort: Effort;
   task_effort: Effort;
   web_search: boolean;
+  /** Ollama: let a model that can think do it, as long as it likes. */
+  think: boolean;
   routines: Routines;
 };
 
