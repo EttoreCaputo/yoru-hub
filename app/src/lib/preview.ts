@@ -247,6 +247,8 @@ const voice: VoiceInfo = {
     keep_recordings: false,
     speak: true,
     follow_up: true,
+    intent_model: "embeddinggemma-300m",
+    turn_model: "",
     keep_warm: true,
     voices: { it: "it_IT-paola-medium", en: "en_US-amy-medium" },
     llm: false,
@@ -256,6 +258,8 @@ const voice: VoiceInfo = {
   },
   models: [
     { id: "large-v3-turbo-q5", kind: "whisper", language: null, engine: null, bytes: 574_000_000, note: "Fast and accurate on a Mac", license: "MIT", installed: true, provider: null },
+    { id: "embeddinggemma-300m", kind: "intent", language: null, engine: null, bytes: 333_590_944, note: "Tells a goodbye from a request in about 20 ms", license: "Gemma", installed: true, provider: null },
+    { id: "smart-turn-v3.2", kind: "turn", language: null, engine: null, bytes: 32_411_198, note: "Hears from the voice whether you finished the sentence", license: "BSD-2-Clause", installed: false, provider: null },
     { id: "small", kind: "whisper", language: null, engine: null, bytes: 488_000_000, note: "Smaller, for older computers", license: "MIT", installed: false, provider: null },
     { id: "groq:whisper-large-v3", kind: "whisper", language: null, engine: null, bytes: 0, note: "In the cloud, very fast", license: "", installed: false, provider: "groq" },
     { id: "it_IT-paola-medium", kind: "voice", language: "it", engine: "piper", bytes: 63_000_000, note: "Paola", license: "CC-BY", installed: true, provider: null },
@@ -270,6 +274,7 @@ const voice: VoiceInfo = {
   tts_error: null,
   llm: "off",
   llm_error: null,
+  llm_server: "/opt/homebrew/bin/llama-server",
   download: null,
   providers: [
     { id: "anthropic", name: "Anthropic", note: "Claude, Yoru's brain; paid by use.", keys_url: "https://platform.claude.com/settings/keys", key_env: "ANTHROPIC_API_KEY", key: info.key },

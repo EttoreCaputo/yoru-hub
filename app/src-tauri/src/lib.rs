@@ -43,6 +43,8 @@ use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use yoru_core::agent;
+use yoru_core::intent::IntentModel;
+use yoru_core::turn::SmartTurn;
 use yoru_core::claude::{cleanup, mcpconfig};
 use yoru_core::flasher::setup;
 use yoru_core::hardware::{self, Hardware, Recommendation};
@@ -127,6 +129,12 @@ struct VoiceSettings {
     speak: bool,
     /// After a spoken answer, listen a few seconds more without the wake word.
     follow_up: bool,
+    /// What tells a goodbye in a follow-up: `""` for a fixed list of
+    /// phrases, or a `models::MODELS` id of kind `intent` (EmbeddingGemma).
+    intent_model: String,
+    /// What judges that a sentence is finished: `""` for the board's own
+    /// pause, or a `models::MODELS` id of kind `turn` (Smart Turn).
+    turn_model: String,
     /// Keep the downloaded models loaded, those standing in for cloud ones
     /// too, and start again any that stops: the first answer doesn't wait.
     keep_warm: bool,
@@ -172,6 +180,8 @@ impl Default for VoiceSettings {
             keep_recordings: false,
             speak: true,
             follow_up: true,
+            intent_model: String::new(),
+            turn_model: String::new(),
             keep_warm: true,
             voices,
             llm: rec.llm.is_some(),
@@ -446,9 +456,9 @@ impl AppState {
 /// the whisper-server, Piper and llama-server sidecars, or stop them.
 fn apply_voice(state: &AppState) {
     let settings = state.settings.lock().unwrap().voice.clone();
-    let (current_stt, current_tts, current_agent) = {
+    let (current_stt, current_tts, current_agent, current_intent, current_turn) = {
         let voice = state.voice.lock().unwrap();
-        (voice.stt.clone(), voice.tts.clone(), voice.agent.clone())
+        (voice.stt.clone(), voice.tts.clone(), voice.agent.clone(), voice.intent.clone(), voice.turn.clone())
     };
     let stt = sidecar(
         settings.enabled.then(|| stt_config(&settings)),
@@ -480,8 +490,32 @@ fn apply_voice(state: &AppState) {
         agent.set_personality(&agent::personality_prompt(&settings.personality, &settings.personality_custom));
     }
     let dump_dir = settings.keep_recordings.then(voice::default_dump_dir).flatten();
-    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up, language: None };
+    let listens = settings.enabled;
+    let intent = installed_path(&settings.intent_model, Kind::Intent).filter(|_| listens && settings.follow_up).and_then(|path| {
+        current_intent.filter(|i| i.path() == path).or_else(|| {
+            let model = Arc::new(IntentModel::new(path)?);
+            if settings.keep_warm {
+                let m = model.clone();
+                thread::spawn(move || drop(m.warm_up()));
+            }
+            Some(model)
+        })
+    });
+    let turn = installed_path(&settings.turn_model, Kind::Turn).filter(|_| listens).map(|path| {
+        current_turn.filter(|t| t.path() == path).unwrap_or_else(|| {
+            let model = Arc::new(SmartTurn::new(path));
+            let m = model.clone();
+            thread::spawn(move || drop(m.warm_up()));
+            model
+        })
+    });
+    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up, intent, turn, language: None };
     apply_language(state);
+}
+
+/// Where the downloaded model `id` of `kind` is; `None` for none picked or not downloaded yet.
+fn installed_path(id: &str, kind: Kind) -> Option<PathBuf> {
+    Model::by_id(id).filter(|m| m.kind == kind && m.is_installed()).and_then(Model::path)
 }
 
 /// The app's language (`it`, `en`): the one picked, else the system's.

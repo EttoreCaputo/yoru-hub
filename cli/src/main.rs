@@ -422,6 +422,8 @@ fn main() -> ExitCode {
             tts,
             agent,
             follow_up: !args.no_follow_up,
+            intent: None,
+            turn: None,
             language: None,
         })),
         confirmations: Arc::default(),

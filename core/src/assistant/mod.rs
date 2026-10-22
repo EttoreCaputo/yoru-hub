@@ -416,17 +416,19 @@ impl Assistant {
 
     /// Answer `text`, said to the board or typed (in `language`, when known), in the conversation.
     pub fn respond(&self, text: &str, language: Option<&str>, channel: Channel, host: &dyn Host) -> Result<Reply, String> {
-        self.respond_with(text, language, channel, host, None)
+        self.respond_with(text, language, channel, false, host, None)
     }
 
     /// [`Assistant::respond`], streamed: the words go to `on` as the model
     /// writes them, raw (a thinking model's `<think>` left in), and
     /// [`crate::stream::Delta::Tools`] when it calls a tool. The voice speaks them as they come.
-    pub fn respond_aloud(&self, text: &str, language: Option<&str>, channel: Channel, host: &dyn Host, on: OnDelta) -> Result<Reply, String> {
-        self.respond_with(text, language, channel, host, Some(on))
+    /// `follow_up`: heard right after an answer, without the wake word, so it
+    /// may not be meant for Yoru; the model then answers "…" to stay silent.
+    pub fn respond_aloud(&self, text: &str, language: Option<&str>, channel: Channel, follow_up: bool, host: &dyn Host, on: OnDelta) -> Result<Reply, String> {
+        self.respond_with(text, language, channel, follow_up, host, Some(on))
     }
 
-    fn respond_with(&self, text: &str, language: Option<&str>, channel: Channel, host: &dyn Host, on: Option<OnDelta>) -> Result<Reply, String> {
+    fn respond_with(&self, text: &str, language: Option<&str>, channel: Channel, follow_up: bool, host: &dyn Host, on: Option<OnDelta>) -> Result<Reply, String> {
         let _turn = self.turn.lock().unwrap();
         let language = self.reply_language(language);
         let language = language.as_deref();
@@ -442,7 +444,7 @@ impl Assistant {
             }
             std::mem::take(&mut conversation.messages)
         };
-        let mut result = self.run(&mut messages, &with_context(text, language, channel), language, channel, &settings, &settings.effort, host, on);
+        let mut result = self.run(&mut messages, &with_context(text, language, channel, follow_up), language, channel, &settings, &settings.effort, host, on);
         // The tags are for the voice: the app and the board show the words.
         if let Ok(reply) = &mut result {
             reply.text = crate::tts::without_audio_tags(&reply.text);
@@ -755,6 +757,10 @@ notifications and inbox lines are in it too. Without one, reply in the user's la
 - When the request was spoken (channel: voice), your reply is said aloud: plain sentences a text-to-speech voice reads well: \
 no markdown, no lists, no emoji, no URLs, no symbols or special characters (* # / & @ | < > [ ] {{ }} ° or arrows); \
 write units and abbreviations as they are said (20 gradi, not 20°C); one to three sentences.
+- After a spoken answer you keep listening for a few seconds; what you hear then is marked as heard without the wake word and may not be \
+meant for you: someone else in the room, the TV, the user thinking aloud. When it clearly isn't for you, reply with just … and nothing \
+else, and you stay silent. When it is (an answer to your question, a follow-up, a new request), answer as usual. \
+When you need something from the user to go on, end with the question: the board then waits longer for the answer.
 - When it was typed (channel: text), you may be longer and use short Markdown.
 - You are friendly and to the point, with a light touch of warmth; never chatty, never servile. Don't end with offers of help."
     )
@@ -839,8 +845,12 @@ fn schema_or_empty(schema: &Value) -> Value {
 }
 
 /// The request with what the model can't know: the time, the channel, the language to reply in.
-fn with_context(text: &str, language: Option<&str>, channel: Channel) -> String {
-    format!("{}\n\n{text}", context_line(language, channel))
+fn with_context(text: &str, language: Option<&str>, channel: Channel, follow_up: bool) -> String {
+    let mut line = context_line(language, channel);
+    if follow_up {
+        line.insert_str(line.len() - 1, ", heard without the wake word");
+    }
+    format!("{line}\n\n{text}")
 }
 
 fn context_line(language: Option<&str>, channel: Channel) -> String {
@@ -1084,7 +1094,7 @@ mod tests {
     fn helpers() {
         assert_eq!(summarize(&json!({"to": "a@b.c", "subject": "Hi", "n": 2, "deep": {"x": 1}})), "to: a@b.c; subject: Hi; n: 2");
         assert_eq!(text_of(&json!([{"type": "thinking", "thinking": ""}, {"type": "text", "text": "Ciao "}, {"type": "text", "text": "Ettore"}])), "Ciao Ettore");
-        assert!(with_context("ciao", Some("it"), Channel::Voice).contains("channel: voice, reply in: Italian"));
+        assert!(with_context("ciao", Some("it"), Channel::Voice, false).contains("channel: voice, reply in: Italian"));
         assert_eq!(schema_or_empty(&Value::Null)["type"], "object");
     }
 

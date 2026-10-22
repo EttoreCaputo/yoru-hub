@@ -203,6 +203,8 @@ export type VoiceSettings = {
   keep_recordings: boolean;
   speak: boolean;
   follow_up: boolean;
+  intent_model: string;
+  turn_model: string;
   keep_warm: boolean;
   voices: Record<string, string>;
   llm: boolean;
@@ -212,7 +214,7 @@ export type VoiceSettings = {
 };
 export type ModelInfo = {
   id: string;
-  kind: "whisper" | "voice" | "llm";
+  kind: "whisper" | "voice" | "llm" | "intent" | "turn";
   language: string | null;
   engine: string | null;
   bytes: number;
@@ -234,6 +236,8 @@ export type VoiceInfo = {
   tts_error: string | null;
   llm: SidecarState;
   llm_error: string | null;
+  /** Where llama.cpp's llama-server is: the language model and EmbeddingGemma run on it. */
+  llm_server?: string | null;
   download: [string, number] | null;
   providers: ProviderInfo[];
 };

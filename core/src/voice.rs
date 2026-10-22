@@ -12,8 +12,15 @@
 //! ([`Speaker`]), or puts the eyes back to idle. When something fails, or
 //! Whisper heard no words, the board shows `error` (a red ring and a short
 //! sound). After a spoken answer the board listens again for a few seconds
-//! without the wake word ([`VoiceConfig::follow_up`]); the wake word said
-//! over the answer stops it (barge-in, on the board).
+//! without the wake word ([`VoiceConfig::follow_up`]): longer after a
+//! question, briefly after a plain answer, and not after a few plain answers
+//! in a row ([`FollowUp`]). What it hears then may not be for Yoru: a
+//! closing word ("grazie", "basta": a fixed list, or EmbeddingGemma with
+//! [`VoiceConfig::intent`]) or words Whisper isn't sure of end the
+//! conversation, and the assistant stays silent for the rest that isn't. The
+//! wake word said over the answer stops it (barge-in, on the board). With
+//! [`VoiceConfig::turn`], Smart Turn judges at each pause whether the
+//! sentence is finished ([`turns`]).
 //!
 //! Speech goes to the board on `audio_down`, paced in real time a little
 //! ahead of the speaker, a sentence at a time: the first plays while the
@@ -38,6 +45,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::agent::{Action, Agent, Toolbox};
+use crate::intent::{IntentModel, Meaning};
+use crate::turn::{self, SmartTurn};
 use crate::bridge::{BridgeEvent, EventSink};
 use crate::intents::{self, Context};
 use crate::link::{Link, Tool};
@@ -165,6 +174,11 @@ impl Capture {
         b.next_seq = seq.wrapping_add(1);
     }
 
+    /// The samples of utterance `id` so far, while it's the one being built.
+    pub fn so_far(&self, id: u8) -> Option<Vec<i16>> {
+        self.current.as_ref().filter(|b| b.id == id).map(|b| b.samples.clone())
+    }
+
     /// `utterance_end`: the finished utterance, if it's the one being built.
     pub fn end(&mut self, params: &Value) -> Option<Utterance> {
         let id = params["id"].as_u64()? as u8;
@@ -208,6 +222,12 @@ pub struct VoiceConfig {
     /// After a spoken answer, listen for a few seconds more without the
     /// wake word.
     pub follow_up: bool,
+    /// Tell a goodbye in a follow-up with EmbeddingGemma; without it, with a
+    /// fixed list of phrases.
+    pub intent: Option<Arc<IntentModel>>,
+    /// Judge at each pause whether the sentence is finished with Smart
+    /// Turn; without it, the board's own pause ends it.
+    pub turn: Option<Arc<SmartTurn>>,
     /// The language every answer is in (`it`, `en`), the one picked in the
     /// app; `None` answers in the one heard.
     pub language: Option<String>,
@@ -326,6 +346,7 @@ pub enum Hearing {
 /// link's reader never waits on it, until the sender is dropped. The link is
 /// weak because the link's reader holds that sender.
 pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSink, rx: Receiver<Hearing>) {
+    let mut chain = FollowUp::default();
     for heard in rx {
         let config = config.lock().unwrap().clone();
         let utterance = match heard {
@@ -368,6 +389,9 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
         // The board shows thinking meanwhile, however long the model takes.
         let mut thinking = StillThinking::start(session);
         let follow_up = utterance.trigger == "follow_up";
+        if !follow_up {
+            chain = FollowUp::default();
+        }
         let transcript = match &config.stt {
             // Voice is off or its model isn't usable: say so rather than drop the words.
             None => {
@@ -382,7 +406,16 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 }
                 Ok(t) => {
                     sink(BridgeEvent::Transcript { id: utterance.id, transcript: Some(t.clone()) });
-                    Ok(t)
+                    if follow_up && t.logprob < FOLLOW_UP_MIN_LOGPROB {
+                        // Unsure words without the wake word: the room, not the user.
+                        sink(BridgeEvent::BoardLog { line: format!("host: follow-up ignored, unsure transcript ({:.2})", t.logprob) });
+                        Err("idle")
+                    } else if follow_up && !alarm_near(&session.timers) && closes(&config, sink, &chain, &t.text) {
+                        sink(BridgeEvent::BoardLog { line: "host: the user closed the conversation".into() });
+                        Err("idle")
+                    } else {
+                        Ok(t)
+                    }
                 }
                 Err(e) => {
                     sink(BridgeEvent::VoiceError { message: e.to_string() });
@@ -391,7 +424,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             },
         };
         let next = match transcript {
-            Ok(t) => respond(&link, session, &config, sink, utterance.id, &t.text, &t.language, &mut thinking),
+            Ok(t) => respond(&link, session, &config, sink, utterance.id, &t.text, &t.language, follow_up, &mut thinking),
             Err(state) => Next::State(state),
         };
         thinking.stop();
@@ -400,17 +433,21 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 set_state(&link, state);
                 true
             }
-            Next::Spoken if config.follow_up => match link.call("voice/listen", json!({"follow_up": true}), STATE_TIMEOUT) {
-                Ok(_) => false,
-                Err(e) => {
-                    sink(BridgeEvent::BoardLog { line: format!("host: no follow-up: {e}") });
-                    true
-                }
+            Next::Spoken { question } if config.follow_up => match chain.next(question) {
+                Some(window) => match link.call("voice/listen", json!({"follow_up": true, "wait_ms": window.wait_ms, "pause_ms": window.pause_ms}), STATE_TIMEOUT) {
+                    Ok(_) => false,
+                    Err(e) => {
+                        sink(BridgeEvent::BoardLog { line: format!("host: no follow-up: {e}") });
+                        true
+                    }
+                },
+                None => true,
             },
-            Next::Spoken => true,
+            Next::Spoken { .. } => true,
             Next::Interrupted => false,
         };
         if over {
+            chain = FollowUp::default();
             (session.conversation_over)();
         }
     }
@@ -422,15 +459,16 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
 enum Next {
     /// Show this state (`idle`, `error`): nothing was said.
     State(&'static str),
-    /// The answer was played to the end, and the board went back to idle.
-    Spoken,
+    /// The answer was played to the end, and the board went back to idle;
+    /// `question`: it ended asking the user something.
+    Spoken { question: bool },
     /// The wake word stopped it: the board is listening already.
     Interrupted,
 }
 
 /// Act on the words and answer.
 #[allow(clippy::too_many_arguments)]
-fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSink, id: u8, text: &str, language: &str, thinking: &mut StillThinking) -> Next {
+fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSink, id: u8, text: &str, language: &str, follow_up: bool, thinking: &mut StillThinking) -> Next {
     let started = Instant::now();
     // "Stop" or "5 more minutes" for an alarm needs no language model: the rules, at once.
     let alarm = session.timers.is_ringing() || session.timers.dismissed_within(ALARM_FOLLOW_UP);
@@ -445,7 +483,7 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
         let talker = tts.map(|tts| scope.spawn(move || talk(link, session, tts, to_say, thinking)));
         let mut aloud = Aloud::new(said, language);
         let assistant = session.assistant.as_ref().filter(|a| !quick && a.is_ready());
-        let answer = assistant.and_then(|a| match a.respond_aloud(text, Some(heard), crate::assistant::Channel::Voice, &VoiceHost { link, session }, &mut |d| aloud.add(d)) {
+        let answer = assistant.and_then(|a| match a.respond_aloud(text, Some(heard), crate::assistant::Channel::Voice, follow_up, &VoiceHost { link, session }, &mut |d| aloud.add(d)) {
             Ok(reply) => Some((reply.text, reply.actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect(), true, "assistant", language)),
             // Its free limits ran out: say so and when, rather than a worse answer.
             Err(e) if a.limited().is_some() => {
@@ -492,7 +530,7 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
         match talker.join().unwrap_or_else(|_| Err("the voice stopped".into())) {
             Ok(Some(spoken)) => {
                 let next = match spoken.reason.as_str() {
-                    "done" => Next::Spoken,
+                    "done" => Next::Spoken { question: asks(&spoken.text) },
                     "barge_in" => Next::Interrupted,
                     // Stopped or replaced by someone else: they say what's next.
                     _ => Next::State("idle"),
@@ -612,7 +650,8 @@ impl Aloud {
 
     /// `text`, written all at once, in `language`.
     fn say_all(&mut self, text: &str, language: &str) {
-        for s in tts::sentences(&tts::speakable(text, language)) {
+        // Nothing to say ("…", the assistant staying silent) is not said.
+        for s in tts::sentences(&tts::speakable(text, language)).into_iter().filter(|s| s.chars().any(char::is_alphanumeric)) {
             self.push(s, language.to_string());
         }
     }
@@ -671,6 +710,90 @@ fn visible(raw: &str, done: bool) -> String {
         out.truncate(lt);
     }
     out
+}
+
+/// How long the board listens after an answer, and how long a pause ends
+/// what's said then (`voice/listen`, firmware 0.11.6).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Window {
+    wait_ms: u32,
+    pause_ms: u32,
+}
+
+/// After a question the user needs time to think, and may stop mid-answer.
+const AFTER_QUESTION: Window = Window { wait_ms: 8000, pause_ms: 700 };
+/// After a plain answer, a short chance to add something.
+const AFTER_ANSWER: Window = Window { wait_ms: 3500, pause_ms: 400 };
+/// Plain answers in a row after which the board stops listening on its own.
+const MAX_PLAIN_ANSWERS: u32 = 3;
+/// Whisper's own line for a decoding that failed: a follow-up below it
+/// was most likely not the user talking to Yoru.
+const FOLLOW_UP_MIN_LOGPROB: f64 = -1.0;
+
+/// The follow-ups of one conversation.
+#[derive(Debug, Default)]
+struct FollowUp {
+    /// The last answer ended with a question.
+    asked: bool,
+    /// Plain answers since the wake word or the last question.
+    plain: u32,
+}
+
+impl FollowUp {
+    /// After an answer: how long to listen, or `None` to stop.
+    fn next(&mut self, question: bool) -> Option<Window> {
+        self.asked = question;
+        if question {
+            self.plain = 0;
+            return Some(AFTER_QUESTION);
+        }
+        self.plain += 1;
+        (self.plain < MAX_PLAIN_ANSWERS).then_some(AFTER_ANSWER)
+    }
+}
+
+/// Whether what was said ends with a question.
+fn asks(said: &str) -> bool {
+    said.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '»' | '”' | ')')).ends_with(['?', '？'])
+}
+
+/// Whether a follow-up ends the conversation: EmbeddingGemma's say when
+/// it's on and works, else the fixed phrases. An acknowledgement ("ok")
+/// closes it after a plain answer; after a question it's the answer.
+fn closes(config: &VoiceConfig, sink: &EventSink, chain: &FollowUp, text: &str) -> bool {
+    if let Some(intent) = &config.intent {
+        let started = Instant::now();
+        match intent.classify(text) {
+            Ok(meaning) => {
+                sink(BridgeEvent::BoardLog { line: format!("host: follow-up means {meaning:?} ({} ms)", started.elapsed().as_millis()) });
+                return meaning == Meaning::Close || (meaning == Meaning::Ack && !chain.asked);
+            }
+            Err(e) => sink(BridgeEvent::BoardLog { line: format!("host: intent model failed, using the phrases: {e}") }),
+        }
+    }
+    !chain.asked && is_closer(text)
+}
+
+/// An alarm rings or was just silenced: "stop" and "basta" are about it.
+fn alarm_near(timers: &Timers) -> bool {
+    timers.is_ringing() || timers.dismissed_within(ALARM_FOLLOW_UP)
+}
+
+/// Words that end a conversation rather than go on with it, in Italian and
+/// English: the whole utterance, not a part of it.
+fn is_closer(text: &str) -> bool {
+    const CLOSERS: &[&str] = &[
+        "grazie", "grazie mille", "ok grazie", "okay grazie", "va bene grazie", "perfetto grazie", "ottimo grazie", "no grazie",
+        "basta", "basta così", "basta cosi", "è tutto", "e tutto", "niente", "nient'altro", "nulla", "a posto", "a posto così",
+        "a posto cosi", "tutto qui", "ok", "okay", "va bene", "perfetto", "ottimo", "ciao", "a dopo", "lascia stare", "lascia perdere",
+        "fine", "stop", "thanks", "thank you", "thanks a lot", "ok thanks", "okay thanks", "no thanks", "that's all", "thats all",
+        "that's it", "nothing", "never mind", "nevermind", "all good", "great thanks", "perfect thanks", "bye", "enough",
+    ];
+    let words: String = text.to_lowercase().chars().map(|c| if c.is_alphanumeric() || c == '\'' || c.is_whitespace() { c } else { ' ' }).collect();
+    let words = words.split_whitespace().collect::<Vec<_>>().join(" ");
+    let words = words.strip_prefix("yoru ").unwrap_or(&words);
+    let words = words.strip_suffix(" yoru").unwrap_or(words);
+    CLOSERS.contains(&words)
 }
 
 /// Words that start like a tool call written as text rather than an answer.
@@ -1099,6 +1222,65 @@ impl Receiving {
             let _ = self.pipeline.send(Hearing::Utterance(u));
         }
     }
+
+    pub fn so_far(&self, id: u8) -> Option<Vec<i16>> {
+        self.capture.so_far(id)
+    }
+}
+
+/// What the link's reader hands [`turns`].
+pub enum TurnJob {
+    /// An utterance started (not push-to-talk): the board is to wait longer.
+    Start(u8),
+    /// A pause in it, with what was heard so far.
+    Pause(u8, Vec<i16>),
+}
+
+/// With Smart Turn the board ends an utterance after this long a pause
+/// unless the host stops it sooner: long enough to think mid-sentence.
+const TURN_FALLBACK_MS: u32 = 1500;
+
+/// Smart Turn's half of a conversation, on its own thread so the link's
+/// reader never waits on the model: at each pause, if the sentence sounds
+/// finished, the board stops listening at once (`voice/stop`); otherwise it
+/// waits up to [`TURN_FALLBACK_MS`] for more.
+pub(crate) fn turns(config: &Mutex<VoiceConfig>, link: &std::sync::OnceLock<Weak<Link>>, sink: &EventSink, rx: Receiver<TurnJob>) {
+    while let Ok(first) = rx.recv() {
+        let Some(turn) = config.lock().unwrap().turn.clone() else { continue };
+        let Some(link) = link.get().and_then(Weak::upgrade) else { continue };
+        for job in latest(std::iter::once(first).chain(rx.try_iter()).collect()) {
+            match job {
+            TurnJob::Start(id) => {
+                if let Err(e) = link.call("voice/pause", json!({"id": id, "pause_ms": TURN_FALLBACK_MS}), STATE_TIMEOUT) {
+                    // A board before 0.11.7: its own pause ends the utterance.
+                    sink(BridgeEvent::BoardLog { line: format!("host: Smart Turn can't hold the pause: {e}") });
+                }
+            }
+            TurnJob::Pause(id, samples) => {
+                let started = Instant::now();
+                match turn.finished(&samples) {
+                    Ok(p) => {
+                        let done = p > turn::FINISHED;
+                        let ms = started.elapsed().as_millis();
+                        sink(BridgeEvent::BoardLog { line: format!("host: utterance {id} {} ({p:.2}, {ms} ms)", if done { "finished" } else { "goes on" }) });
+                        if done {
+                            let _ = link.call("voice/stop", json!({}), STATE_TIMEOUT);
+                        }
+                    }
+                    Err(e) => sink(BridgeEvent::BoardLog { line: format!("host: Smart Turn failed: {e}") }),
+                }
+            }
+            }
+        }
+    }
+}
+
+/// Of the jobs waiting, the last start and the last pause after it: an
+/// older pause was overtaken by more words.
+fn latest(jobs: Vec<TurnJob>) -> Vec<TurnJob> {
+    let start = jobs.iter().rposition(|j| matches!(j, TurnJob::Start(_)));
+    let pause = jobs.iter().rposition(|j| matches!(j, TurnJob::Pause(..))).filter(|&p| start.is_none_or(|s| p > s));
+    jobs.into_iter().enumerate().filter(|(i, _)| Some(*i) == start || Some(*i) == pause).map(|(_, j)| j).collect()
 }
 
 /// For tests and tools: an `audio_up` frame as the board sends it.
@@ -1109,6 +1291,40 @@ pub fn audio_frame(id: u8, seq: u16, samples: &[i16]) -> Vec<u8> {
         out.extend_from_slice(&s.to_le_bytes());
     }
     out
+}
+
+#[cfg(test)]
+mod follow_up_tests {
+    use super::*;
+
+    #[test]
+    fn listens_longer_after_a_question_and_stops_after_plain_answers() {
+        let mut chain = FollowUp::default();
+        assert_eq!(chain.next(true), Some(AFTER_QUESTION));
+        assert_eq!(chain.next(false), Some(AFTER_ANSWER));
+        assert_eq!(chain.next(false), Some(AFTER_ANSWER));
+        assert_eq!(chain.next(false), None);
+        assert_eq!(chain.next(true), Some(AFTER_QUESTION));
+    }
+
+    #[test]
+    fn tells_a_question() {
+        assert!(asks("Vuoi che lo aggiunga al calendario?"));
+        assert!(asks("A che ora? "));
+        assert!(asks("Shall I send it?\""));
+        assert!(!asks("Timer impostato per dieci minuti."));
+        assert!(!asks("Fatto"));
+    }
+
+    #[test]
+    fn closers_are_the_whole_utterance() {
+        assert!(is_closer("Grazie!"));
+        assert!(is_closer(" Ok, grazie. "));
+        assert!(is_closer("Basta così, Yoru."));
+        assert!(is_closer("That's all."));
+        assert!(!is_closer("Grazie, e domani che tempo fa?"));
+        assert!(!is_closer("Niente di speciale per stasera?"));
+    }
 }
 
 #[cfg(test)]

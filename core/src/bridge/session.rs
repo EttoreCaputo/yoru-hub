@@ -16,7 +16,7 @@ use crate::link::{CallError, Link, LinkEvent};
 use crate::pointer;
 use crate::profile::BoardKind;
 use crate::protocol::Channel;
-use crate::voice::{self, Hearing, Receiving, Session, Speaker};
+use crate::voice::{self, Hearing, Receiving, Session, Speaker, TurnJob};
 
 use super::alerts::{AlertTarget, Targets};
 use super::manager::SessionInfo;
@@ -71,6 +71,14 @@ pub(super) fn run(
         })?;
         tx
     };
+    // Smart Turn's judge of pauses, with the link once it's open.
+    let turn_link = Arc::new(std::sync::OnceLock::<Weak<Link>>::new());
+    let turn_jobs = {
+        let (config, link, sink) = (config.voice.clone(), turn_link.clone(), on_event.clone());
+        let (tx, rx) = std::sync::mpsc::channel::<TurnJob>();
+        thread::Builder::new().name("yoru-turns".into()).spawn(move || voice::turns(&config, &link, &sink, rx))?;
+        tx
+    };
     let floor = targets.floor.clone();
     let number = info.number;
     let receiving = Mutex::new(Receiving::gated(pipeline, Box::new(move || floor.claim(number))));
@@ -82,6 +90,8 @@ pub(super) fn run(
         let timers = config.timers.clone();
         let confirmations = config.confirmations.clone();
         let assistant = config.assistant.clone();
+        let voice = config.voice.clone();
+        let smart_turn = move || voice.lock().unwrap().turn.is_some();
         Link::open(port, move |event| match event {
             LinkEvent::Log(line) => sink(BridgeEvent::BoardLog { line }),
             LinkEvent::Text(line) => {
@@ -106,10 +116,18 @@ pub(super) fn run(
             }
             LinkEvent::Notification { method, params } if method == "utterance_start" => {
                 receiving.lock().unwrap().start(&params);
-                sink(BridgeEvent::Listening {
-                    id: params["id"].as_u64().unwrap_or(0) as u8,
-                    trigger: params["trigger"].as_str().unwrap_or("wake").to_string(),
-                });
+                let (id, trigger) = (params["id"].as_u64().unwrap_or(0) as u8, params["trigger"].as_str().unwrap_or("wake").to_string());
+                // Push-to-talk ends when PWR is let go, not at a pause.
+                if trigger != "button" && smart_turn() {
+                    let _ = turn_jobs.send(TurnJob::Start(id));
+                }
+                sink(BridgeEvent::Listening { id, trigger });
+            }
+            LinkEvent::Notification { method, params } if method == "utterance_pause" => {
+                let id = params["id"].as_u64().unwrap_or(0) as u8;
+                if smart_turn() && let Some(samples) = receiving.lock().unwrap().so_far(id) {
+                    let _ = turn_jobs.send(TurnJob::Pause(id, samples));
+                }
             }
             LinkEvent::Notification { method, params } if method == "utterance_end" => receiving.lock().unwrap().end(&params),
             LinkEvent::Notification { method, params } if method == "playback_end" => speaker.playback_end(params),
@@ -123,6 +141,7 @@ pub(super) fn run(
             LinkEvent::Notification { .. } | LinkEvent::Closed(_) => {}
         })?
     });
+    let _ = turn_link.set(Arc::downgrade(&link));
     let board_kind = Arc::new(Mutex::new(BoardKind::default()));
     let board_id = Arc::new(Mutex::new(None::<String>));
     let floor = targets.floor.clone();

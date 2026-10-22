@@ -3,7 +3,10 @@
 //! `ggerganov/whisper.cpp` on Hugging Face) for speech-to-text, Piper
 //! voices (ONNX plus its JSON config, from `rhasspy/piper-voices`) for
 //! speaking, and small language models (GGUF, quantized by Unsloth) for the
-//! voice agent ([`crate::llm`]). Each file is pinned by size and SHA-256.
+//! voice agent ([`crate::llm`]), EmbeddingGemma (GGUF) for what a
+//! follow-up means ([`crate::intent`]) and Smart Turn (ONNX) for when a
+//! sentence is finished ([`crate::turn`]). Each file is pinned by size and
+//! SHA-256.
 //!
 //! A download goes to `<file>.part` and is renamed once its checksum
 //! matches, so a model file that exists is a complete one.
@@ -25,6 +28,10 @@ pub enum Kind {
     Voice,
     /// A language model for [`crate::Llm`]: what the voice agent thinks with.
     Llm,
+    /// An embedding model for [`crate::intent`]: whether a follow-up closes the conversation.
+    Intent,
+    /// An end-of-turn model for [`crate::turn`]: whether the user finished the sentence.
+    Turn,
 }
 
 /// What speaks a [`Kind::Voice`] ([`crate::tts`]).
@@ -160,6 +167,26 @@ pub const MODELS: &[Model] = &[
         license: "Apache-2.0",
         repo: Some("unsloth/Qwen3.5-4B-GGUF"),
     },
+    Model {
+        id: "embeddinggemma-300m",
+        kind: Kind::Intent,
+        language: None,
+        files: &[file("embeddinggemma-300M-Q8_0.gguf", 333_590_944, "b5ce9d77a3fc4b3b39ccb5643c36777911cc4eb46a66962eadfa3f5f60490d63")],
+        note: "Google's EmbeddingGemma: tells a goodbye from a request in about 20 ms, in Italian and English",
+        license: "Gemma",
+        repo: Some("ggml-org/embeddinggemma-300M-GGUF"),
+    },
+    Model {
+        id: "smart-turn-v3.2",
+        kind: Kind::Turn,
+        language: None,
+        // The full-precision one: tract runs it as onnxruntime does (the
+        // int8 one comes out wrong).
+        files: &[file("smart-turn-v3.2-gpu.onnx", 32_411_198, "ab8dc64b88713f90b571c15b714bd1330e6c883cad8763dacf65c9376dc539be")],
+        note: "Pipecat's Smart Turn: hears from the voice whether you finished the sentence, in about 70 ms",
+        license: "BSD-2-Clause",
+        repo: Some("pipecat-ai/smart-turn-v3"),
+    },
 ];
 
 pub const DEFAULT_MODEL: &str = "small";
@@ -204,7 +231,7 @@ impl Model {
                 let family = locale.split('_').next().unwrap_or("");
                 format!("{PIPER_URL}{family}/{locale}/{name}/{quality}/")
             }
-            Kind::Llm => format!("https://huggingface.co/{}/resolve/main/", self.repo.unwrap_or_default()),
+            Kind::Llm | Kind::Intent | Kind::Turn => format!("https://huggingface.co/{}/resolve/main/", self.repo.unwrap_or_default()),
         };
         format!("{base}{}", file.name)
     }
@@ -291,7 +318,8 @@ mod tests {
             match m.kind {
                 Kind::Whisper => assert!(m.files[0].name.starts_with("ggml-") && m.language.is_none()),
                 Kind::Voice => assert_eq!(m.files.iter().map(|f| f.name.to_string()).collect::<Vec<_>>(), [format!("{}.onnx", m.id), format!("{}.onnx.json", m.id)]),
-                Kind::Llm => assert!(m.files[0].name.ends_with(".gguf") && m.repo.is_some() && m.language.is_none()),
+                Kind::Llm | Kind::Intent => assert!(m.files[0].name.ends_with(".gguf") && m.repo.is_some() && m.language.is_none()),
+                Kind::Turn => assert!(m.files[0].name.ends_with(".onnx") && m.repo.is_some()),
             }
         }
     }

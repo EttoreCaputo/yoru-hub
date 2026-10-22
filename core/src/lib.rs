@@ -25,6 +25,7 @@ pub mod firmware;
 pub mod flasher;
 pub mod hardware;
 pub mod hub;
+pub mod intent;
 pub mod intents;
 pub mod link;
 pub mod llm;
@@ -44,6 +45,7 @@ pub mod stream;
 pub mod stt;
 pub mod timers;
 pub mod tts;
+pub mod turn;
 pub mod voice;
 pub mod wifi;
 

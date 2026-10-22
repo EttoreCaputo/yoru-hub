@@ -99,6 +99,8 @@
   const missing = (m: ModelInfo | undefined) => !!m && !m.installed && !m.provider;
   const label = (m: ModelInfo) => `${m.id.replace(/^[^:]+:/, "")}${m.note ? ` — ${m.note}` : ""}${missing(m) ? ` · ${t.toDownload(mb(m))}` : ""}`;
   const dl = $derived(info?.download ?? null);
+  const intents = $derived(info?.models.filter((m) => m.kind === "intent") ?? []);
+  const turns = $derived(info?.models.filter((m) => m.kind === "turn") ?? []);
 
   // What each row of tiles shows as picked. Speaking follows the app's language's voice.
   const heard = $derived(info?.settings.enabled ? serviceOf(info.settings.model) : null);
@@ -199,6 +201,12 @@
           <div class="what"><b>{t.followUp}</b></div>
           <div class="how"><Toggle checked={s.follow_up} label={t.followUp} onchange={(on) => set({ follow_up: on })} /></div>
         </div>
+        {#if s.follow_up}
+          {@render picker(t.intentModel, t.intentHint, s.intent_model, t.intentPhrases, intents, (id) => set({ intent_model: id }), !info.llm_server ? t.needsLlamaServer : "")}
+        {/if}
+      {/if}
+      {#if s.enabled}
+        {@render picker(t.turnModel, t.turnHint, s.turn_model, t.turnPause, turns, (id) => set({ turn_model: id }))}
       {/if}
       {#if board && board.volume !== null}
         <div class="setting">
@@ -228,6 +236,21 @@
     {#if blocked}<span class="tag dim">{keyed(svc!) ? t.noVoices : t.needsKey(nameOf(svc!))}</span>
     {:else if on && svc}<span class="tag" class:dim={state !== "ready"}>{state === "ready" ? t.inUse : t.state[state]}</span>{/if}
   </button>
+{/snippet}
+
+<!-- One job a small local model can do, or the built-in way ("" picks it). -->
+{#snippet picker(name: string, hint: string, value: string, builtIn: string, list: ModelInfo[], pick: (id: string) => void, blocked = "")}
+  {@const m = model(value)}
+  <div class="setting">
+    <div class="what"><b>{name}</b><span class="dim">{blocked || hint}</span></div>
+    <div class="how">
+      {#if m && missing(m)}{@render fetch(m)}{/if}
+      <select {value} onchange={(e) => pick(e.currentTarget.value)} aria-label={name}>
+        <option value="">{builtIn}</option>
+        {#each list as option (option.id)}<option value={option.id} disabled={!!blocked}>{label(option)}</option>{/each}
+      </select>
+    </div>
+  </div>
 {/snippet}
 
 <!-- A picked local model still to download. -->
