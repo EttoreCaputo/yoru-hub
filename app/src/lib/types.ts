@@ -238,6 +238,8 @@ export type AccountVoice = { voice_id: string; name: string; category: string; d
 export type KeyCheck = { state: "valid" | "invalid" | "unknown"; error: string | null };
 
 export type McpInfo = { command: string | null; args: string[]; registered: boolean; config_path: string | null; hub_error: string | null };
+/** A sentence Yoru said with ElevenLabs (`spoken_clips`). */
+export type SpokenClip = { id: string; at: number; text: string; language: string; voice: string; duration_ms: number };
 export type Onboarding = { done: boolean; tour_version: number };
 
 /** A bridge event: `kind` and its fields, plus the board it comes from. */

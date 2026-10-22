@@ -381,12 +381,24 @@ impl Tts {
                         return Ok(());
                     }
                     let mut heard = false;
+                    // ElevenLabs' sentences are kept for the app (crate::spoken).
+                    let keep = client.model.provider.api == cloud::Api::ElevenLabs;
+                    let mut kept = Vec::new();
                     match self.speak_cloud(client, said, language, &mut |samples| {
                         heard |= !samples.is_empty();
+                        if keep {
+                            kept.extend_from_slice(&samples);
+                        }
                         out(samples);
                     }) {
                         Ok(()) => {
                             self.failed.lock().unwrap().remove(&voice);
+                            if keep {
+                                let (text, language, voice) = (said.to_string(), language.to_string(), voice.clone());
+                                // Off the voice's thread: the next sentence shouldn't wait for the
+                                // disk. One that can't be kept is only missing from the list.
+                                std::thread::spawn(move || drop(crate::spoken::save(&text, &language, &voice, &kept)));
+                            }
                             return Ok(());
                         }
                         // Whatever went wrong, the downloaded voice answers.

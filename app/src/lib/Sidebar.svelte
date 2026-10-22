@@ -15,10 +15,11 @@
     connectors: "M9 7V4M15 7V4M7 7h10v4a5 5 0 0 1-10 0zM12 16v4",
     routines: "M12 7v5l3 2M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z",
     memory: "M6 4h9l3 3v13H6zM9 10h6M9 14h6",
+    spoken: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2",
     settings: "M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4",
   };
   const MOON = "M4 13a8 8 0 0 0 15 3.5A8 8 0 0 1 9 5a8 8 0 0 0-5 8Z";
-  const MAIN: Page[] = ["today", "conversation", "inbox", "connectors", "routines", "memory"];
+  const MAIN: Page[] = ["today", "conversation", "inbox", "connectors", "routines", "memory", "spoken"];
   const BODY: Page[] = ["settings"];
 
   const tint = $derived(

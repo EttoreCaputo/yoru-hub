@@ -9,6 +9,7 @@ const en = {
     connectors: "Connectors",
     routines: "Routines",
     memory: "Memory",
+    spoken: "Spoken",
     settings: "Settings",
     preview: "Preview",
     previewTitle: "Mocked data: the app isn't running",
@@ -249,6 +250,22 @@ const en = {
     unsaved: "Unsaved changes",
     revert: "Undo changes",
     file: "memory.md",
+  },
+
+  spoken: {
+    title: "Spoken",
+    lede: "Every sentence Yoru said with its ElevenLabs voice: the text it sent, audio tags included, and the sound that came back. The latest 500 are kept.",
+    search: "Search the text",
+    count: (n: number) => (n === 1 ? "1 sentence" : `${n} sentences`),
+    play: "Play",
+    stop: "Stop",
+    delete: "Delete",
+    clear: "Delete all",
+    clearConfirm: "Delete every sentence and its sound?",
+    clearSure: "Delete all",
+    empty: "Nothing said yet",
+    emptyHint: "What Yoru says with an ElevenLabs voice shows up here, a sentence at a time.",
+    noMatch: "No sentence has those words",
   },
 
   board: {

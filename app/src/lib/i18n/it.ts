@@ -10,6 +10,7 @@ const it: Messages = {
     connectors: "Servizi",
     routines: "Abitudini",
     memory: "Memoria",
+    spoken: "Parlato",
     settings: "Impostazioni",
     preview: "Anteprima",
     previewTitle: "Dati finti: l'app non è in esecuzione",
@@ -250,6 +251,22 @@ const it: Messages = {
     unsaved: "Modifiche non salvate",
     revert: "Annulla le modifiche",
     file: "memory.md",
+  },
+
+  spoken: {
+    title: "Parlato",
+    lede: "Ogni frase che Yoru ha detto con la voce di ElevenLabs: il testo inviato, tag audio compresi, e l'audio che è tornato. Tiene le ultime 500.",
+    search: "Cerca nel testo",
+    count: (n: number) => (n === 1 ? "1 frase" : `${n} frasi`),
+    play: "Ascolta",
+    stop: "Ferma",
+    delete: "Elimina",
+    clear: "Elimina tutto",
+    clearConfirm: "Eliminare ogni frase e il suo audio?",
+    clearSure: "Elimina tutto",
+    empty: "Ancora niente",
+    emptyHint: "Quello che Yoru dice con una voce ElevenLabs compare qui, una frase alla volta.",
+    noMatch: "Nessuna frase con queste parole",
   },
 
   board: {

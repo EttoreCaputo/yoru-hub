@@ -51,6 +51,7 @@ use yoru_core::cloud::{self, CloudError, CloudRef, KeySource, Provider};
 use yoru_core::llm::{self, Llm, LlmConfig, LocalLlm};
 use yoru_core::models::{self, Kind, Model};
 use yoru_core::pointer;
+use yoru_core::spoken;
 use yoru_core::stt::{self, Stt, SttConfig, SttEngine, SttLanguage, Transcript};
 use yoru_core::tts::{self, Engine, Tts, TtsConfig};
 use yoru_core::timers::{self, Pomodoro, ShowOn, TimerInfo, Timers};
@@ -754,6 +755,29 @@ fn open_in_browser(url: &str) -> Result<(), String> {
 #[tauri::command]
 async fn elevenlabs_voices() -> Result<Vec<AccountVoice>, String> {
     tauri::async_runtime::spawn_blocking(|| elevenlabs::voices().map_err(|e| e.to_string())).await.map_err(|e| e.to_string())?
+}
+
+/// What Yoru said with ElevenLabs, newest first ([`spoken`]).
+#[tauri::command]
+fn spoken_clips() -> Vec<spoken::Clip> {
+    spoken::list()
+}
+
+/// The WAV of a spoken clip, as bytes rather than a JSON list of numbers.
+#[tauri::command]
+fn spoken_audio(id: String) -> Result<tauri::ipc::Response, String> {
+    spoken::audio(&id).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_spoken(id: String) -> Result<Vec<spoken::Clip>, String> {
+    spoken::delete(&id).map_err(|e| e.to_string())?;
+    Ok(spoken::list())
+}
+
+#[tauri::command]
+fn clear_spoken() -> Result<(), String> {
+    spoken::clear().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1714,6 +1738,7 @@ pub fn run() {
             firmware_info, identify_board, flash_board,
             confirmations, confirm, mcp_info, claude_mcp,
             voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine,
+            spoken_clips, spoken_audio, delete_spoken, clear_spoken,
             board_voice, set_board_volume, set_board_wake_sound, play_board_sound, test_voice,
             yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu,
             timers_info, timer_tool, set_timer_screen, dismiss_timers,

@@ -39,6 +39,7 @@ pub mod protocol;
 pub mod serial;
 pub(crate) mod sidecar;
 pub mod snapshot;
+pub mod spoken;
 pub mod stream;
 pub mod stt;
 pub mod timers;

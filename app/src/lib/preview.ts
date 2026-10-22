@@ -15,6 +15,7 @@ import type {
   ConnectorStatus,
   Notification,
   Preset,
+  SpokenClip,
   TimersInfo,
   ToolInfo,
   VoiceInfo,
@@ -130,6 +131,24 @@ let watchers: WatchEntry[] = [
     state: { last_run: now() - 2 * 24 * 60 * MIN, last_error: "notion needs you to sign in again", told: 0 },
   },
 ];
+
+let spoken: SpokenClip[] = [
+  { id: "3", at: now() - 4 * MIN, text: "[happy] Fatto! Il timer da venticinque minuti è partito.", language: "it", voice: "elevenlabs:voice/x", duration_ms: 3400 },
+  { id: "2", at: now() - 50 * MIN, text: "Hai una riunione alle 14:30 con Marco.", language: "it", voice: "elevenlabs:voice/x", duration_ms: 2600 },
+  { id: "1", at: now() - 26 * 60 * MIN, text: "[whispers] Good night. I'll keep watch.", language: "en", voice: "elevenlabs:voice/x", duration_ms: 2100 },
+];
+
+function tone(): ArrayBuffer {
+  const n = 8000;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const text = (at: number, s: string) => [...s].forEach((c, i) => v.setUint8(at + i, c.charCodeAt(0)));
+  text(0, "RIFF"), v.setUint32(4, 36 + n * 2, true), text(8, "WAVEfmt "), v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true), v.setUint16(22, 1, true), v.setUint32(24, 16000, true), v.setUint32(28, 32000, true);
+  v.setUint16(32, 2, true), v.setUint16(34, 16, true), text(36, "data"), v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.sin((i / 16000) * 2 * Math.PI * 440) * 3000, true);
+  return buf;
+}
 
 let memory = `# What Yoru knows about you
 
@@ -357,6 +376,11 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   open_key_page: () => undefined,
   memory: () => memory,
   set_memory: (a) => void (memory = a.text),
+  spoken_clips: () => spoken,
+  // Half a second of a quiet tone, as a 16 kHz WAV.
+  spoken_audio: () => tone(),
+  delete_spoken: (a) => (spoken = spoken.filter((c) => c.id !== a.id)),
+  clear_spoken: () => void (spoken = []),
   watchers: () => watchers,
   put_watcher: (a) => {
     const w = a.watcher as Watcher;
