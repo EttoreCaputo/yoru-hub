@@ -191,11 +191,9 @@ jobs:
             args: --target x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     # The app's own OAuth clients (docs/oauth-clients.md), compiled in: with
-    # them Google, GitHub, Slack, Box, Asana and HubSpot sign in with one
+    # them GitHub, Slack, Box, Asana and HubSpot sign in with one
     # click. Unset secrets build an app where those need the user's client.
     env:
-      YORU_GOOGLE_CLIENT_ID: ${{ secrets.YORU_GOOGLE_CLIENT_ID }}
-      YORU_GOOGLE_CLIENT_SECRET: ${{ secrets.YORU_GOOGLE_CLIENT_SECRET }}
       YORU_GITHUB_CLIENT_ID: ${{ secrets.YORU_GITHUB_CLIENT_ID }}
       YORU_GITHUB_CLIENT_SECRET: ${{ secrets.YORU_GITHUB_CLIENT_SECRET }}
       YORU_SLACK_CLIENT_ID: ${{ secrets.YORU_SLACK_CLIENT_ID }}

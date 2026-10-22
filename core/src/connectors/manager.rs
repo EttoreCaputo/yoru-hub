@@ -30,7 +30,8 @@ use tokio::runtime::Runtime;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use super::config::{ConnectorConfig, ConnectorsFile, EnvValue, ToolPolicy, TransportConfig};
+use super::config::{ConnectorConfig, ConnectorsFile, EnvValue, GoogleService, ToolPolicy, TransportConfig};
+use super::google::{self, oauth as google_oauth};
 use super::login::{self, LoginParams};
 use super::store::{self, ConnectorCredentials, ConnectorStates, Keychain, SecretStore};
 use super::lenient;
@@ -97,7 +98,15 @@ impl Connectors {
         secrets: Arc<dyn SecretStore>,
         events: impl Fn(ConnectorEvent) + Send + Sync + 'static,
     ) -> Result<Self, ConnectorError> {
-        let file = ConnectorsFile::load(&data_dir)?;
+        let mut file = ConnectorsFile::load(&data_dir)?;
+        let migrated = google::migrate(&mut file);
+        if !migrated.is_empty() {
+            for id in &migrated {
+                secrets.delete(&store::credentials_account(id))?;
+                secrets.delete(&store::state_account(id))?;
+            }
+            file.save(&data_dir)?;
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("yoru-connectors")
@@ -162,8 +171,13 @@ impl Connectors {
         let target = match &c.transport {
             TransportConfig::Http { url } => url.clone(),
             TransportConfig::Stdio { command, args, .. } => std::iter::once(command.as_str()).chain(args.iter().map(String::as_str)).collect::<Vec<_>>().join(" "),
+            TransportConfig::Google { service } => service.api_name().to_string(),
         };
-        let signed_in = matches!(c.transport, TransportConfig::Http { .. }) && ConnectorCredentials::new(&c.id, self.shared.secrets.clone()).has_token();
+        let signed_in = match c.transport {
+            TransportConfig::Http { .. } => ConnectorCredentials::new(&c.id, self.shared.secrets.clone()).has_token(),
+            TransportConfig::Google { .. } => matches!(google_oauth::load(self.shared.secrets.as_ref(), &c.id), Ok(Some(_))),
+            TransportConfig::Stdio { .. } => false,
+        };
         ConnectorStatus { id: c.id.clone(), name: c.name.clone(), enabled: c.enabled, state, transport: c.transport.kind(), target, signed_in, tools }
     }
 
@@ -264,6 +278,9 @@ impl Connectors {
 
     fn login_with_timeout(&self, id: &str, open_url: &dyn Fn(&str), timeout: Duration) -> Result<(), ConnectorError> {
         let config = self.config(id)?;
+        if let TransportConfig::Google { service } = config.transport {
+            return self.login_google(&config, service, open_url, timeout);
+        }
         let TransportConfig::Http { url } = &config.transport else { return Err(ConnectorError::NoLogin(id.into())) };
         let params = LoginParams {
             id: id.into(),
@@ -287,6 +304,30 @@ impl Connectors {
         result
     }
 
+    /// Sign in to a Google service with the user's own client: Google's
+    /// consent page, then the tokens in the keychain.
+    fn login_google(&self, config: &ConnectorConfig, service: GoogleService, open_url: &dyn Fn(&str), timeout: Duration) -> Result<(), ConnectorError> {
+        let id = config.id.clone();
+        let client = google_oauth::Client {
+            id: config.oauth.as_ref().and_then(|o| o.client_id.clone()).ok_or_else(|| ConnectorError::ClientIdRequired(format!("{} needs your OAuth client's id", config.name)))?,
+            secret: self.shared.secrets.get(&store::client_secret_account(&id))?,
+        };
+        let port = config.oauth.as_ref().and_then(|o| o.redirect_port);
+        let cancel = Arc::new(Notify::new());
+        self.shared.logins.lock().unwrap().insert(id.clone(), cancel.clone());
+        let prepare_client = client.clone();
+        let result = self.run(async move { google_oauth::prepare(&prepare_client, service.scopes(), port).await }).and_then(|prepared| {
+            open_url(&prepared.auth_url);
+            let (secrets, id) = (self.shared.secrets.clone(), id.clone());
+            self.run(async move { google_oauth::finish(prepared, &id, &client, secrets, cancel, timeout).await })
+        });
+        self.shared.logins.lock().unwrap().remove(&id);
+        if result.is_ok() {
+            self.restart(&id);
+        }
+        result
+    }
+
     /// Stop a [`Self::login`] waiting for the browser; it returns
     /// [`ConnectorError::LoginCancelled`].
     pub fn cancel_login(&self, id: &str) {
@@ -299,7 +340,7 @@ impl Connectors {
     /// and reconnect: a server that needs a sign-in then says so.
     pub fn logout(&self, id: &str) -> Result<(), ConnectorError> {
         let config = self.config(id)?;
-        if !matches!(config.transport, TransportConfig::Http { .. }) {
+        if matches!(config.transport, TransportConfig::Stdio { .. }) {
             return Err(ConnectorError::NoLogin(id.into()));
         }
         self.shared.secrets.delete(&store::credentials_account(id))?;
@@ -585,11 +626,54 @@ async fn list_tools(peer: &Peer<RoleClient>) -> Result<Vec<Tool>, String> {
     }
 }
 
-async fn connect(shared: &Shared, config: &ConnectorConfig, changed: Arc<Notify>) -> Result<RunningService<RoleClient, Handler>, ConnectFailure> {
+async fn connect(shared: &Arc<Shared>, config: &ConnectorConfig, changed: Arc<Notify>) -> Result<RunningService<RoleClient, Handler>, ConnectFailure> {
     let handler = Handler { changed };
     match &config.transport {
         TransportConfig::Http { url } => connect_http(shared, config, url, handler).await,
         TransportConfig::Stdio { command, args, env } => connect_stdio(shared, command, args, env, handler).await,
+        TransportConfig::Google { service } => connect_google(shared, config, *service, handler).await,
+    }
+}
+
+/// A Google service: check the tokens (refreshing them), then talk to
+/// Yoru's own server for it over a pipe.
+async fn connect_google(
+    shared: &Arc<Shared>,
+    config: &ConnectorConfig,
+    service: GoogleService,
+    handler: Handler,
+) -> Result<RunningService<RoleClient, Handler>, ConnectFailure> {
+    let secrets = shared.secrets.clone();
+    let id = config.id.clone();
+    let (stored, secret) = tokio::task::spawn_blocking(move || {
+        let stored = google_oauth::load(secrets.as_ref(), &id)?;
+        Ok::<_, ConnectorError>((stored, secrets.get(&store::client_secret_account(&id))?))
+    })
+    .await
+    .map_err(|e| ConnectFailure::Other(e.to_string()))?
+    .map_err(|e| ConnectFailure::Other(e.to_string()))?;
+    if stored.is_none() {
+        return Err(ConnectFailure::NeedsLogin { challenge: None, had_token: false });
+    }
+    let client_id = config.oauth.as_ref().and_then(|o| o.client_id.clone()).unwrap_or_default();
+    let tokens = google_oauth::TokenSource::new(&config.id, google_oauth::Client { id: client_id, secret }, shared.secrets.clone(), reqwest::Client::new());
+    match tokens.access_token().await {
+        Ok(_) => {}
+        Err(google_oauth::TokenError::SignInAgain(_)) => return Err(ConnectFailure::NeedsLogin { challenge: None, had_token: true }),
+        Err(google_oauth::TokenError::Other(why)) => return Err(ConnectFailure::Other(why)),
+    }
+    // Weak: the server lives in a task of the runtime `Shared` owns.
+    let (weak, id) = (Arc::downgrade(shared), config.id.clone());
+    let sign_in_needed = Box::new(move || {
+        if let Some(shared) = weak.upgrade() {
+            shared.set_needs_login(&id, None, true);
+        }
+    });
+    let pipe = google::spawn_server(service, tokens, sign_in_needed);
+    match tokio::time::timeout(CONNECT_TIMEOUT, handler.serve(pipe)).await {
+        Err(_) => Err(ConnectFailure::Other("Yoru's Google server didn't start".into())),
+        Ok(Ok(running)) => Ok(running),
+        Ok(Err(e)) => Err(ConnectFailure::Other(e.to_string())),
     }
 }
 

@@ -34,7 +34,7 @@
   // Two clicks instead of confirm(): the webview may swallow native dialogs.
   const remove = () => (removing ? run("remove_connector", { id: c.id }) : (removing = true));
   // A failed sign-in can leave a half-saved registration behind even without tokens, so reset is offered whenever the service isn't plainly connected.
-  const canReset = $derived(c.transport === "http" && (c.signed_in || c.state !== "connected"));
+  const canReset = $derived(c.transport !== "stdio" && (c.signed_in || c.state !== "connected"));
   const policy = (tool: ToolInfo, enabled: boolean, acts: boolean) => run("set_tool_policy", { id: c.id, tool: tool.name, enabled, acts });
 </script>
 
@@ -54,7 +54,7 @@
   <div class="row actions">
     {#if signingIn}
       <button class="btn small" onclick={() => call("cancel_login", { id: c.id })}>{t.cancel}</button>
-    {:else if c.enabled && c.transport === "http" && (c.state === "needs_login" || (c.state === "error" && !c.signed_in))}
+    {:else if c.enabled && c.transport !== "stdio" && (c.state === "needs_login" || (c.state === "error" && !c.signed_in))}
       <button class="btn primary small" onclick={onsignin}>{t.signIn}</button>
     {/if}
     {#if c.tools.length}

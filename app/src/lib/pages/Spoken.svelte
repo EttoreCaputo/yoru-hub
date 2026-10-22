@@ -66,6 +66,23 @@
     }
   }
 
+  let exporting = $state(false);
+  let exported = $state("");
+  /** The clips in view (all, or those the search finds) into a zip in Downloads. */
+  async function exportZip() {
+    exporting = true;
+    error = "";
+    exported = "";
+    try {
+      const ids = filter.trim() ? list.map((c) => c.id) : [];
+      exported = await call<string>("export_spoken", { ids });
+    } catch (e) {
+      error = why(e);
+    } finally {
+      exporting = false;
+    }
+  }
+
   async function clear() {
     stop();
     try {
@@ -92,10 +109,14 @@
   <div class="bar">
     <input type="text" placeholder={t.search} bind:value={filter} aria-label={t.search} />
     <span class="faint small">{t.count(clips.length)}</span>
-    <ConfirmButton small label={t.clear} question={t.clearConfirm} sure={t.clearSure} disabled={!clips.length} onconfirm={clear} />
+    <span class="end">
+      <button class="btn small" disabled={!list.length || exporting} onclick={exportZip}>{exporting ? t.exporting : filter.trim() ? t.exportFound(list.length) : t.export}</button>
+      <ConfirmButton small label={t.clear} question={t.clearConfirm} sure={t.clearSure} disabled={!clips.length} onconfirm={clear} />
+    </span>
   </div>
 
   {#if error}<p class="error-text">{error}</p>{/if}
+  {#if exported}<p class="faint small saved">{t.exported(exported)}</p>{/if}
 
   {#if list.length}
     <div class="list">
@@ -146,8 +167,14 @@
     flex: 1;
     max-width: 320px;
   }
-  .bar :global(:last-child) {
+  .end {
+    display: flex;
+    gap: 8px;
     margin-left: auto;
+  }
+  .saved {
+    margin: 8px 0 4px;
+    user-select: text;
   }
   .clip {
     display: grid;

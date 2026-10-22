@@ -107,7 +107,8 @@ export type ConnectorStatus = {
   state: ConnectionState;
   /** With `state: "error"`. */
   message?: string;
-  transport: "http" | "stdio";
+  /** `google`: Gmail or Calendar, served by Yoru Hub itself. */
+  transport: "http" | "stdio" | "google";
   target: string;
   signed_in: boolean;
   tools: ToolInfo[];
@@ -131,12 +132,14 @@ export type Preset = {
   scopes: string[];
   auth_params: [string, string][];
   redirect_port: number | null;
+  /** A Google service Yoru Hub serves itself, with the user's own client. */
+  google: "gmail" | "calendar" | null;
 };
 
 export type ConnectorConfig = {
   id: string;
   name: string;
-  transport: { type: "http"; url: string } | { type: "stdio"; command: string; args?: string[]; env?: Record<string, string | { secret: string }> };
+  transport: { type: "http"; url: string } | { type: "google"; service: "gmail" | "calendar" } | { type: "stdio"; command: string; args?: string[]; env?: Record<string, string | { secret: string }> };
   oauth?: { client_id?: string; client_secret?: string; scopes?: string[] };
   enabled: boolean;
 };

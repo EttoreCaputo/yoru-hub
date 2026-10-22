@@ -8,7 +8,7 @@
 //! approved clients (Vercel, Figma, Canva's waitlist) are left out, as are
 //! servers found only in metadata without a vendor page.
 //!
-//! The rest (Google, GitHub, Slack, Box, Asana, HubSpot) take neither dynamic
+//! The rest (GitHub, Slack, Box, Asana, HubSpot) take neither dynamic
 //! registration nor client ID metadata documents (checked 2026-10-19): they
 //! sign in only with a client registered in their console. The app ships its
 //! own, given at build time in `YORU_<SERVICE>_CLIENT_ID` and
@@ -17,10 +17,14 @@
 //! so these are the providers' "installed app" clients, whose secret isn't
 //! one, and PKCE protects the code. Without them in the build, the user's own
 //! client stays possible ("Advanced" in the app).
+//!
+//! Gmail and Google Calendar are Yoru's own ([`super::google`]): their REST
+//! APIs, always with the user's own client, since an app client of ours
+//! would need Google's verification.
 
 use serde::{Serialize, Serializer};
 
-use super::config::{ConnectorConfig, OAuthConfig, ToolPolicy, TransportConfig};
+use super::config::{ConnectorConfig, GoogleService, OAuthConfig, ToolPolicy, TransportConfig};
 
 /// How a client gets an OAuth client id for the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -55,7 +59,6 @@ const fn app_client(id: Option<&'static str>, secret: Option<&'static str>) -> O
     }
 }
 
-const GOOGLE_CLIENT: Option<AppClient> = app_client(option_env!("YORU_GOOGLE_CLIENT_ID"), option_env!("YORU_GOOGLE_CLIENT_SECRET"));
 const GITHUB_CLIENT: Option<AppClient> = app_client(option_env!("YORU_GITHUB_CLIENT_ID"), option_env!("YORU_GITHUB_CLIENT_SECRET"));
 const SLACK_CLIENT: Option<AppClient> = app_client(option_env!("YORU_SLACK_CLIENT_ID"), option_env!("YORU_SLACK_CLIENT_SECRET"));
 const BOX_CLIENT: Option<AppClient> = app_client(option_env!("YORU_BOX_CLIENT_ID"), option_env!("YORU_BOX_CLIENT_SECRET"));
@@ -93,6 +96,9 @@ pub struct Preset {
     /// still change them.
     #[serde(skip)]
     pub tools: &'static [(&'static str, ToolPolicy)],
+    /// A Google service Yoru serves itself, instead of a remote MCP server
+    /// at `url` (which then only names the API).
+    pub google: Option<GoogleService>,
 }
 
 fn is_some<S: Serializer>(client: &Option<AppClient>, s: S) -> Result<S::Ok, S::Error> {
@@ -126,7 +132,10 @@ impl Preset {
         ConnectorConfig {
             id: self.id.into(),
             name: self.name.into(),
-            transport: TransportConfig::Http { url: self.url.into() },
+            transport: match self.google {
+                Some(service) => TransportConfig::Google { service },
+                None => TransportConfig::Http { url: self.url.into() },
+            },
             oauth: needed.then_some(oauth),
             enabled: true,
             tools: self.tools.iter().map(|(name, policy)| (name.to_string(), *policy)).collect(),
@@ -149,35 +158,42 @@ const fn dynamic(id: &'static str, name: &'static str, url: &'static str, docs: 
         auth_params: &[],
         redirect_port: None,
         tools: &[],
+        google: None,
     }
 }
 
-/// The redirect port of the Google preset: register
-/// `http://127.0.0.1:8765/callback` on the Google OAuth client.
-pub const GOOGLE_REDIRECT_PORT: u16 = 8765;
-/// Google returns a refresh token only for `access_type=offline`; its doc
-/// says `offline_access` isn't enough.
-const GOOGLE_PARAMS: &[(&str, &str)] = &[("access_type", "offline"), ("prompt", "consent")];
-const GOOGLE_DOCS: &str = "https://developers.google.com/workspace/guides/configure-mcp-servers";
-const GOOGLE_SETUP: &str = "In your own Google Cloud project, enable the API and its MCP service, and create a \
-\"Web application\" OAuth client (marked for an AI agent) with redirect URI http://127.0.0.1:8765/callback. \
-While the project is in testing, Google makes you sign in again every 7 days.";
+const GOOGLE_DOCS: &str = "https://developers.google.com/workspace/guides/create-credentials#desktop-app";
 
-const fn google(id: &'static str, name: &'static str, url: &'static str, notes: &'static str) -> Preset {
+/// How to make the client, for a Google API.
+macro_rules! google_setup {
+    ($api:literal) => {
+        concat!(
+            "In your own Google Cloud project (console.cloud.google.com): enable the ", $api, "; set up the OAuth consent screen ",
+            "(External, with yourself as a test user, then \"Publish app\" so the sign-in doesn't expire every 7 days; ",
+            "Google warns that the app isn't verified, which is fine for your own account); then Credentials, ",
+            "Create credentials, OAuth client ID, type \"Desktop app\". Give its client id and secret here, or paste its JSON in the client id. ",
+            "The same client works for Gmail and Calendar."
+        )
+    };
+}
+
+/// Gmail and Calendar: Yoru's own server for the REST API, the user's client.
+const fn google(id: &'static str, name: &'static str, url: &'static str, service: GoogleService, notes: &'static str, setup: &'static str) -> Preset {
     Preset {
         id,
         name,
         url,
         registration: Registration::OwnClient,
         needs_client_secret: true,
-        app_client: GOOGLE_CLIENT,
+        app_client: None,
         docs: GOOGLE_DOCS,
         notes,
-        setup: GOOGLE_SETUP,
+        setup,
         scopes: &[],
-        auth_params: GOOGLE_PARAMS,
-        redirect_port: Some(GOOGLE_REDIRECT_PORT),
+        auth_params: &[],
+        redirect_port: None,
         tools: &[],
+        google: Some(service),
     }
 }
 
@@ -204,6 +220,7 @@ const fn own_client(
         auth_params: &[],
         redirect_port: None,
         tools: &[],
+        google: None,
     }
 }
 
@@ -247,6 +264,17 @@ static PRESETS: &[Preset] = &[
     dynamic("huggingface", "Hugging Face", "https://huggingface.co/mcp", "https://huggingface.co/docs/hub/en/hf-mcp-server", "Models, datasets and Spaces; works without signing in, with fewer tools."),
     // 2026-10-21: https://docs.tavily.com/documentation/mcp; metadata has /register.
     Preset { tools: TAVILY_TOOLS, ..dynamic("tavily", "Tavily", "https://mcp.tavily.com/mcp/", "https://docs.tavily.com/documentation/mcp", TAVILY_NOTES) },
+    // 2026-10-22: https://exa.ai/docs/get-started/exa-mcp; answered initialize without auth, read-only tools.
+    Preset {
+        registration: Registration::None,
+        ..dynamic("exa", "Exa", "https://mcp.exa.ai/mcp", "https://exa.ai/docs/get-started/exa-mcp", "Another web search, and pages read in full; no sign-in, with a free daily allowance.")
+    },
+    // 2026-10-22: 401 names https://airtable.com/oauth2/v1, whose metadata has /register.
+    dynamic("airtable", "Airtable", "https://mcp.airtable.com/mcp", "https://support.airtable.com/articles/9897799762-using-the-airtable-mcp-server", "Your bases, their tables and records."),
+    // 2026-10-22: metadata of mcp.clickup.com has /oauth/register.
+    dynamic("clickup", "ClickUp", "https://mcp.clickup.com/mcp", "https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server", "Tasks, docs and chat of your workspace."),
+    // 2026-10-22: metadata of mcp.miro.com has /register.
+    dynamic("miro", "Miro", "https://mcp.miro.com/", "https://developers.miro.com/docs/miro-mcp", "Your boards: read them and add to them."),
     // 2026-10-19: https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/; metadata has /register.
     dynamic(
         "cloudflare",
@@ -283,10 +311,23 @@ static PRESETS: &[Preset] = &[
         "Repositories, issues and pull requests; an organization that restricts OAuth apps has to approve Yoru.",
         "Create a GitHub OAuth app (Settings, Developer settings) with callback URL http://127.0.0.1/callback.",
     ),
-    // 2026-10-19: https://developers.google.com/workspace/guides/configure-mcp-servers; metadata (accounts.google.com) has no registration.
-    google("gmail", "Gmail", "https://gmailmcp.googleapis.com/mcp/v1", "The mail of your Google account."),
-    google("google-calendar", "Google Calendar", "https://calendarmcp.googleapis.com/mcp/v1", "Your calendars and their events."),
-    google("google-drive", "Google Drive", "https://drivemcp.googleapis.com/mcp/v1", "The files in your Drive."),
+        // 2026-10-22: Yoru's own server on the REST APIs, any Google account, the user's own "Desktop app" client.
+    google(
+        "gmail",
+        "Gmail",
+        "https://gmail.googleapis.com",
+        GoogleService::Gmail,
+        "The mail of your Google account: search, read, reply, send, archive.",
+        google_setup!("Gmail API"),
+    ),
+    google(
+        "google-calendar",
+        "Google Calendar",
+        "https://calendar.google.com",
+        GoogleService::Calendar,
+        "Your calendars and their events: read, create, change, answer invitations.",
+        google_setup!("Google Calendar API"),
+    ),
     // 2026-10-19: https://docs.slack.dev/ai/slack-mcp-server/ (no DCR; a registered Slack app, confidential client).
     own_client(
         "slack",
@@ -385,12 +426,14 @@ mod tests {
     }
 
     #[test]
-    fn google_asks_for_a_refresh_token_on_a_fixed_port() {
-        let c = preset("gmail").unwrap().config(Some("id".into()), Some("secret".into()));
+    fn google_services_are_served_by_yoru_with_the_users_client() {
+        let p = preset("gmail").unwrap();
+        assert!(!p.one_click() && p.needs_client_secret);
+        let c = p.config(Some("id".into()), Some("secret".into()));
+        assert_eq!(c.transport, TransportConfig::Google { service: GoogleService::Gmail });
         let oauth = c.oauth.unwrap();
-        assert_eq!(oauth.auth_params.get("access_type").map(String::as_str), Some("offline"));
-        assert_eq!(oauth.redirect_port, Some(GOOGLE_REDIRECT_PORT));
-        assert_eq!(oauth.client_secret.as_deref(), Some("secret"));
+        assert_eq!((oauth.client_id.as_deref(), oauth.client_secret.as_deref(), oauth.redirect_port), (Some("id"), Some("secret"), None));
+        assert!(preset("google-drive").is_none());
     }
 
     #[test]

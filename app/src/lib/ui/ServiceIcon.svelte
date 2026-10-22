@@ -12,7 +12,7 @@
 
 {#if mark}
   <span class="mark {kind}" class:off style:--brand={mark.hex} style:--size="{size}px" aria-hidden="true">
-    <svg viewBox="0 0 24 24"><path d={mark.path} /></svg>
+    <svg viewBox="0 0 24 24"><path d={mark.path} fill-rule={mark.evenodd ? "evenodd" : undefined} /></svg>
   </span>
 {:else}
   <span class="mark letter" class:off style:--size="{size}px" aria-hidden="true">{name.trim().slice(0, 1).toUpperCase() || "?"}</span>

@@ -277,6 +277,35 @@ fn a_server_that_wants_a_sign_in() {
     assert!(secrets.get("private.client-secret").unwrap().is_none());
 }
 
+/// A Google service is Yoru's own server: it asks for a sign-in without
+/// tokens, and lists its tools with them (listing calls nothing at Google).
+#[test]
+fn a_google_service_is_served_in_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let (c, events, secrets) = open(dir.path());
+    let config = catalog::preset("gmail").unwrap().config(Some("cid".into()), Some("csecret".into()));
+    c.add(config).unwrap();
+    eventually("needs_login", || c.get("gmail").unwrap().state == ConnectionState::NeedsLogin);
+    assert!(!events.lock().unwrap().iter().any(|e| matches!(e, ConnectorEvent::LoginNeeded { .. })));
+    assert_eq!(c.get("gmail").unwrap().target, "Gmail API");
+
+    let far = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 3600;
+    let tokens = json!({"client_id": "cid", "access_token": "a", "refresh_token": "r", "expires_at": far});
+    secrets.set("gmail", &tokens.to_string()).unwrap();
+    c.set_enabled("gmail", true).unwrap();
+    eventually("connected", || c.get("gmail").unwrap().state == ConnectionState::Connected);
+    let status = c.get("gmail").unwrap();
+    assert!(status.signed_in);
+    let search = status.tools.iter().find(|t| t.name == "search_threads").unwrap();
+    assert!(search.enabled && !search.acts);
+    let trash = status.tools.iter().find(|t| t.name == "trash_thread").unwrap();
+    assert!(trash.acts && trash.destructive);
+    assert!(c.tools().iter().any(|t| t.tool.qualified_name == "gmail__send_message"));
+    assert!(matches!(c.call("gmail__nope", json!({}), Duration::from_secs(5)), Err(ConnectorError::UnknownTool(_))));
+    c.logout("gmail").unwrap();
+    eventually("needs_login again", || c.get("gmail").unwrap().state == ConnectionState::NeedsLogin);
+}
+
 #[test]
 fn bad_configs_are_refused() {
     let dir = tempfile::tempdir().unwrap();

@@ -780,6 +780,28 @@ fn clear_spoken() -> Result<(), String> {
     spoken::clear().map_err(|e| e.to_string())
 }
 
+/// Zip clips `ids` (all of them when empty) into Downloads and show the zip
+/// in the file manager; returns its path.
+#[tauri::command]
+async fn export_spoken(ids: Vec<String>) -> Result<String, String> {
+    let path = tauri::async_runtime::spawn_blocking(move || spoken::export(&ids)).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    reveal(&path);
+    Ok(path.display().to_string())
+}
+
+/// Select `path` in Finder (Explorer, or open its folder elsewhere).
+fn reveal(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    #[cfg(windows)]
+    let r = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn();
+    if let Err(e) = r {
+        eprintln!("could not show {}: {e}", path.display());
+    }
+}
+
 #[tauri::command]
 fn voice_info(state: State<AppState>) -> VoiceInfo {
     voice_info_of(&state)
@@ -1738,7 +1760,7 @@ pub fn run() {
             firmware_info, identify_board, flash_board,
             confirmations, confirm, mcp_info, claude_mcp,
             voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine,
-            spoken_clips, spoken_audio, delete_spoken, clear_spoken,
+            spoken_clips, spoken_audio, delete_spoken, clear_spoken, export_spoken,
             board_voice, set_board_volume, set_board_wake_sound, play_board_sound, test_voice,
             yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu,
             timers_info, timer_tool, set_timer_screen, dismiss_timers,

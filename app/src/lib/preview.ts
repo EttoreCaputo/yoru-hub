@@ -41,13 +41,13 @@ const tool = (name: string, description: string, acts = false, connector = "line
   destructive: acts,
 });
 
-// Built as if the app shipped Google's and GitHub's clients but not Slack's,
+// Built as if the app shipped GitHub's client but not Slack's (Google always takes the user's own),
 // so both the one-click path and Advanced show.
 const preset = (id: string, name: string, url: string, notes: string, more: Partial<Preset> = {}): Preset => ({
-  id, name, url, registration: "dynamic", needs_client_secret: false, app_client: false, docs: "https://modelcontextprotocol.io", notes, setup: "", scopes: [], auth_params: [], redirect_port: null, ...more,
+  id, name, url, registration: "dynamic", needs_client_secret: false, app_client: false, docs: "https://modelcontextprotocol.io", notes, setup: "", scopes: [], auth_params: [], redirect_port: null, google: null, ...more,
 });
-const GOOGLE_SETUP = "In your own Google Cloud project, enable the API and its MCP service, and create a \"Web application\" OAuth client with redirect URI http://127.0.0.1:8765/callback.";
-const google = { registration: "own_client", needs_client_secret: true, app_client: true, setup: GOOGLE_SETUP, redirect_port: 8765, docs: "https://developers.google.com/workspace/guides/configure-mcp-servers" } as const;
+const GOOGLE_SETUP = "In your own Google Cloud project: enable the API, set up the OAuth consent screen, then create an OAuth client of type \"Desktop app\".";
+const google = { registration: "own_client", needs_client_secret: true, app_client: false, setup: GOOGLE_SETUP, docs: "https://developers.google.com/workspace/guides/create-credentials#desktop-app" } as const;
 const presets: Preset[] = [
   preset("notion", "Notion", "https://mcp.notion.com/mcp", "Pages and databases of your workspace."),
   preset("linear", "Linear", "https://mcp.linear.app/mcp", "Issues, projects and comments."),
@@ -55,13 +55,17 @@ const presets: Preset[] = [
   preset("sentry", "Sentry", "https://mcp.sentry.dev/mcp", "Issues and errors of your Sentry organizations."),
   preset("stripe", "Stripe", "https://mcp.stripe.com", "Payments, customers and invoices. Its tools can act on real money."),
   preset("todoist", "Todoist", "https://ai.todoist.net/mcp", "Tasks and projects."),
+  preset("tavily", "Tavily", "https://mcp.tavily.com/mcp/", "Web search, with news and finance; gives Yoru the web on every brain. The free plan has 1,000 credits a month: a search costs 1 (2 when advanced)."),
+  preset("exa", "Exa", "https://mcp.exa.ai/mcp", "Another web search, and pages read in full; no sign-in, with a free daily allowance.", { registration: "none" }),
+  preset("airtable", "Airtable", "https://mcp.airtable.com/mcp", "Your bases, their tables and records."),
+  preset("clickup", "ClickUp", "https://mcp.clickup.com/mcp", "Tasks, docs and chat of your workspace."),
+  preset("miro", "Miro", "https://mcp.miro.com/", "Your boards: read them and add to them."),
   preset("cloudflare-docs", "Cloudflare docs", "https://docs.mcp.cloudflare.com/mcp", "Searches Cloudflare's documentation; no sign-in.", { registration: "none" }),
   preset("github", "GitHub", "https://api.githubcopilot.com/mcp/", "Repositories, issues and pull requests; an organization that restricts OAuth apps has to approve Yoru.", {
     registration: "own_client", needs_client_secret: true, app_client: true, setup: "Create a GitHub OAuth app (Settings, Developer settings) with callback URL http://127.0.0.1/callback.",
   }),
-  preset("gmail", "Gmail", "https://gmailmcp.googleapis.com/mcp/v1", "The mail of your Google account.", google),
-  preset("google-calendar", "Google Calendar", "https://calendarmcp.googleapis.com/mcp/v1", "Your calendars and their events.", google),
-  preset("google-drive", "Google Drive", "https://drivemcp.googleapis.com/mcp/v1", "The files in your Drive.", google),
+  preset("gmail", "Gmail", "https://gmail.googleapis.com", "The mail of your Google account: search, read, reply, send, archive.", { ...google, google: "gmail" }),
+  preset("google-calendar", "Google Calendar", "https://calendar.google.com", "Your calendars and their events: read, create, change, answer invitations.", { ...google, google: "calendar" }),
   preset("slack", "Slack", "https://mcp.slack.com/mcp", "Channels, messages and people of your workspace.", {
     registration: "own_client", needs_client_secret: true, setup: "Create a Slack app of your workspace (internal or published) and give its client id and secret.",
   }),
@@ -381,6 +385,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   spoken_audio: () => tone(),
   delete_spoken: (a) => (spoken = spoken.filter((c) => c.id !== a.id)),
   clear_spoken: () => void (spoken = []),
+  export_spoken: () => "/Users/you/Downloads/yoru-spoken-20261022-153012.zip",
   watchers: () => watchers,
   put_watcher: (a) => {
     const w = a.watcher as Watcher;
@@ -412,8 +417,10 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     const id = p?.id ?? config!.id;
     if (connector(id)) throw new Error(`a connector "${id}" exists already`);
     if (p?.registration === "own_client" && !p.app_client && !a.clientId) throw new Error(`this build of Yoru Hub has no ${p.name} client: give your own in Advanced`);
-    const target = p?.url ?? (config!.transport.type === "http" ? config!.transport.url : config!.transport.command);
-    const status: ConnectorStatus = { id, name: p?.name ?? config!.name, enabled: true, state: "needs_login", transport: p ? "http" : config!.transport.type, target, signed_in: false, tools: [] };
+    const t = config?.transport;
+    const target = p?.google ? (p.google === "gmail" ? "Gmail API" : "Google Calendar API") : (p?.url ?? (t!.type === "http" ? t!.url : t!.type === "stdio" ? t!.command : t!.service));
+    const transport = p ? (p.google ? "google" : "http") : t!.type;
+    const status: ConnectorStatus = { id, name: p?.name ?? config!.name, enabled: true, state: "needs_login", transport, target, signed_in: false, tools: [] };
     connectors = [...connectors, status];
     emitConnectors();
     return status;

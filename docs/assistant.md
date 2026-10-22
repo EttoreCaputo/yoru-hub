@@ -33,10 +33,11 @@ New in `core/src/connectors/`:
 
 There are three kinds of service:
 - **A remote MCP server with dynamic registration.** It works with nothing set up in advance. Several services publish one; whether each supports dynamic registration is checked service by service.
-- **A service that needs our own OAuth client**: Google (Gmail, Calendar, Drive), GitHub, Slack, Box, Asana, HubSpot (none takes dynamic registration or client ID metadata documents, checked 2026-10-19). The app's own client for each is registered once and compiled in from `YORU_<SERVICE>_CLIENT_ID`/`_SECRET` (`docs/oauth-clients.md`), so Connect is one click there too. A build without it falls back to the user's own client, folded under "Advanced" on the card. Google: an app left in "testing" gets refresh tokens that expire after 7 days, and Gmail's scopes are restricted. Fine for personal use, but it shows up as a weekly sign-in until the app is verified.
+- **A service that needs our own OAuth client**: GitHub, Slack, Box, Asana, HubSpot (none takes dynamic registration or client ID metadata documents, checked 2026-10-19). The app's own client for each is registered once and compiled in from `YORU_<SERVICE>_CLIENT_ID`/`_SECRET` (`docs/oauth-clients.md`), so Connect is one click there too. A build without it falls back to the user's own client, folded under "Advanced" on the card.
+- **Google (Gmail, Calendar)**: since 2026-10-22 Yoru Hub serves their tools itself, on the REST APIs, with a "Desktop app" client the user makes in their own Google Cloud project (`docs/oauth-clients.md`). A client of ours would need Google's verification for Gmail's restricted scopes; the user's own works with any account. Drive is left out for now.
 - **A local MCP server** (`npx …`, `uvx …`), run as a child process, with its token in the keychain and passed as an environment variable.
 
-Web search on every brain comes from Tavily (`tavily` in the catalog, added 2026-10-21): a remote server with dynamic registration, whose free plan gives 1,000 credits a month (a basic search costs 1, an advanced one 2). Its tools carry no read-only annotations, so the preset marks search, extract, crawl and map as reading; `tavily_research` (4 to 250 credits a call) and `tavily_feedback` start turned off. A watcher on `tavily_search` with `topic: "news"` and `time_range: "day"` follows a subject without the model; feeds stay the better source for fixed headlines, since they cost nothing.
+Web search on every brain comes from Tavily (`tavily` in the catalog, added 2026-10-21): a remote server with dynamic registration, whose free plan gives 1,000 credits a month (a basic search costs 1, an advanced one 2). Its tools carry no read-only annotations, so the preset marks search, extract, crawl and map as reading; `tavily_research` (4 to 250 credits a call) and `tavily_feedback` start turned off. A watcher on `tavily_search` with `topic: "news"` and `time_range: "day"` follows a subject without the model; feeds stay the better source for fixed headlines, since they cost nothing. Exa (`exa`, added 2026-10-22) is a second search with no sign-in; Airtable, ClickUp and Miro joined the catalog the same day, all with dynamic registration.
 
 ## The agent
 
@@ -122,11 +123,11 @@ Status (2026-10-19): A0, A1, A2, A4 and A5 are built in the core and the CLI (`y
 - **A0. Yoru only.** Remove DualEye and the pet. Align with firmware 0.9.2 (no `get_pet`, push-to-talk accepted). The app, the CLI and the identifier are named Yoru. Done when the app runs with a Yoru on USB and nothing of DualEye is left.
 - **A1. Connectors.** The MCP client, OAuth, the keychain store, `connectors.json`. Done when `yoru connect <url>` signs in to a remote MCP server and `yoru tools` lists its tools.
 - **A2. The agent with connectors.** The Anthropic provider, tools per request, acting asks first on the board. Done when "what mail do I have?" said to Yoru gets a real answer. Then the Yoru app (`../yoru-app`) is retired.
-- **A3. The new app.** The pages above, the Connectors page with Google and GitHub through our own OAuth clients, the first run.
+- **A3. The new app.** The pages above, the Connectors page with GitHub through our own OAuth client and Google through the user's, the first run.
 - **A4. Watchers and notifications.** Watchers, triage, delivery, the inbox in the app, and `show_notification` with the inbox in the firmware.
 - **A5. Memory and routines.** The memory files and their page, the morning recap, quiet hours.
 
 ## Open questions
 
 - The default model: settled on 2026-10-19. Claude (`claude-opus-5-5`) when there is an Anthropic key, else Groq (`openai/gpt-oss-120b`, free) when there is a Groq key; the first run offers both.
-- Which services first. Gmail and Calendar are the most useful and need our own Google OAuth app.
+- Which services first. Gmail and Calendar are the most useful: done on Google's REST APIs with the user's own client (2026-10-22).

@@ -1,8 +1,9 @@
 //! Connectors: Yoru as an MCP **client** of the user's services.
 //!
 //! A connector is one MCP server: a remote one over Streamable HTTP, usually
-//! behind OAuth (Notion, Linear, GitHub…), or a local one run as a child
-//! process (`npx …`, `uvx …`) with its token passed in the environment.
+//! behind OAuth (Notion, Linear, GitHub…), a local one run as a child
+//! process (`npx …`, `uvx …`) with its token passed in the environment, or
+//! Yoru's own for a Google service, in-process.
 //! [`Connectors`] keeps a session open with each enabled connector, lists
 //! their tools for the agent under qualified names (`linear__list_issues`)
 //! and calls them.
@@ -16,6 +17,8 @@
 //! - `manager`: [`Connectors`], a synchronous façade over a tokio runtime of
 //!   its own: sessions, reconnection with backoff, token refresh (rmcp's
 //!   `AuthClient`), and the tool list kept current on `tools/list_changed`.
+//! - `google`: Gmail and Google Calendar on their REST APIs, served by Yoru
+//!   itself in-process, with the user's own OAuth client.
 //! - [`catalog`]: services the app can offer with one click.
 //! - [`names`]: the qualified tool names LLM APIs accept.
 //!
@@ -28,6 +31,7 @@
 
 pub mod catalog;
 pub mod config;
+mod google;
 mod lenient;
 mod login;
 mod manager;
@@ -41,7 +45,7 @@ use std::fmt;
 use serde::Serialize;
 use serde_json::Value;
 
-pub use config::{ConnectorConfig, EnvValue, OAuthConfig, ToolPolicy, TransportConfig, TransportKind};
+pub use config::{ConnectorConfig, EnvValue, GoogleService, OAuthConfig, ToolPolicy, TransportConfig, TransportKind};
 pub use manager::Connectors;
 pub use store::{Keychain, MemorySecrets, SecretStore};
 

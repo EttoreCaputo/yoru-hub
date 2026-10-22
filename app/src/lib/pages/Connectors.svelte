@@ -24,6 +24,8 @@
   let opening = $state<string | null>(null);
   let clientId = $state("");
   let clientSecret = $state("");
+  /** Google's downloaded client JSON pasted whole: it holds the secret too. */
+  const pastedJson = $derived(clientId.trim().startsWith("{"));
   let busy = $state<string | null>(null);
   let error = $state<{ id: string; text: string } | null>(null);
 
@@ -137,16 +139,16 @@
       {/if}
       {#if opening === p.id}
         <form class="client" onsubmit={(e) => (e.preventDefault(), connect(p))}>
-          <p class="dim">{p.app_client ? t.advancedHint : t.advancedNeeded}</p>
+          <p class="dim">{p.google ? t.googleClient : p.app_client ? t.advancedHint : t.advancedNeeded}</p>
           <p class="dim">{p.setup}</p>
           <button type="button" class="btn quiet small docs" onclick={() => openDocs(p.docs)}>{t.ownClientHow} ↗</button>
-          <p class="mono faint">{t.redirect(redirect(p))}</p>
-          <label class="stack">{t.clientId}<input type="text" bind:value={clientId} autocomplete="off" spellcheck="false" /></label>
-          {#if p.needs_client_secret}
+          {#if !p.google}<p class="mono faint">{t.redirect(redirect(p))}</p>{/if}
+          <label class="stack">{p.google ? t.clientIdOrJson : t.clientId}<input type="text" bind:value={clientId} autocomplete="off" spellcheck="false" /></label>
+          {#if p.needs_client_secret && !pastedJson}
             <label class="stack">{t.clientSecret}<input type="password" bind:value={clientSecret} autocomplete="off" /></label>
           {/if}
           <div class="row">
-            <button class="btn primary small" type="submit" disabled={!clientId.trim() || (p.needs_client_secret && !clientSecret.trim()) || busy === p.id}>{t.connectOwn}</button>
+            <button class="btn primary small" type="submit" disabled={!clientId.trim() || (p.needs_client_secret && !pastedJson && !clientSecret.trim()) || busy === p.id}>{t.connectOwn}</button>
             <button class="btn quiet small" type="button" onclick={() => (opening = null)}>{t.cancel}</button>
           </div>
         </form>
@@ -210,9 +212,11 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
     gap: 12px;
-    align-items: start;
   }
+  /* Cards of a row as tall as each other, Advanced at the bottom. */
   .preset {
+    display: flex;
+    flex-direction: column;
     padding: 16px;
     border-radius: var(--r-lg);
     background: var(--ink);
@@ -261,7 +265,9 @@
     font-size: 12.5px;
   }
   .advanced {
-    margin-top: 6px;
+    align-self: flex-start;
+    margin-top: auto;
+    padding-top: 6px;
     padding: 0;
     height: auto;
     gap: 4px;
@@ -281,6 +287,7 @@
   }
   /* The whole story once it's open; three lines while browsing. */
   .preset:not(.open) .notes {
+    min-height: calc(3 * 1.45em);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     line-clamp: 3;

@@ -415,7 +415,10 @@ pub async fn add_connector(
 fn from_preset(id: &str, client_id: Option<String>, client_secret: Option<String>) -> Result<ConnectorConfig, String> {
     let preset = catalog::preset(id).ok_or_else(|| format!("no preset {id:?}"))?;
     let clean = |s: Option<String>| s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let (client_id, client_secret) = (clean(client_id), clean(client_secret));
+    let (client_id, client_secret) = match clean(client_id) {
+        Some(json) if json.starts_with('{') => client_from_json(&json)?,
+        id => (id, clean(client_secret)),
+    };
     if client_id.is_none() && !preset.one_click() {
         return Err(format!("this build of Yoru Hub has no {} client: give your own in Advanced", preset.name));
     }
@@ -423,6 +426,18 @@ fn from_preset(id: &str, client_id: Option<String>, client_secret: Option<String
         return Err(format!("{} needs your OAuth client's secret too", preset.name));
     }
     Ok(preset.config(client_id, client_secret))
+}
+
+/// The client in the JSON Google's console downloads
+/// (`{"installed": {"client_id": …, "client_secret": …}}`, or `"web"`).
+fn client_from_json(json: &str) -> Result<(Option<String>, Option<String>), String> {
+    let v: Value = serde_json::from_str(json).map_err(|e| format!("that isn't the JSON Google gives: {e}"))?;
+    let client = v.get("installed").or_else(|| v.get("web")).unwrap_or(&v);
+    let field = |k: &str| client.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    match field("client_id") {
+        Some(id) => Ok((Some(id), field("client_secret"))),
+        None => Err("the JSON has no client_id".into()),
+    }
 }
 
 #[tauri::command]

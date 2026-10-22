@@ -35,7 +35,7 @@ pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// The client name shown on the service's consent screen.
 const CLIENT_NAME: &str = "Yoru";
-const CALLBACK_PATH: &str = "/callback";
+pub(crate) const CALLBACK_PATH: &str = "/callback";
 
 /// A sign-in waiting for the browser.
 pub(crate) struct Prepared {
@@ -109,7 +109,7 @@ pub(crate) async fn finish(p: Prepared, cancel: Arc<Notify>, timeout: Duration) 
 
 /// Accept connections until one is our callback; anything else (a favicon)
 /// gets a 404. A callback with an error or a wrong state ends the wait.
-async fn wait_for_code(listener: &TcpListener, state: &str) -> Result<(TcpStream, String, Option<String>), ConnectorError> {
+pub(crate) async fn wait_for_code(listener: &TcpListener, state: &str) -> Result<(TcpStream, String, Option<String>), ConnectorError> {
     loop {
         let (mut stream, _) = listener.accept().await?;
         let Ok(Ok(target)) = tokio::time::timeout(REQUEST_TIMEOUT, read_target(&mut stream)).await else { continue };
@@ -175,7 +175,7 @@ pub(crate) fn parse_callback(target: &str, expected_state: &str) -> Callback {
 }
 
 /// The page the browser shows once it's done.
-async fn answer(stream: &mut TcpStream, error: Option<&ConnectorError>) -> std::io::Result<()> {
+pub(crate) async fn answer(stream: &mut TcpStream, error: Option<&ConnectorError>) -> std::io::Result<()> {
     let (title, text) = match error {
         None => ("Yoru is connected", "Yoru is connected, you can close this tab.".to_string()),
         Some(e) => ("Yoru could not connect", format!("Yoru could not connect: {}. You can close this tab and try again.", html_escape(&e.to_string()))),

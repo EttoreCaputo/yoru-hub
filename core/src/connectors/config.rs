@@ -63,6 +63,17 @@ pub enum TransportConfig {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         env: BTreeMap<String, EnvValue>,
     },
+    /// A Google service reached through its REST API by Yoru itself, signed
+    /// in with the user's own OAuth client ([`super::google`]).
+    Google { service: GoogleService },
+}
+
+/// The Google services Yoru speaks to natively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoogleService {
+    Gmail,
+    Calendar,
 }
 
 impl TransportConfig {
@@ -70,13 +81,14 @@ impl TransportConfig {
         match self {
             Self::Http { .. } => TransportKind::Http,
             Self::Stdio { .. } => TransportKind::Stdio,
+            Self::Google { .. } => TransportKind::Google,
         }
     }
 
     /// The named secrets the child process needs.
     pub fn secret_names(&self) -> Vec<&str> {
         match self {
-            Self::Http { .. } => Vec::new(),
+            Self::Http { .. } | Self::Google { .. } => Vec::new(),
             Self::Stdio { env, .. } => env
                 .values()
                 .filter_map(|v| match v {
@@ -93,6 +105,7 @@ impl TransportConfig {
 pub enum TransportKind {
     Http,
     Stdio,
+    Google,
 }
 
 /// An environment variable of a local server: a plain value, or the name of
@@ -219,6 +232,11 @@ impl ConnectorConfig {
             TransportConfig::Stdio { .. } => {
                 if self.oauth.is_some() {
                     return bad("a local server takes its tokens from the environment, not OAuth".into());
+                }
+            }
+            TransportConfig::Google { .. } => {
+                if self.oauth.as_ref().and_then(|o| o.client_id.as_ref()).is_none_or(|id| id.trim().is_empty()) {
+                    return bad("a Google service needs your OAuth client's id".into());
                 }
             }
         }
