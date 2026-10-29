@@ -35,6 +35,7 @@
 pub mod compat;
 pub mod confirm;
 pub mod external;
+pub mod habits;
 pub mod inbox;
 pub mod memory;
 pub mod routines;
@@ -43,7 +44,7 @@ pub mod watchers;
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -57,7 +58,8 @@ use crate::stream::OnDelta;
 use crate::timers::Timers;
 
 pub use confirm::{Confirmation, Confirmations};
-pub use external::{ExternalTool, ExternalTools};
+pub use external::{Errand, ErrandListener, ExternalTool, ExternalTools};
+pub use habits::{HabitView, Habits};
 pub use inbox::{Inbox, InboxChange, Notification, Urgency};
 pub use memory::Memory;
 
@@ -271,8 +273,12 @@ pub struct Assistant {
     settings: Mutex<Settings>,
     pub memory: Memory,
     pub inbox: Arc<Inbox>,
+    pub habits: Arc<Habits>,
     pub timers: Arc<Timers>,
     external: Mutex<Option<Arc<dyn ExternalTools>>>,
+    /// Told of each external call the model makes (the bridge, while it runs).
+    errands: Mutex<Option<ErrandListener>>,
+    errand_ids: AtomicU64,
     conversation: Mutex<Conversation>,
     /// One turn at a time.
     turn: Mutex<()>,
@@ -309,9 +315,12 @@ impl Assistant {
         Self {
             memory: Memory::open(file("memory.md")),
             inbox: Arc::new(Inbox::open(file("inbox.json"))),
+            habits: Arc::new(Habits::open(file("habits.json"))),
             timers,
             settings: Mutex::new(settings),
             external: Mutex::default(),
+            errands: Mutex::default(),
+            errand_ids: AtomicU64::new(0),
             conversation: Mutex::default(),
             turn: Mutex::default(),
             log: Mutex::new(log),
@@ -341,6 +350,18 @@ impl Assistant {
     /// The connectors' tools, once they're running.
     pub fn set_external(&self, external: Option<Arc<dyn ExternalTools>>) {
         *self.external.lock().unwrap() = external;
+    }
+
+    /// Who shows the model's external calls as Yoru's errands.
+    pub fn set_errands(&self, listener: Option<ErrandListener>) {
+        *self.errands.lock().unwrap() = listener;
+    }
+
+    fn errand(&self, id: &str, source: &str, state: &'static str) {
+        let listener = self.errands.lock().unwrap().clone();
+        if let Some(listener) = listener {
+            listener(Errand { id: id.to_string(), source: source.to_string(), state });
+        }
     }
 
     pub fn external(&self) -> Option<Arc<dyn ExternalTools>> {
@@ -635,6 +656,7 @@ impl Assistant {
             "remember" => return self.memory.remember(input["section"].as_str().unwrap_or("notes"), input["text"].as_str().unwrap_or_default()),
             "forget" => return self.memory.forget(input["text"].as_str().unwrap_or_default()),
             "revise_memory" => return self.memory.revise(input["old"].as_str().unwrap_or_default(), input["text"].as_str().unwrap_or_default()),
+            "habits" => return self.habits.call_tool(input),
             "get_inbox" => {
                 let items: Vec<Value> = self
                     .inbox
@@ -664,7 +686,11 @@ impl Assistant {
                 None => return Err("the user didn't answer in time: it wasn't done".into()),
             }
         }
-        match external.call(name, input, EXTERNAL_TIMEOUT)? {
+        let errand = format!("e{}", self.errand_ids.fetch_add(1, Ordering::Relaxed) + 1);
+        self.errand(&errand, &tool.service, "start");
+        let outcome = external.call(name, input, EXTERNAL_TIMEOUT);
+        self.errand(&errand, &tool.service, if matches!(outcome, Ok((_, false))) { "done" } else { "failed" });
+        match outcome? {
             (text, false) => Ok(text),
             (text, true) => Err(text),
         }
@@ -743,7 +769,8 @@ the people, projects and habits that matter to them, what they want to hear abou
 refines what is there, correct the line with revise_memory; when it is no longer true, remove it with forget. Keep it tidy: one fact per \
 short line, in the right section, no duplicates (merge them), nothing passing (a one-off errand is a timer or a note, not a memory). \
 Don't announce every change; mention it briefly only when the user would want to know. The memory is in <memory> below.
-- Timers and reminders run on this computer and ring on your board.
+- Timers and reminders run on this computer and ring on your board. Daily habits (the habits tool) show in your board's Habits app, \
+with today's count and the streak: when the user says they did one, tick it with done.
 
 # Notifying
 notify puts a line in the user's inbox and on your board. Urgency: low (inbox only), normal (a banner), high (you knock on the glass: \
@@ -814,6 +841,7 @@ tell (what they want to be told about), quiet (what they don't want to hear abou
             "description": "The 20 newest notifications in the user's inbox: what you already told them.",
             "input_schema": {"type": "object", "properties": {}},
         }),
+        Habits::tool(),
     ]
 }
 

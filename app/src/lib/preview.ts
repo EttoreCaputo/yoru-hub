@@ -13,6 +13,7 @@ import type {
   Confirmation,
   ConnectorConfig,
   ConnectorStatus,
+  Habit,
   Notification,
   Preset,
   SpokenClip,
@@ -120,6 +121,18 @@ let chat: ChatLine[] = [
     at: now() - 40 * MIN + 9000,
   },
 ];
+
+let habits: Habit[] = [
+  { id: "water", name: "Water", goal: 8, done: 3, streak: 12, color: "#40C8E0" },
+  { id: "walk", name: "Walk", goal: 1, done: 0, streak: 4 },
+  { id: "read", name: "Read", goal: 1, done: 1, streak: 21 },
+];
+
+function habitChange(change: () => void): Habit[] {
+  change();
+  emit("habits", habits);
+  return habits;
+}
 
 let watchers: WatchEntry[] = [
   {
@@ -392,6 +405,24 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   clear_spoken: () => void (spoken = []),
   export_spoken: () => "/Users/you/Downloads/yoru-spoken-20261022-153012.zip",
   watchers: () => watchers,
+  habits: () => habits,
+  add_habit: (a) =>
+    habitChange(() => {
+      const name = String(a.name).trim();
+      if (!name) throw "a habit needs a name";
+      habits = [...habits, { id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name, goal: Number(a.goal) || 1, done: 0, streak: 0 }];
+    }),
+  edit_habit: (a) => habitChange(() => (habits = habits.map((h) => (h.id === a.id ? { ...h, name: (a.name as string) ?? h.name, goal: (a.goal as number) ?? h.goal } : h)))),
+  remove_habit: (a) => habitChange(() => (habits = habits.filter((h) => h.id !== a.id))),
+  check_habit: (a) =>
+    habitChange(() => {
+      habits = habits.map((h) => {
+        if (h.id !== a.id) return h;
+        const done = Math.max(0, Math.min(h.goal, h.done + Number(a.by)));
+        const streak = h.streak + (done >= h.goal ? 1 : 0) - (h.done >= h.goal ? 1 : 0);
+        return { ...h, done, streak };
+      });
+    }),
   put_watcher: (a) => {
     const w = a.watcher as Watcher;
     if (!w.id) w.id = w.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");

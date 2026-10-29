@@ -82,6 +82,9 @@ export type Watcher = WatchKind & {
   max_urgency: Urgency;
 };
 
+/** A daily habit as of today (`assistant/habits.rs`). */
+export type Habit = { id: string; name: string; goal: number; done: number; streak: number; color?: string };
+
 export type WatchState = { last_run: number; last_error: string | null; told: number };
 export type WatchEntry = { watcher: Watcher; state: WatchState };
 

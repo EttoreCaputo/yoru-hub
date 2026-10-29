@@ -80,6 +80,13 @@ The board streams what it hears after its wake word, with PWR held, or while it 
 - **Keep listening after an answer.** The board listens again without the wake word, for as long as the answer calls for (`voice/listen` with `wait_ms` and `pause_ms`, firmware 0.11.6). What is heard then may only close the conversation ("no, thanks") or acknowledge it ("ok"): fixed phrases, or EmbeddingGemma on a `llama-server --embedding` sidecar (`intent.rs`) telling a goodbye from a new request; anything else goes to the assistant.
 - **When you finished.** A short pause on the board, or Pipecat's Smart Turn v3.2 (`turn.rs`, run with tract) hearing from the voice whether the sentence is finished, on each `utterance_pause`, then `voice/stop` (firmware 0.11.7).
 
+## The board's apps
+
+Firmware 0.11.0 has three apps in its menu that the host drives:
+- **Timers** (`set_timers`, `timer_action`). Each board's session (`bridge/session.rs`) sends the whole list from `timers.rs` whenever it changes (`Timers::revision`), and on every handshake; the board counts down by itself. A tap there pauses, resumes or dismisses one, a long press cancels it (`Timers::act`). The snapshot's `timer` still goes too, for older firmware.
+- **Habits** (`set_habits`, `habit_check`). `assistant/habits.rs` keeps them in `habits.json`: a name, a goal of times a day, today's count and the days its goal was reached, for the streak. The model has one `habits` tool (list, add, remove, done, undo), the app a section on the Routines page; the board gets today's list on every change and at midnight, and a tap there sets the count.
+- **Errands** (`show_fetch`). Each call the model makes to a connector's tool (not the watchers' calls) is told to `bridge/errands.rs` (`Assistant::set_errands`), which shows it on every board on a thread of its own: `start` before the call, `done` or `failed` after it, with the service's name.
+
 ## Memory
 
 Files in the data folder that the agent reads at the start of a turn and keeps up to date on its own as you talk (`remember`, `revise_memory`, `forget`): who you are, what matters to you (people, projects, topics), what to tell you and what not, and what it has already told you. You read and edit them in the app.
@@ -129,11 +136,11 @@ Done (2026-10-19): none of the following is left in the code.
 
 ## Phases
 
-Status (2026-10-29): A0 to A5 are built, in the core, the CLI and the app, and the app is Yoru's only host (the Yoru app was retired on 2026-10-19). Since then: four brains (2026-10-20), tools loaded on demand (2026-10-21), Google on its REST APIs (2026-10-22), the voice above (2026-10-21 to 2026-10-22). The board's side is in firmware 0.10.0 (inbox), 0.11.5 (only Yoru), 0.11.6 and 0.11.7 (listening).
+Status (2026-10-29): A0 to A5 are built, in the core, the CLI and the app, and the app is Yoru's only host (the Yoru app was retired on 2026-10-19). Since then: four brains (2026-10-20), tools loaded on demand (2026-10-21), Google on its REST APIs (2026-10-22), the voice above (2026-10-21 to 2026-10-22), and firmware 0.11.0's apps (2026-10-29: the timers' list, habits, errands; see "The board's apps"). The board's side is in firmware 0.10.0 (inbox), 0.11.5 (only Yoru), 0.11.6 and 0.11.7 (listening).
 
 Left:
-- **Firmware 0.11.0's apps.** The board has Timers, Habits and errands, but Yoru Hub sends no `set_timers`, `set_habits` or `show_fetch`, and doesn't handle `timer_action` or `habit_check`: its timers reach the board only in the snapshot, and there are no habits here at all.
 - **Windows and Linux.** The release workflow builds only for macOS (Apple Silicon and Intel); the other two are off for now.
+- **Habits outside the app.** The MCP server and the CLI have no habits tools yet; the model and the app do.
 - **The release.** `v0.1.0` is on GitHub, refreshed by each push to `main`; `main` stops at 2026-10-20, so everything from 2026-10-21 on is only on `develop`.
 
 - **A0. Yoru only.** Remove DualEye and the pet. Align with firmware 0.9.2 (no `get_pet`, push-to-talk accepted). The app, the CLI and the identifier are named Yoru. Done when the app runs with a Yoru on USB and nothing of DualEye is left.

@@ -1,6 +1,6 @@
 //! The assistant's side of the app: Yoru's answers, inbox, memory, routines,
 //! watchers and connectors, as commands for the UI and the events that keep
-//! it current (`inbox`, `chat`, `schedule`, `connectors`).
+//! it current (`inbox`, `chat`, `habits`, `schedule`, `connectors`).
 //!
 //! Everything the assistant does that can take a while (a turn of the model,
 //! a sign-in, a watcher) runs on a blocking thread, never on Tauri's.
@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use yoru_core::assistant::watchers::{self, ScheduleEvent, WatchEntry, Watcher};
-use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, Confirmations, Host, Notification, Reply, Settings, TaskHost};
+use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, Confirmations, HabitView, Host, Notification, Reply, Settings, TaskHost};
 use yoru_core::cloud::{self, KeySource, Provider};
 use yoru_core::connectors::catalog::{self, Preset};
 use yoru_core::connectors::{ConnectorConfig, ConnectorEvent, ConnectorStatus, Connectors};
@@ -93,6 +93,12 @@ pub fn start(app: &AppHandle) {
         let app = app.clone();
         a.on_chat(Arc::new(move |lines| {
             let _ = app.emit("chat", lines);
+        }));
+    }
+    {
+        let app = app.clone();
+        a.habits.listen(Arc::new(move |habits| {
+            let _ = app.emit("habits", habits);
         }));
     }
     start_connectors(app);
@@ -265,6 +271,38 @@ pub fn chat(state: State<AppState>) -> Vec<ChatLine> {
 #[tauri::command]
 pub fn forget_conversation(state: State<AppState>) {
     state.assistant.forget_conversation();
+}
+
+// Habits.
+
+#[tauri::command]
+pub fn habits(state: State<AppState>) -> Vec<HabitView> {
+    state.assistant.habits.list()
+}
+
+#[tauri::command]
+pub fn add_habit(state: State<AppState>, name: String, goal: u32, color: Option<String>) -> Result<Vec<HabitView>, String> {
+    state.assistant.habits.add(&name, goal, color.as_deref())?;
+    Ok(state.assistant.habits.list())
+}
+
+#[tauri::command]
+pub fn edit_habit(state: State<AppState>, id: String, name: Option<String>, goal: Option<u32>, color: Option<String>) -> Result<Vec<HabitView>, String> {
+    state.assistant.habits.edit(&id, name.as_deref(), goal, color.as_deref())?;
+    Ok(state.assistant.habits.list())
+}
+
+#[tauri::command]
+pub fn remove_habit(state: State<AppState>, id: String) -> Result<Vec<HabitView>, String> {
+    state.assistant.habits.remove(&id)?;
+    Ok(state.assistant.habits.list())
+}
+
+/// One more time today (`by` 1), or one less (-1).
+#[tauri::command]
+pub fn check_habit(state: State<AppState>, id: String, by: i32) -> Result<Vec<HabitView>, String> {
+    state.assistant.habits.check(&id, by)?;
+    Ok(state.assistant.habits.list())
 }
 
 // The inbox.

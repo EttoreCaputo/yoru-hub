@@ -9,6 +9,10 @@
 //! down, takes over the screen [`ShowOn`] picks while it runs and rings when
 //! the host says it's up. The host then says why out loud ([`Fired::spoken`]).
 //!
+//! Firmware 0.11.0 and later also get the whole list ([`Timers::board_list`],
+//! `set_timers`) whenever it changes ([`Timers::revision`]), for the menu's
+//! Timers app, and send back what was tapped there ([`Timers::act`]).
+//!
 //! A timer rings for ten seconds, or until someone says the wake word or
 //! dismisses it ([`Timers::dismiss`]). A pomodoro is work and break timers
 //! in turn: when one ends the next starts at once and the old one rings for
@@ -17,6 +21,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::{Local, NaiveTime, TimeZone, Timelike};
@@ -37,6 +42,8 @@ const SNOOZE_MS: i64 = 60_000;
 const MAX_SECS: u64 = 24 * 3600;
 /// The board's bold font: ASCII capitals, digits and punctuation.
 const BOARD_LABEL_MAX: usize = 27;
+/// The board's Timers app holds this many (`TIMERS_MAX` in its `timers.h`).
+const BOARD_LIST_MAX: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -318,6 +325,8 @@ pub struct Timers {
     file: Option<PathBuf>,
     /// When something ringing was last silenced.
     dismissed: Mutex<Option<Instant>>,
+    /// Goes up with every change, for the boards' copies of the list.
+    revision: AtomicU64,
 }
 
 impl std::fmt::Debug for Timers {
@@ -329,7 +338,7 @@ impl std::fmt::Debug for Timers {
 impl Default for Timers {
     /// Kept in memory only.
     fn default() -> Self {
-        Self { state: Mutex::default(), file: None, dismissed: Mutex::default() }
+        Self { state: Mutex::default(), file: None, dismissed: Mutex::default(), revision: AtomicU64::new(0) }
     }
 }
 
@@ -380,12 +389,13 @@ impl Timers {
         if !state.timers.iter().any(|t| t.kind.is_pomodoro()) {
             state.pomodoro = None;
         }
-        let timers = Self { state: Mutex::new(state), file, dismissed: Mutex::default() };
+        let timers = Self { state: Mutex::new(state), file, dismissed: Mutex::default(), revision: AtomicU64::new(0) };
         timers.save(&timers.state.lock().unwrap());
         timers
     }
 
     fn save(&self, state: &State) {
+        self.revision.fetch_add(1, Ordering::Relaxed);
         if let Some(file) = &self.file {
             if let Some(dir) = file.parent() {
                 let _ = fs::create_dir_all(dir);
@@ -691,6 +701,75 @@ impl Timers {
         timer
     }
 
+    /// Changes whenever the timers do (not with the countdown).
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Relaxed)
+    }
+
+    /// `set_timers`' arguments: every timer as the board's Timers app takes
+    /// it, the ones that matter most first, counted down from now.
+    pub fn board_list(&self) -> Value {
+        self.board_list_at(now_ms())
+    }
+
+    fn board_list_at(&self, now: i64) -> Value {
+        let state = self.state.lock().unwrap();
+        let mut timers: Vec<&Timer> = state.timers.iter().collect();
+        timers.sort_by_key(|t| (!t.is_ringing(), t.is_paused(), t.left_ms(now)));
+        let list: Vec<Value> = timers
+            .into_iter()
+            .take(BOARD_LIST_MAX)
+            .map(|t| {
+                let mut v = json!({"id": t.id, "kind": t.kind.name(), "state": t.state(), "left_s": (t.left_ms(now) as f64 / 100.0).round() / 10.0, "total_s": t.total_s.max(1)});
+                if let Some(label) = &t.label {
+                    v["label"] = json!(label);
+                }
+                if t.kind == Kind::Reminder
+                    && let Some(end) = t.ends_at.and_then(|e| Local.timestamp_millis_opt(e).single())
+                {
+                    v["at"] = json!(end.format("%H:%M").to_string());
+                }
+                v
+            })
+            .collect();
+        json!({"timers": list})
+    }
+
+    /// What was tapped in the board's Timers app (`timer_action`): `pause`,
+    /// `resume` or `cancel` timer `id`, or `dismiss` it while it rings.
+    pub fn act(&self, id: &str, action: &str) -> Result<(), String> {
+        self.act_at(now_ms(), id, action)
+    }
+
+    fn act_at(&self, now: i64, id: &str, action: &str) -> Result<(), String> {
+        let id: u32 = id.trim().parse().map_err(|_| format!("no timer {id}"))?;
+        let mut state = self.state.lock().unwrap();
+        let i = state.timers.iter().position(|t| t.id == id).ok_or(format!("no timer {id}"))?;
+        let t = &mut state.timers[i];
+        match action {
+            "pause" if !t.is_paused() && !t.is_ringing() => {
+                t.paused_left_ms = t.left_ms(now);
+                t.ends_at = None;
+            }
+            "resume" if t.is_paused() => t.ends_at = Some(now + t.paused_left_ms),
+            "dismiss" | "cancel" => {
+                let t = state.timers.remove(i);
+                if t.is_ringing() {
+                    state.ended.push((now, t.clone()));
+                    *self.dismissed.lock().unwrap() = Some(Instant::now());
+                } else if t.kind.is_pomodoro() {
+                    // Cancelling a phase ends the pomodoro, as control_timer does.
+                    state.pomodoro = None;
+                    state.timers.retain(|t| !t.kind.is_pomodoro());
+                }
+            }
+            "pause" | "resume" => {}
+            _ => return Err(format!("unknown timer action {action}")),
+        }
+        self.save(&state);
+        Ok(())
+    }
+
     /// Ring the timers that are up, move a pomodoro on, stop what has rung
     /// long enough. What just ended is returned, to be said.
     pub fn tick(&self) -> Vec<Fired> {
@@ -969,6 +1048,43 @@ mod tests {
     use super::*;
 
     const T0: i64 = 1_800_000_000_000;
+
+    #[test]
+    fn the_board_gets_the_list_and_acts_on_it() {
+        let timers = Timers::default();
+        let pasta = timers.start_at(T0, 600, Some("pasta"), "en").unwrap();
+        let call = timers.remind_at(T0, "call Anna", When::In(3600), "en").unwrap();
+        let before = timers.revision();
+        let list = timers.board_list_at(T0 + 100_000);
+        let first = &list["timers"][0];
+        assert_eq!((first["id"].as_u64(), first["state"].as_str(), first["left_s"].as_f64()), (Some(pasta.id as u64), Some("run"), Some(500.0)));
+        assert_eq!(list["timers"][1]["kind"], "reminder");
+        assert!(list["timers"][1]["at"].as_str().is_some_and(|at| at.len() == 5));
+        // The countdown alone isn't a change.
+        assert_eq!(timers.revision(), before);
+
+        timers.act_at(T0 + 100_000, &pasta.id.to_string(), "pause").unwrap();
+        assert!(timers.revision() > before);
+        assert_eq!(timers.board_list_at(T0 + 200_000)["timers"][1]["state"], "pause");
+        timers.act_at(T0 + 200_000, &pasta.id.to_string(), "resume").unwrap();
+        assert_eq!(timers.list_at(T0 + 200_000).iter().find(|t| t.id == pasta.id).unwrap().left_s, 500);
+        timers.act_at(T0, &call.id.to_string(), "cancel").unwrap();
+        assert!(timers.act_at(T0, "99", "pause").is_err());
+        assert!(timers.act_at(T0, &pasta.id.to_string(), "explode").is_err());
+        assert_eq!(timers.list_at(T0).len(), 1);
+    }
+
+    #[test]
+    fn dismissing_on_the_board_silences_only_that_one() {
+        let timers = Timers::default();
+        let a = timers.start_at(T0, 60, Some("tea"), "en").unwrap();
+        timers.start_at(T0, 60, Some("eggs"), "en").unwrap();
+        timers.tick_at(T0 + 60_000);
+        timers.act_at(T0 + 61_000, &a.id.to_string(), "dismiss").unwrap();
+        let left: Vec<_> = timers.list_at(T0 + 61_000).into_iter().map(|t| t.label.unwrap_or_default()).collect();
+        assert_eq!(left, ["eggs"]);
+        assert!(timers.dismissed_within(Duration::from_secs(5)));
+    }
 
     #[test]
     fn a_timer_rings_then_stops() {

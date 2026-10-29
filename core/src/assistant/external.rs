@@ -21,6 +21,19 @@ pub struct ExternalTool {
     pub acts: bool,
 }
 
+/// A call to an external tool while the model answers: the board shows it as
+/// Yoru's errand (`show_fetch`, firmware 0.11.0). `state` is `start`, `done`
+/// or `failed`; the same `id` starts and ends it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Errand {
+    pub id: String,
+    /// The service, as the user knows it ("Gmail").
+    pub source: String,
+    pub state: &'static str,
+}
+
+pub type ErrandListener = std::sync::Arc<dyn Fn(Errand) + Send + Sync>;
+
 pub trait ExternalTools: Send + Sync {
     /// The tools that are enabled now.
     fn tools(&self) -> Vec<ExternalTool>;

@@ -38,7 +38,7 @@ use crate::serial;
 use crate::wifi;
 
 use super::alerts::{self, AlertInput, Targets};
-use super::confirm;
+use super::{confirm, errands};
 use super::sampler::{Latest, Sampler};
 use super::{BridgeConfig, BridgeEvent, EventSink, Transport, session, sleep_unless_stopped, warm_up_voice};
 
@@ -201,6 +201,7 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
         })));
     }
     let cards = confirm::listen(config);
+    let errands = errands::listen(config);
     let latest = Latest::default();
     let shared = Shared { config, stop, latest: &latest, targets: &targets, sink: &sink, host: &host, control };
     thread::scope(|scope| {
@@ -210,6 +211,9 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
         let _ = thread::Builder::new()
             .name("yoru-confirm".into())
             .spawn_scoped(scope, || confirm::confirm_loop(stop, &targets, cards, &host));
+        if let Some(errands) = errands {
+            let _ = thread::Builder::new().name("yoru-errands".into()).spawn_scoped(scope, || errands::errand_loop(stop, &targets, errands));
+        }
         let _ = thread::Builder::new()
             .name("yoru-sampler".into())
             .spawn_scoped(scope, || Sampler.run(config, stop, &latest, &alert_tx));
@@ -217,6 +221,7 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
     });
     if let Some(assistant) = &config.assistant {
         assistant.inbox.set_delivery(None);
+        assistant.set_errands(None);
     }
     if let Some(hub) = &config.hub {
         hub.set_timers(None);

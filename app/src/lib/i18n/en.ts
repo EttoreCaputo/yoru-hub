@@ -185,7 +185,7 @@ const en = {
 
   routines: {
     title: "Routines",
-    lede: "What Yoru does on its own: the morning recap, the quiet hours, and the things it keeps an eye on.",
+    lede: "What Yoru does on its own: the morning recap, the quiet hours, your habits and the things it keeps an eye on.",
     recap: "Morning recap",
     recapHint: "Mail, calendar and what's pending, in a few lines, once a morning.",
     at: "At",
@@ -217,6 +217,19 @@ const en = {
     log: "Recently",
     logWatched: (name: string, n: number) => (n ? `${name}: ${n} new` : `${name}: nothing new`),
     logRecap: "Morning recap given",
+    habits: "Habits",
+    habitsHint: "What you want to do every day. They're in the board's Habits app: tap to tick one off, hold to take it back.",
+    noHabits: "No habits yet",
+    noHabitsHint: "Add one here, or tell Yoru (\"I want to drink water 8 times a day\").",
+    habitName: "Habit",
+    habitPlaceholder: "Water",
+    goal: "Times a day",
+    addHabit: "Add",
+    today: (done: number, goal: number) => `${done} of ${goal} today`,
+    streak: (days: number) => (days === 1 ? "1 day in a row" : `${days} days in a row`),
+    doneOnce: "Done once more",
+    undoOnce: "One less",
+    removeHabit: (name: string) => `Remove the habit "${name}"?`,
   },
 
   watcher: {

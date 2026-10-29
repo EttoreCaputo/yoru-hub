@@ -1,6 +1,7 @@
 <!--
-  What Yoru does on its own: the morning recap, the quiet hours, and the
-  watchers, with what each one did last.
+  What Yoru does on its own: the morning recap, the quiet hours, your daily
+  habits (also on the board's Habits app), and the watchers, with what each
+  one did last.
 -->
 <script lang="ts">
   import { call, why } from "../api";
@@ -48,6 +49,24 @@
       await store.refreshWatchers();
     }
   }
+
+  let habitName = $state("");
+  let habitGoal = $state(1);
+  let habitError = $state("");
+  async function habit(action: () => Promise<void>) {
+    habitError = "";
+    try {
+      await action();
+    } catch (e) {
+      habitError = why(e);
+    }
+  }
+  const addHabit = () =>
+    habit(async () => {
+      await store.addHabit(habitName, Math.round(habitGoal) || 1);
+      habitName = "";
+      habitGoal = 1;
+    });
 
   const toggle = (w: Watcher, enabled: boolean) => store.putWatcher({ ...w, enabled });
   const nameOf = (id: string) => store.watchers.find((e) => e.watcher.id === id)?.watcher.name ?? id;
@@ -103,6 +122,35 @@
       </div>
     </section>
   {/if}
+
+  <h2 class="section-title">{t.habits}</h2>
+  <p class="dim hint below">{t.habitsHint}</p>
+  <section class="panel">
+    {#if store.habits.length}
+      <ul class="habits">
+        {#each store.habits as h (h.id)}
+          <li>
+            <span class="ring" style:--c={h.color ?? "var(--pearl-mid)"} style:--p={h.done / h.goal}></span>
+            <div class="h-what">
+              <b>{h.name}</b>
+              <span class="faint">{t.today(h.done, h.goal)}{h.streak ? ` · ${t.streak(h.streak)}` : ""}</span>
+            </div>
+            <button class="btn quiet small" disabled={h.done === 0} aria-label={t.undoOnce} title={t.undoOnce} onclick={() => habit(() => store.checkHabit(h.id, -1))}>−</button>
+            <button class="btn small" disabled={h.done >= h.goal} aria-label={t.doneOnce} title={t.doneOnce} onclick={() => habit(() => store.checkHabit(h.id, 1))}>+</button>
+            <ConfirmButton small label={t.remove} question={t.removeHabit(h.name)} sure={t.removeSure} onconfirm={() => habit(() => store.removeHabit(h.id))} />
+          </li>
+        {/each}
+      </ul>
+    {:else}
+      <p class="empty-line"><b>{t.noHabits}</b> <span class="dim">{t.noHabitsHint}</span></p>
+    {/if}
+    <form class="row foot add" onsubmit={(e) => (e.preventDefault(), addHabit())}>
+      <input type="text" maxlength="24" placeholder={t.habitPlaceholder} aria-label={t.habitName} bind:value={habitName} />
+      <label class="inline"><span class="dim">{t.goal}</span><input type="number" min="1" max="99" bind:value={habitGoal} aria-label={t.goal} /></label>
+      <button class="btn" type="submit" disabled={!habitName.trim()}>{t.addHabit}</button>
+      {#if habitError}<span class="error-text">{habitError}</span>{/if}
+    </form>
+  </section>
 
   <div class="watch-head">
     <div>
@@ -176,6 +224,51 @@
     padding-top: 12px;
     border-top: 1px solid var(--rim);
     font-size: 12.5px;
+  }
+  .below {
+    margin: -6px 0 12px;
+  }
+  .habits {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .habits li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+  }
+  .ring {
+    width: 22px;
+    height: 22px;
+    flex: none;
+    border-radius: 50%;
+    background: conic-gradient(var(--c) calc(var(--p) * 360deg), var(--rim-2) 0);
+    -webkit-mask: radial-gradient(circle, transparent 6px, #000 7px);
+    mask: radial-gradient(circle, transparent 6px, #000 7px);
+  }
+  .h-what {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    font-size: 13.5px;
+  }
+  .h-what .faint {
+    font-size: 12px;
+  }
+  .empty-line {
+    margin: 0 0 4px;
+    font-size: 13px;
+  }
+  .add input[type="text"] {
+    flex: 1;
+    min-width: 120px;
+  }
+  .add input[type="number"] {
+    width: 56px;
   }
   .watch-head {
     display: flex;

@@ -1,6 +1,7 @@
 //! One board's connection: the link and its reader, the protocol v2
 //! handshake (again after a reboot), the voice pipeline, the pointer for its
-//! eyes, and each snapshot the sampler publishes.
+//! eyes, each snapshot the sampler publishes, and the timers and habits
+//! lists of the menu's apps whenever they change (firmware 0.11.0).
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -137,6 +138,19 @@ pub(super) fn run(
                     on_notification_action(assistant, &params, &sink);
                 }
             }
+            LinkEvent::Notification { method, params } if method == "timer_action" => {
+                let (id, action) = (params["id"].as_str().unwrap_or_default(), params["action"].as_str().unwrap_or_default());
+                if let Err(e) = timers.act(id, action) {
+                    sink(BridgeEvent::BoardLog { line: format!("host: timer_action {id} {action}: {e}") });
+                }
+            }
+            LinkEvent::Notification { method, params } if method == "habit_check" => {
+                if let (Some(assistant), Some(id), Some(done)) = (&assistant, params["id"].as_str(), params["done"].as_u64())
+                    && let Err(e) = assistant.habits.set_done(id, done as u32)
+                {
+                    sink(BridgeEvent::BoardLog { line: format!("host: habit_check {id}: {e}") });
+                }
+            }
             LinkEvent::Audio(payload) => receiving.lock().unwrap().audio(&payload),
             LinkEvent::Notification { .. } | LinkEvent::Closed(_) => {}
         })?
@@ -189,6 +203,7 @@ pub(super) fn run(
     };
 
     let mut ready = false;
+    let mut lists = Lists::default();
     let mut unanswered = 0u32;
     let mut next_hello = Instant::now();
     while !stop.load(Ordering::Relaxed) && !info.stop.load(Ordering::Relaxed) {
@@ -212,6 +227,7 @@ pub(super) fn run(
                     *board_kind.lock().unwrap() = kind;
                     *board_id.lock().unwrap() = hello.id.clone();
                     info.learn(&hello, kind);
+                    lists = Lists::for_board(&hello.capabilities);
                     ready = true;
                     info.ready.store(true, Ordering::Relaxed);
                     board_ready.store(true, Ordering::Relaxed);
@@ -254,6 +270,10 @@ pub(super) fn run(
         hub_changed_settings.store(false, Ordering::Relaxed);
         voice_changed_settings.store(false, Ordering::Relaxed);
 
+        if ready {
+            lists.send(&link, config);
+        }
+
         let Some((number, shared)) = latest.newer(seen, WAKE) else { continue };
         seen = number;
         let snapshot = (*shared).clone();
@@ -264,6 +284,48 @@ pub(super) fn run(
         on_event(BridgeEvent::Snapshot { snapshot, sent });
     }
     Ok(())
+}
+
+/// What the board's Timers and Habits apps were last sent, to send them again
+/// only when they change (and on every handshake).
+#[derive(Default)]
+struct Lists {
+    timers: Option<Sent<u64>>,
+    habits: Option<Sent<(u64, chrono::NaiveDate)>>,
+}
+
+/// One list: whether the board takes it, and what it got last.
+#[derive(Default)]
+struct Sent<T> {
+    last: Option<T>,
+}
+
+impl Lists {
+    /// Nothing sent yet, for a board with these capabilities.
+    fn for_board(capabilities: &[String]) -> Self {
+        let has = |c: &str| capabilities.iter().any(|x| x == c);
+        Self { timers: has("timers").then(Sent::default), habits: has("habits").then(Sent::default) }
+    }
+
+    /// Send what changed since last time. A list the board refused is tried
+    /// again at the next change, not in a loop.
+    fn send(&mut self, link: &Link, config: &BridgeConfig) {
+        if let Some(sent) = &mut self.timers {
+            let revision = config.timers.revision();
+            if sent.last != Some(revision) {
+                sent.last = Some(revision);
+                let _ = link.call_tool("set_timers", config.timers.board_list(), TOOL_TIMEOUT);
+            }
+        }
+        if let (Some(sent), Some(assistant)) = (&mut self.habits, &config.assistant) {
+            // A new day starts every count again.
+            let now = (assistant.habits.revision(), crate::assistant::habits::today());
+            if sent.last != Some(now) {
+                sent.last = Some(now);
+                let _ = link.call_tool("set_habits", assistant.habits.board_list(), TOOL_TIMEOUT);
+            }
+        }
+    }
 }
 
 /// How many unread notifications a board that (re)connects gets back.

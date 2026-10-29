@@ -16,6 +16,8 @@
 //!   and the assistant's notifications.
 //! - [`confirm`]: the cards the assistant waits on, to the frontend and to
 //!   the boards that can answer them.
+//! - [`errands`]: the assistant's calls to the user's services, shown on the
+//!   boards as Yoru's errands.
 //!
 //! With a [`Hub`] other processes (the MCP server, `yoru call`) use the
 //! board through this connection.
@@ -26,6 +28,7 @@
 
 mod alerts;
 mod confirm;
+mod errands;
 mod floor;
 mod manager;
 mod sampler;

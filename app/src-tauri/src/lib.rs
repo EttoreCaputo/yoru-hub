@@ -1802,6 +1802,7 @@ pub fn run() {
             assistant::assistant_info, assistant::ollama_models, assistant::set_assistant_settings, assistant::set_do_not_disturb, assistant::ask, assistant::chat, assistant::forget_conversation,
             assistant::inbox, assistant::inbox_read, assistant::inbox_read_all, assistant::inbox_dismiss, assistant::inbox_clear, assistant::open_notification, assistant::open_web,
             assistant::memory, assistant::set_memory,
+            assistant::habits, assistant::add_habit, assistant::edit_habit, assistant::remove_habit, assistant::check_habit,
             assistant::watchers, assistant::put_watcher, assistant::remove_watcher, assistant::run_watcher, assistant::recap_now,
             assistant::connectors, assistant::connector_presets, assistant::add_connector, assistant::remove_connector, assistant::set_connector_enabled,
             assistant::set_tool_policy, assistant::login_connector, assistant::cancel_login, assistant::logout_connector, assistant::set_connector_secret,
