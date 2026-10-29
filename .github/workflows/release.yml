@@ -7,7 +7,7 @@
 # The release is named after `version` in app/src-tauri/tauri.conf.json.
 # Bump it for a new release; until then each merge refreshes the assets of
 # the current one. Each firmware's version is its repository's version.txt,
-# and its FIRMWARE_CHANGELOG.md must have a section for it.
+# and its docs/FIRMWARE_CHANGELOG.md must have a section for it.
 #
 # A push to develop builds the same assets for the pre-release
 # `v<app version>-develop`, recreated on that commit every time, so it never
@@ -55,11 +55,15 @@ jobs:
         id: version
         run: |
           version="$(tr -d '[:space:]' < version.txt)"
-          if ! grep -Eq "^##[[:space:]]+v?${version//./\\.}[[:space:]]*$" FIRMWARE_CHANGELOG.md; then
-            echo "::error file=FIRMWARE_CHANGELOG.md::No '## $version' section for the version in version.txt"
+          # In docs/ after 0.11.9; an older ref has it at the root.
+          changelog=docs/FIRMWARE_CHANGELOG.md
+          [[ -f "$changelog" ]] || changelog=FIRMWARE_CHANGELOG.md
+          if ! grep -Eq "^##[[:space:]]+v?${version//./\\.}[[:space:]]*$" "$changelog"; then
+            echo "::error file=$changelog::No '## $version' section for the version in version.txt"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "changelog=$changelog" >> "$GITHUB_OUTPUT"
 
       - name: Build with ESP-IDF ${{ env.ESP_IDF_VERSION }}
         uses: espressif/esp-idf-ci-action@v1
@@ -89,7 +93,8 @@ jobs:
       - name: Lay it out as firmware/${{ matrix.board }}
         run: |
           mkdir -p out
-          cp build/merged-binary.bin version.txt FIRMWARE_CHANGELOG.md out/
+          cp build/merged-binary.bin version.txt out/
+          cp "${{ steps.version.outputs.changelog }}" out/FIRMWARE_CHANGELOG.md
 
       - uses: actions/upload-artifact@v4
         with:

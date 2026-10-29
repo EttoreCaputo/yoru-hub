@@ -842,12 +842,22 @@ fn auth_in_chain(e: &(dyn std::error::Error + 'static)) -> Option<Option<String>
         if let Some(a) = current.downcast_ref::<InsufficientScopeError>() {
             return Some(Some(a.www_authenticate_header.clone()));
         }
-        if let Some(AuthError::AuthorizationRequired) = current.downcast_ref::<AuthError>() {
-            return Some(None);
+        match current.downcast_ref::<AuthError>() {
+            Some(AuthError::AuthorizationRequired) => return Some(None),
+            Some(AuthError::TokenRefreshFailed(why)) if refresh_answered(why) => return Some(None),
+            _ => {}
         }
         source = current.source();
     }
     None
+}
+
+/// A refresh the token server answered but not with tokens: a refusal other
+/// than `invalid_grant`, or no OAuth answer at all (Tavily sends a plain
+/// "Internal Server Error" for a dead refresh token). Retrying won't help, so
+/// it means signing in again; only a failed request (no network) is retried.
+fn refresh_answered(why: &str) -> bool {
+    !why.starts_with("Request failed")
 }
 
 fn state_word(state: &ConnectionState) -> String {
@@ -906,5 +916,19 @@ fn describe(block: &ContentBlock) -> String {
             None => format!("[link {}: {}]", l.name, l.uri),
         },
         _ => "[unsupported content]".into(),
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    #[test]
+    fn a_refresh_the_server_answered_badly_means_signing_in() {
+        let failed = |why: &str| auth_in_chain(&AuthError::TokenRefreshFailed(why.into()));
+        assert_eq!(failed("Failed to parse server response"), Some(None));
+        assert_eq!(failed("Server returned error response: invalid_client"), Some(None));
+        assert_eq!(failed("Request failed"), None);
+        assert_eq!(auth_in_chain(&AuthError::AuthorizationRequired), Some(None));
     }
 }

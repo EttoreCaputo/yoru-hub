@@ -1,5 +1,7 @@
 # Several boards at once
 
+> **History.** This was Companion Hub's plan, before it became Yoru Hub on 2026-10-19. DualEye has left this repository (it keeps its own `host/`), and with it everything below that is about DualEye; the app is for Yoru only. Kept for the design of the bridge (`core/src/bridge/`).
+
 Goal: one Companion Hub drives any number of boards together, of either kind. For example, a DualEye on USB and a Yoru on WiFi, or two Yorus. Services that belong to the computer run once and are shared. Everything that belongs to a board is kept per board, keyed by the `id` in its `hello`.
 
 Status: all ten steps are done. The core, the CLI and the app drive several boards at once (`Manager`); the window shows one at a time, picked in the title bar. None of it has been tried with two boards at once in the app yet; what's still open is under "Left over" at the end.

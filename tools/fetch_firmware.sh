@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copy Yoru's firmware into firmware/yoru/, where the app embeds it: the
-# merged image, its version.txt and its FIRMWARE_CHANGELOG.md.
+# merged image, its version.txt and its changelog (docs/FIRMWARE_CHANGELOG.md).
 #
 #   tools/fetch_firmware.sh
 #
@@ -21,5 +21,8 @@ fi
 mkdir -p "$out"
 cp "$repo/build/merged-binary.bin" "$out/merged-binary.bin"
 cp "$repo/version.txt" "$out/version.txt"
-cp "$repo/FIRMWARE_CHANGELOG.md" "$out/FIRMWARE_CHANGELOG.md"
+# The changelog moved into docs/ after 0.11.9; an older checkout has it at the root.
+changelog="$repo/docs/FIRMWARE_CHANGELOG.md"
+[[ -f "$changelog" ]] || changelog="$repo/FIRMWARE_CHANGELOG.md"
+cp "$changelog" "$out/FIRMWARE_CHANGELOG.md"
 echo "yoru: firmware $(tr -d '[:space:]' < "$out/version.txt") from $repo"

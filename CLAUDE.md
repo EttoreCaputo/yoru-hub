@@ -2,7 +2,7 @@
 
 The host program of Yoru (`../yoru`): Rust core, CLI, Tauri + Svelte app. The folder is `yoru-hub`; it was Companion Hub until 2026-10-19. It came out of DualEye's `host/`.
 
-Since 2026-10-19 it is Yoru's personal assistant, for Yoru only: MCP connectors with OAuth (`core/src/connectors/`), the assistant on Claude (`core/src/assistant/`, `core/src/cloud/anthropic.rs`), watchers, notifications, memory, routines. The plan is `docs/assistant.md`. DualEye is gone from here (it keeps its own `host/`); `docs/multiboard.md` is history.
+Since 2026-10-19 it is Yoru's personal assistant, for Yoru only: MCP connectors with OAuth (`core/src/connectors/`), the assistant on four brains (`core/src/assistant/`: Claude in `core/src/cloud/anthropic.rs`, Groq, OpenAI and Ollama in `assistant/compat.rs`), voice, watchers, notifications, memory, routines. The plan is `docs/assistant.md`. DualEye is gone from here (it keeps its own `host/`); `docs/multiboard.md` is history.
 
 ## Rule: the user makes the commits
 
@@ -15,6 +15,10 @@ Identifiers, comments, log messages, strings, file names and docs are written in
 ## Rule: protocol changes go to the firmware too
 
 A change to the board protocol is made in `../yoru/docs/protocol.md` as well.
+
+## Rule: documentation lives in `docs/`
+
+Every document goes in `docs/`: the README (`docs/README.md`, which GitHub shows on the repository's page), the plan, the app's code (`docs/app.md`), licenses, privacy, terms. Nothing else outside it but this file. When a piece of work changes what a doc says, update the doc in the same piece of work.
 
 ## Checks after a change
 

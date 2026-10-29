@@ -2,7 +2,7 @@
 
 Decided on 2026-10-19. Yoru becomes a personal assistant that lives on the computer, and the round ESP32-S3 board (`../yoru`) is its body. It connects to the services you use (mail, calendar, documents, issues…) through MCP connectors, tells you when something worth knowing happens, and answers when you ask: "anything new?", "what's on tomorrow?", "find the mail from…".
 
-This repository (`yoru-hub`, formerly `companion-hub`) becomes Yoru's only host program. DualEye leaves it (DualEye keeps its own `host/`), and so does everything that was there only for the pet. The Yoru app (`../yoru-app`, the fork of coucou) stays in use until phase A2 works, then it is retired.
+This repository (`yoru-hub`, formerly `companion-hub`) becomes Yoru's only host program. DualEye leaves it (DualEye keeps its own `host/`), and so does everything that was there only for the pet. The Yoru app (`../yoru-app`, the fork of coucou) was retired on 2026-10-19, once phase A2 worked.
 
 Out of scope, on purpose: firmware 0.9's remote features on the host (drafts, session chats, new sessions), following coding agents (see below) and the Mac-native parts of the Yoru app (pasting with Accessibility, bringing a terminal to the front, Parakeet, Apple's speech recognition). The board still works without them: its push-to-talk is an ordinary utterance.
 
@@ -70,7 +70,15 @@ The conversation is kept in memory in the brain's own form (Anthropic's content 
 
 A 429 from Groq says what ran out (the minute's tokens or the day's) and when to retry (its `retry-after`, or the "try again in 7m12s" of its message). The model isn't asked again until then. The app shows it as an error with that time; said to the board, Yoru answers with a short spoken line ("I've used up today's free thinking. Try again in 13 minutes.") instead of a worse answer. Tests point Groq elsewhere with `GROQ_BASE_URL` (each provider's key variable with `_BASE_URL`), as `ANTHROPIC_BASE_URL` does for Claude.
 
-The first run's brain step offers both, with their keys; its optional second part sets Yoru's voice: an ElevenLabs key, one of the account's voices (`elevenlabs:voice/<id>`, for both languages), and a test on the board. Settings has the brain, both keys and both models; `yoru settings provider groq|anthropic|auto` and `yoru settings groq_model …` do the same from the CLI.
+The first run's brain step offers Groq, OpenAI and Claude, with their keys (Ollama is picked later, in Settings); its optional second part sets Yoru's voice: an ElevenLabs key, one of the account's voices (`elevenlabs:voice/<id>`, for both languages), and a test on the board. Settings has the four brains, their keys and their models (and Ollama's thinking switch); `yoru settings provider …` and `yoru settings groq_model …` do the same from the CLI.
+
+## Voice
+
+The board streams what it hears after its wake word, with PWR held, or while it keeps listening after an answer (`core/src/voice.rs`).
+- **Listening.** whisper.cpp's `whisper-server` on this computer (`stt.rs`, Whisper `base`, `small` or `large-v3-turbo`), or a provider's Whisper (Groq, OpenAI), falling back to the local one at the provider's limits. Italian or English, detected.
+- **Speaking.** Piper on this computer (`tts.rs`, a voice per language), or a provider's voice: ElevenLabs (it acts out audio tags such as `[laughs]`) or Groq. A failed cloud voice hands over to a downloaded one for a minute. What ElevenLabs said is kept, one clip per sentence, on the Spoken page (`spoken.rs`), to play again or export as a zip.
+- **Keep listening after an answer.** The board listens again without the wake word, for as long as the answer calls for (`voice/listen` with `wait_ms` and `pause_ms`, firmware 0.11.6). What is heard then may only close the conversation ("no, thanks") or acknowledge it ("ok"): fixed phrases, or EmbeddingGemma on a `llama-server --embedding` sidecar (`intent.rs`) telling a goodbye from a new request; anything else goes to the assistant.
+- **When you finished.** A short pause on the board, or Pipecat's Smart Turn v3.2 (`turn.rs`, run with tract) hearing from the voice whether the sentence is finished, on each `utterance_pause`, then `voice/stop` (firmware 0.11.7).
 
 ## Memory
 
@@ -80,9 +88,9 @@ Files in the data folder that the agent reads at the start of a turn and keeps u
 
 - **Watchers.** A periodic check without the model: it calls a connector's read tool with fixed arguments ("unread mail since…", "events in the next 2 hours"), compares the ids with the ones already seen, and wakes the model only for new ones. A watcher is data: connector, tool, arguments, where the id is, how often.
 - **Triage.** The model decides, with the memory, whether something new is worth telling, how urgent it is, and says it in one line.
-- **Delivery.** By urgency: a line in the app's inbox; a toast on the board; Yoru knocks on the glass; Yoru says it aloud. Quiet hours and presence (`presence.rs`) hold back the loud ones. `bridge/alerts.rs` already has the thread that waits for the right moment; `quips.rs` and `diary.rs` are the model for it.
+- **Delivery** (`bridge/alerts.rs`). Every notification goes into the app's inbox and, with `show_notification`, into the board's at its urgency: `low` only in the inbox, `normal` with a banner and a chirp, `high` with Yoru knocking on the glass, `urgent` with the alarm, lighting the dark screen, and said aloud by the board that speaks once no conversation is on. In quiet hours anything below `urgent` arrives as `low`.
 - **Routines.** The morning recap (mail, calendar, what's pending) at a set time, and on request ("recap").
-- **Firmware.** An inbox on the board: a `show_notification` tool (source, title, one line, urgency) and a list to scroll. It is the only real change to the board.
+- **Firmware.** An inbox on the board: a `show_notification` tool (source, title, one line, urgency) and a list to scroll, in firmware 0.10.0; `notification_action` comes back when it is read, dismissed or opened.
 
 ## Coding agents
 
@@ -95,7 +103,7 @@ What stays:
 
 ## The app: Yoru only, redone
 
-Today the window is DualEye's: a home with the board's mirror and pills, and a settings drawer with Voice, Pet, Timers, Claude, Device and Diagnostics tabs. The new app has a sidebar:
+Until 2026-10-19 the window was DualEye's: a home with the board's mirror and pills, and a settings drawer with Voice, Pet, Timers, Claude, Device and Diagnostics tabs. The new app has a sidebar:
 
 | Page | What is on it |
 |------|---------------|
@@ -105,12 +113,15 @@ Today the window is DualEye's: a home with the board's mirror and pills, and a s
 | Connectors | A card per service: connected or not, Connect and Disconnect, what it may read and what it may do, its watchers and how often |
 | Routines | The morning recap, quiet hours, the watchers' schedule |
 | Memory | What Yoru knows about you, editable |
-| Yoru | The board: connection, WiFi, firmware, its settings, wake word, voice and volume |
-| Settings | The model and its key, speech to text and voices, language, start at login, diagnostics |
+| Spoken | What ElevenLabs said, to play again, delete or export (added 2026-10-22) |
+| Settings | A list of parts: the brain (model and key), the MCP server, voice (listening, speaking, keep listening, a goodbye, the end of a sentence), language, the board (connection, WiFi, firmware, its settings, wake word, volume; it was the Yoru page until 2026-10-21) and about |
 
 The tray icon shows the last notification, a "talk" button and do-not-disturb. The first run has four steps: connect Yoru, pick the brain (with Yoru's voice as an optional part), connect a first service, say what matters to you (the first memory).
 
 ## What leaves this repository
+
+Done (2026-10-19): none of the following is left in the code.
+
 
 - DualEye: its profile, faces, rotation, cover, `bridge/dualeye.rs`, `FacePicker`, `Board.svelte`, `Telemetry`, `Chart`, `Eye.svelte`, `eyes.ts`, `scenes.ts` (only Yoru's reactions stay), and the multi-board switcher (one Yoru at a time is enough).
 - The pet of firmware 0.6: needs, feed, `get_pet`, `MoodPill`, `PetMood`, `PetGallery`, `petMood.ts`, the Pet tab, the pet parts of `quips.rs` and `diary.rs`.
@@ -118,7 +129,12 @@ The tray icon shows the last notification, a "talk" button and do-not-disturb. T
 
 ## Phases
 
-Status (2026-10-19): A0, A1, A2, A4 and A5 are built in the core and the CLI (`yoru`), with tests; the app (A3) is redone and checked in the browser preview, not yet in the Tauri window with a board. The board's inbox is in firmware 0.10.0. Not yet tried end to end with a real Anthropic key or a real OAuth sign-in.
+Status (2026-10-29): A0 to A5 are built, in the core, the CLI and the app, and the app is Yoru's only host (the Yoru app was retired on 2026-10-19). Since then: four brains (2026-10-20), tools loaded on demand (2026-10-21), Google on its REST APIs (2026-10-22), the voice above (2026-10-21 to 2026-10-22). The board's side is in firmware 0.10.0 (inbox), 0.11.5 (only Yoru), 0.11.6 and 0.11.7 (listening).
+
+Left:
+- **Firmware 0.11.0's apps.** The board has Timers, Habits and errands, but Yoru Hub sends no `set_timers`, `set_habits` or `show_fetch`, and doesn't handle `timer_action` or `habit_check`: its timers reach the board only in the snapshot, and there are no habits here at all.
+- **Windows and Linux.** The release workflow builds only for macOS (Apple Silicon and Intel); the other two are off for now.
+- **The release.** `v0.1.0` is on GitHub, refreshed by each push to `main`; `main` stops at 2026-10-20, so everything from 2026-10-21 on is only on `develop`.
 
 - **A0. Yoru only.** Remove DualEye and the pet. Align with firmware 0.9.2 (no `get_pet`, push-to-talk accepted). The app, the CLI and the identifier are named Yoru. Done when the app runs with a Yoru on USB and nothing of DualEye is left.
 - **A1. Connectors.** The MCP client, OAuth, the keychain store, `connectors.json`. Done when `yoru connect <url>` signs in to a remote MCP server and `yoru tools` lists its tools.
