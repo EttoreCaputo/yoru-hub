@@ -16,8 +16,11 @@
   let error = $state("");
   let playing = $state<string | null>(null);
   let filter = $state("");
-  // One sound at a time: playing another stops this one.
-  let audio: HTMLAudioElement | null = null;
+  // One sound at a time: playing another stops this one. Web Audio rather
+  // than an <audio> on a blob URL: the context is resumed in the click
+  // itself, so WebKit lets it play once the clip arrives.
+  let context: AudioContext | null = null;
+  let source: AudioBufferSourceNode | null = null;
 
   const list = $derived.by(() => {
     const q = filter.trim().toLowerCase();
@@ -29,15 +32,22 @@
       (c) => ((clips = c), (loaded = true)),
       (e) => (error = why(e)),
     );
-    return stop;
+    return () => {
+      stop();
+      void context?.close();
+      context = null;
+    };
   });
 
   function stop() {
-    if (!audio) return;
-    audio.pause();
-    URL.revokeObjectURL(audio.src);
-    audio = null;
+    const node = source;
+    source = null;
     playing = null;
+    try {
+      node?.stop();
+    } catch {
+      // Not started yet.
+    }
   }
 
   async function play(id: string) {
@@ -45,16 +55,60 @@
     stop();
     if (again) return;
     error = "";
+    context ??= new AudioContext();
+    const ready = context.resume();
+    playing = id;
     try {
-      const wav = await call<ArrayBuffer>("spoken_audio", { id });
-      audio = new Audio(URL.createObjectURL(new Blob([wav], { type: "audio/wav" })));
-      audio.onended = stop;
-      playing = id;
-      await audio.play();
+      const wav = bytes(await call<ArrayBuffer | Uint8Array | number[]>("spoken_audio", { id }));
+      await ready;
+      if (playing !== id || !context) return;
+      const node = context.createBufferSource();
+      node.buffer = samples(context, wav);
+      node.connect(context.destination);
+      node.onended = () => {
+        if (source === node) stop();
+      };
+      source = node;
+      node.start();
     } catch (e) {
-      stop();
+      if (playing === id) stop();
       error = why(e);
     }
+  }
+
+  /** The command's bytes: Tauri hands them over as an ArrayBuffer, a typed
+   *  array or a JSON list of numbers, depending on the build. */
+  function bytes(raw: ArrayBuffer | Uint8Array | number[]): ArrayBuffer {
+    if (raw instanceof ArrayBuffer) return raw;
+    const view = ArrayBuffer.isView(raw) ? raw : Uint8Array.from(raw);
+    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+  }
+
+  /** A 16-bit PCM WAV (what the clips are) as an audio buffer. */
+  function samples(context: AudioContext, wav: ArrayBuffer): AudioBuffer {
+    const view = new DataView(wav);
+    const tag = (at: number) => String.fromCharCode(...new Uint8Array(wav, at, 4));
+    if (wav.byteLength < 12 || tag(0) !== "RIFF" || tag(8) !== "WAVE") throw new Error(t.notWav);
+    let channels = 1;
+    let rate = 16000;
+    for (let at = 12; at + 8 <= wav.byteLength; ) {
+      const size = view.getUint32(at + 4, true);
+      const body = at + 8;
+      if (tag(at) === "fmt ") {
+        channels = view.getUint16(body + 2, true);
+        rate = view.getUint32(body + 4, true);
+      } else if (tag(at) === "data") {
+        const frames = Math.floor(Math.min(size, wav.byteLength - body) / 2 / channels);
+        const buffer = context.createBuffer(channels, frames, rate);
+        for (let ch = 0; ch < channels; ch++) {
+          const out = buffer.getChannelData(ch);
+          for (let i = 0; i < frames; i++) out[i] = view.getInt16(body + (i * channels + ch) * 2, true) / 32768;
+        }
+        return buffer;
+      }
+      at = body + size + (size & 1);
+    }
+    throw new Error(t.notWav);
   }
 
   async function remove(id: string) {

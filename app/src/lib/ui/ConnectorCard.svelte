@@ -49,7 +49,7 @@
     <Toggle checked={c.enabled} label={t.enabled} onchange={(on) => run("set_connector_enabled", { id: c.id, enabled: on })} />
   </div>
 
-  {#if c.state === "error" && c.message}<p class="error-text msg">{c.message}</p>{/if}
+  {#if c.state === "error" && c.message}<p class="error-text msg" title={c.message}>{c.message}</p>{/if}
 
   <div class="row actions">
     {#if signingIn}
@@ -123,8 +123,14 @@
     font-size: 12.5px;
     white-space: nowrap;
   }
+  /* Two lines on the card; the whole message on hover. */
   .msg {
     margin-top: 10px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
   }
   .actions {
     margin-top: 12px;

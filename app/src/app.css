@@ -293,6 +293,8 @@ label.stack {
 .error-text {
   color: var(--wrong);
   font-size: 12.5px;
+  /* Errors can carry long unbroken names: never wider than their box. */
+  overflow-wrap: anywhere;
 }
 .row {
   display: flex;

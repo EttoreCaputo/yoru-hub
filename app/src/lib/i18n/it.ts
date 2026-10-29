@@ -272,6 +272,7 @@ const it: Messages = {
     title: "Parlato",
     lede: "Ogni frase che Yoru ha detto con la voce di ElevenLabs: il testo inviato, tag audio compresi, e l'audio che è tornato. Restano finché non le elimini; esportale in uno zip per conservarle o per addestrare una voce.",
     search: "Cerca nel testo",
+    notWav: "Non riesco a leggere l'audio di questa frase.",
     count: (n: number) => (n === 1 ? "1 frase" : `${n} frasi`),
     play: "Ascolta",
     stop: "Ferma",

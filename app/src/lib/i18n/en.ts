@@ -271,6 +271,7 @@ const en = {
     title: "Spoken",
     lede: "Every sentence Yoru said with its ElevenLabs voice: the text it sent, audio tags included, and the sound that came back. They stay until you delete them; export them as a zip to keep or train with.",
     search: "Search the text",
+    notWav: "This clip's sound can't be read.",
     count: (n: number) => (n === 1 ? "1 sentence" : `${n} sentences`),
     play: "Play",
     stop: "Stop",

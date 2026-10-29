@@ -559,7 +559,10 @@ impl Shared {
             }
             return ConnectorError::NeedsLogin(id.into());
         }
-        ConnectorError::Call(e.to_string())
+        ConnectorError::Call(match &e {
+            ServiceError::TransportSend(error) => error.error.to_string(),
+            _ => e.to_string(),
+        })
     }
 }
 
@@ -708,7 +711,7 @@ async fn serve_http<C: StreamableHttpClient>(
         Ok(Ok(running)) => Ok(running),
         Ok(Err(e)) => match init_auth_challenge(&e) {
             Some(challenge) => Err(ConnectFailure::NeedsLogin { challenge, had_token }),
-            None => Err(ConnectFailure::Other(e.to_string())),
+            None => Err(ConnectFailure::Other(init_failure(&e))),
         },
     }
 }
@@ -822,15 +825,33 @@ impl ClientHandler for Handler {
 
 /// The 401/403 challenge behind a failed initialization, if that's why.
 /// `Some(None)` is a sign-in needed without a challenge to go on.
+/// rmcp doesn't chain the transport's error as a source, so it is looked
+/// into by hand.
 fn init_auth_challenge(e: &ClientInitializeError) -> Option<Option<String>> {
     if let Some(challenge) = e.auth_challenge() {
         return Some(Some(challenge.to_string()));
     }
-    auth_in_chain(e)
+    match e {
+        ClientInitializeError::TransportError { error, .. } => auth_in_chain(error),
+        ClientInitializeError::LegacyFallbackFailed { fallback, .. } => init_auth_challenge(fallback),
+        _ => auth_in_chain(e),
+    }
 }
 
 fn auth_challenge(e: &ServiceError) -> Option<Option<String>> {
-    auth_in_chain(e)
+    match e {
+        ServiceError::TransportSend(error) => auth_in_chain(error),
+        _ => auth_in_chain(e),
+    }
+}
+
+/// Why initializing failed, without the transport's long type name.
+fn init_failure(e: &ClientInitializeError) -> String {
+    match e {
+        ClientInitializeError::TransportError { error, context } => format!("{} ({context})", error.error),
+        ClientInitializeError::LegacyFallbackFailed { fallback, .. } => init_failure(fallback),
+        _ => e.to_string(),
+    }
 }
 
 fn auth_in_chain(e: &(dyn std::error::Error + 'static)) -> Option<Option<String>> {
