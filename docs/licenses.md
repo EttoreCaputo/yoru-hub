@@ -10,6 +10,7 @@ Yoru Hub (desktop app, CLI) is MIT-licensed, see [LICENSE](../LICENSE). This pag
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` | b11146 | MIT | Same; the local language model, and EmbeddingGemma's embeddings |
 | [Tauri](https://tauri.app) and the Rust crates in `Cargo.lock` | | MIT or Apache-2.0 (a few: BSD, ISC, Zlib, Unicode-3.0) | Linked into the app |
 | [Svelte](https://svelte.dev) | | MIT | The app's interface |
+| [FluidAudio](https://github.com/FluidInference/FluidAudio) | 0.17.7 | Apache-2.0 | Linked into `yoru-audio`, the meetings' helper (`audio/`): Parakeet on the Neural Engine |
 | Service marks from [Simple Icons](https://simpleicons.org) | 16.35.0 (Slack: 13.21.0) | CC0-1.0 (the brands are their owners' trademarks) | `app/src/lib/icons/services.ts`, to tell the connectors apart |
 
 The license texts of whisper.cpp and llama.cpp are in the app's resources (`licenses/`). The two servers run as separate processes on `127.0.0.1`.
@@ -32,6 +33,8 @@ Each file is pinned by size and SHA-256 in `core/src/models.rs`.
 | Qwen3.5 2B and 4B (GGUF by [Unsloth](https://huggingface.co/unsloth)) | Language model | Apache-2.0 |
 | EmbeddingGemma 300M Q8_0 ([ggml-org](https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF)) | Telling a goodbye from a request, after an answer | [Gemma terms of use](https://ai.google.dev/gemma/terms) |
 | Smart Turn v3.2 ([pipecat-ai](https://huggingface.co/pipecat-ai/smart-turn-v3)) | Hearing when a sentence is finished | BSD-2-Clause |
+| Parakeet Ultra ([FluidInference/parakeet-ultra-coreml](https://huggingface.co/FluidInference/parakeet-ultra-coreml), from [moondream/parakeet-ultra](https://huggingface.co/moondream/parakeet-ultra), a post-training of NVIDIA's parakeet-tdt-0.6b-v3) | Transcribing meetings | CC-BY-4.0. Downloaded by FluidAudio from Hugging Face, not pinned by hash in `models.rs` |
+| Nemotron 3 Diarization ([FluidInference/nemotron-3-diarization-coreml](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml), from [nvidia/Nemotron-3-Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization)) | Telling the speakers of a meeting apart | [OpenMDW-1.1](https://openmdw.ai/license/1-1/). Downloaded by FluidAudio the first time a transcript tells the speakers apart |
 | Piper voice `it_IT-paola-medium` | Italian voice | Dataset CC0 1.0 (paolapersico1/Voice-Dataset-Italian); fine-tuned from lessac |
 | Piper voice `it_IT-riccardo-x_low` | Italian voice | Dataset M-AILABS (BSD-style) |
 | Piper voice `en_GB-alba-medium` | English voice | Dataset CC BY 4.0 (Edinburgh DataShare 10283/3270); fine-tuned from lessac |

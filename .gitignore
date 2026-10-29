@@ -4,8 +4,10 @@ build/
 node_modules/
 app/dist/
 app/src-tauri/gen/
-# Sidecars and the power helper, built by tools/ for the bundle.
+# Sidecars, built by tools/ and build.rs for the bundle.
 app/src-tauri/binaries/
 # Firmware images, fetched by tools/fetch_firmware.sh (docs/README.md, Firmware).
 firmware/
 *.env
+# yoru-audio's SwiftPM build, when built by hand in audio/.
+audio/.build/

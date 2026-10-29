@@ -29,6 +29,7 @@ pub mod intent;
 pub mod intents;
 pub mod link;
 pub mod llm;
+pub mod meetings;
 pub mod models;
 pub(crate) mod paths;
 #[cfg(feature = "mcp")]

@@ -139,7 +139,8 @@ Done (2026-10-19): none of the following is left in the code.
 Status (2026-10-29): A0 to A5 are built, in the core, the CLI and the app, and the app is Yoru's only host (the Yoru app was retired on 2026-10-19). Since then: four brains (2026-10-20), tools loaded on demand (2026-10-21), Google on its REST APIs (2026-10-22), the voice above (2026-10-21 to 2026-10-22), and firmware 0.11.0's apps (2026-10-29: the timers' list, habits, errands; see "The board's apps"). The board's side is in firmware 0.10.0 (inbox), 0.11.5 (only Yoru), 0.11.6 and 0.11.7 (listening).
 
 Left:
-- **Windows and Linux.** The release workflow builds only for macOS (Apple Silicon and Intel); the other two are off for now.
+- **macOS only.** Decided on 2026-10-29: Yoru supports only macOS (Apple Silicon and Intel) for now. The release workflow builds only for it, and new work, like the meetings in [meetings.md](meetings.md), can use Mac-only APIs without a fallback for Windows and Linux.
+- **Meetings.** Recording calls and other audio, transcribing, telling the speakers apart and summarizing, all on this computer: [meetings.md](meetings.md), phases M1 to M5 (planned 2026-10-29).
 - **Habits outside the app.** The MCP server and the CLI have no habits tools yet; the model and the app do.
 - **The release.** `v0.1.0` is on GitHub, refreshed by each push to `main`; `main` stops at 2026-10-20, so everything from 2026-10-21 on is only on `develop`.
 

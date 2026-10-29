@@ -250,6 +250,57 @@ export type KeyCheck = { state: "valid" | "invalid" | "unknown"; error: string |
 export type McpInfo = { command: string | null; args: string[]; registered: boolean; config_path: string | null; hub_error: string | null };
 /** A sentence Yoru said with ElevenLabs (`spoken_clips`). */
 export type SpokenClip = { id: string; at: number; text: string; language: string; voice: string; duration_ms: number };
+/** A recorded track of a meeting: `others` is what the computer played, `mic` the user. */
+export type MeetingTrack = { name: string; source: string; kind: "others" | "mic"; file: string | null; duration_ms: number; rate: number; channels: number };
+/** A recording and what came of it (`meetings_list`). */
+export type Meeting = {
+  id: string;
+  title: string | null;
+  started_at: number;
+  duration_ms: number;
+  state: "recording" | "done" | "interrupted";
+  tracks: MeetingTrack[];
+  /** When its transcript was made. */
+  transcribed_at: number | null;
+  /** When its summary was made. */
+  summarized_at: number | null;
+};
+/** A meeting's summary (`meeting_summary`); `by` names the model. */
+export type Summary = {
+  title: string;
+  overview: string;
+  points: string[];
+  decisions: string[];
+  actions: { text: string; owner: string; due: string }[];
+  questions: string[];
+  by: string;
+  made_at: number;
+};
+/** What can summarize (`meeting_summarizers`): the local model, and the brain's name. */
+export type Summarizers = { local: boolean; brain: string | null };
+/** A stretch of speech: `kind` `mic` is the user's track; `speaker` who, within the track (0: first heard). */
+export type TranscriptLine = { track: string; kind: "mic" | "others"; start_ms: number; end_ms: number; text: string; speaker: number | null };
+/** Someone heard: `key` is `<track>/<speaker or ->`; `number` 0 is the user, then 1, 2… as they first speak. */
+export type Speaker = { key: string; number: number; name: string | null };
+export type Transcript = { engine: string; language: string | null; lines: TranscriptLine[]; speakers: Speaker[] };
+/** `meeting_settings`: when to transcribe, the language (empty: Parakeet finds it), and whether to tell the speakers apart. */
+export type MeetingSettings = { transcribe: "after" | "live" | "manual"; language: string; speakers: boolean; summary_by: "local" | "brain"; auto_summary: boolean };
+/** What can be recorded right now (`meeting_sources`). */
+export type MeetingSources = { apps: { id: string; name: string; playing: boolean; icon?: string }[]; microphones: { id: string; name: string; default: boolean }[] };
+/** What to record (`meeting_start`): everything played, or one app's sound, and microphones. */
+export type MeetingRequest = { system: boolean; app: string | null; microphones: string[]; title: string | null };
+/** A running recording's news (`meeting` event). */
+export type MeetingEvent =
+  | { kind: "level"; levels: Record<string, number> }
+  | { kind: "error"; message: string; code?: "no_system_audio" | "no_microphone_sound" }
+  | { kind: "done"; meeting: Meeting }
+  | { kind: "progress"; id: string; track: string; phase: "load" | "transcribe"; fraction: number }
+  | { kind: "transcribed"; meeting: Meeting }
+  | { kind: "failed"; id: string; message: string }
+  | { kind: "model"; fraction: number }
+  | { kind: "summarizing"; id: string; fraction: number }
+  | { kind: "summarized"; meeting: Meeting; summary: Summary }
+  | { kind: "summary_failed"; id: string; message: string };
 export type Onboarding = { done: boolean; tour_version: number };
 
 /** A bridge event: `kind` and its fields, plus the board it comes from. */

@@ -12,9 +12,10 @@ Everything Yoru knows lives in a folder on your computer (on macOS, `~/Library/A
 
 - your settings and the list of services you connected;
 - the memory Yoru keeps about you (`memory.md`), which you can read and edit in the app;
-- your conversations, notifications and timers, and the clips Yoru spoke with ElevenLabs.
+- your conversations, notifications and timers, and the clips Yoru spoke with ElevenLabs;
+- the meetings you record or import: the sound of each track and its transcript, on the Meetings page, until you delete them. Recording and transcribing them never sends anything anywhere (the models are downloaded once, from Hugging Face). Their summaries are written on this computer too, unless you pick the brain for them in the meetings' settings: then the transcript goes to that brain's provider.
 
-The sign-in tokens of your services and your API keys are kept in the system keychain (macOS Keychain, Windows Credential Manager, the Secret Service on Linux), never in a plain file.
+The sign-in tokens of your services and your API keys are kept in the macOS Keychain, never in a plain file.
 
 We have no account system, no analytics and no telemetry. We never receive your data, your tokens or your conversations.
 

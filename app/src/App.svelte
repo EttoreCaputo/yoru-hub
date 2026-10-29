@@ -3,6 +3,7 @@
   import Connectors from "./lib/pages/Connectors.svelte";
   import Conversation from "./lib/pages/Conversation.svelte";
   import Inbox from "./lib/pages/Inbox.svelte";
+  import Meetings from "./lib/pages/Meetings.svelte";
   import Memory from "./lib/pages/Memory.svelte";
   import Routines from "./lib/pages/Routines.svelte";
   import Settings from "./lib/pages/Settings.svelte";
@@ -16,7 +17,7 @@
   store.start();
   i18n.start();
 
-  const PAGES = { today: Today, conversation: Conversation, inbox: Inbox, connectors: Connectors, routines: Routines, memory: Memory, spoken: Spoken, settings: Settings };
+  const PAGES = { today: Today, conversation: Conversation, inbox: Inbox, connectors: Connectors, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, settings: Settings };
   const Page = $derived(PAGES[store.page]);
   let main: HTMLElement | undefined = $state();
   // Each page starts at its top.

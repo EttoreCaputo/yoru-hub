@@ -6,9 +6,11 @@
 
 Yoru is a personal assistant that lives on your computer and has a body: [a round ESP32-S3 board](https://github.com/EttoreCaputo/Yoru) on the desk, a pearl sphere on true black. It connects to the services you use (mail, calendar, issues, documents…) through MCP connectors, keeps an eye on them, tells you when something is worth knowing, and answers when you ask, typed in the app or said to the board.
 
-This repository is its host program: the Rust core, the `yoru` command line and the desktop app. The plan and where it stands: [assistant.md](assistant.md); the app's code: [app.md](app.md).
+This repository is its host program: the Rust core, the `yoru` command line and the desktop app. The plan and where it stands: [assistant.md](assistant.md); recording and summarizing meetings, planned: [meetings.md](meetings.md); the app's code: [app.md](app.md).
 
 Status: early development (0.1.0).
+
+Platform: **macOS only** for now (Apple Silicon and Intel). Some code still builds elsewhere, but Linux and Windows are neither built, released nor tested.
 
 ## What it does
 
@@ -17,6 +19,7 @@ Status: early development (0.1.0).
 - **Keeps time and habits**: timers, a pomodoro and reminders, and daily habits with their streaks, all shown and ticked off in the board's apps.
 - **Remembers**: `memory.md` in the data folder, read every turn, kept up to date by Yoru as you talk, edited in the app.
 - **Talks**: after the wake word or with PWR held on the board, it transcribes on this computer (whisper.cpp) or with your provider's Whisper, and speaks with Piper on this computer or with ElevenLabs or Groq. It keeps listening after an answer, tells a goodbye from a new request (EmbeddingGemma) and hears when you finished the sentence (Smart Turn); the Spoken page keeps what ElevenLabs said.
+- **Records meetings**: what the computer plays (everything, or one app such as a call) and your microphones, each as a track of its own, or an audio or video file you bring in; transcribed on this computer with Parakeet, who speaks told apart with Nemotron (up to 8 people per track, each nameable), saved as Markdown, SRT or text, and summarized (points, decisions, things to do, open questions) by the local model or the brain ([meetings.md](meetings.md)).
 - **Has a body**: the board shows notifications, timers, habits and Allow/Deny cards, goes on an errand while a connector is called, listens after its wake word, and speaks. Any MCP client (Claude Code, Claude Desktop…) can make it react, speak, notify you and set timers, through its MCP server.
 
 ## Repository layout
@@ -27,9 +30,10 @@ core/            library: the assistant (inbox, memory, routines, watchers), con
                  (STT, TTS), MCP server, timers, flasher
 cli/             `yoru` command line
 app/             desktop app: Svelte UI in src/, Tauri shell in src-tauri/
+audio/           yoru-audio, the Swift helper that records meetings (built by the app's build.rs)
 firmware/        the board's firmware image, embedded in the app (fetched, not committed)
 tools/           firmware fetch, the signed Mac build and voice sidecar builds
-docs/            this README, the plan, the app's code, OAuth clients, licenses, privacy and terms
+docs/            this README, the plans, the app's code, OAuth clients, licenses, privacy and terms
 ```
 
 ## Firmware
@@ -77,7 +81,7 @@ cd app && npm run check && npm run build
 
 ## Releases
 
-Every push to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml): it builds Yoru's firmware with ESP-IDF 6.1, then the app for macOS (Apple Silicon and Intel; Linux and Windows are off for now) with that image and the voice helpers inside, and uploads everything, plus the bare firmware image, to the GitHub release `v<version>` from `app/src-tauri/tauri.conf.json`. A push to `develop` does the same for the pre-release `v<version>-develop`.
+Every push to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml): it builds Yoru's firmware with ESP-IDF 6.1, then the app for macOS (Apple Silicon and Intel; the only platform Yoru supports) with that image and the voice helpers inside, and uploads everything, plus the bare firmware image, to the GitHub release `v<version>` from `app/src-tauri/tauri.conf.json`. A push to `develop` does the same for the pre-release `v<version>-develop`.
 
 ## Protocol
 

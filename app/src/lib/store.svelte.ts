@@ -21,18 +21,21 @@ import type {
   Gaze,
   Habit,
   Link,
+  Meeting,
+  MeetingEvent,
   Notification,
   Onboarding,
   Preset,
   ScheduleEvent,
   Status,
+  Summary,
   TimersInfo,
   VoiceState,
   WatchEntry,
   Watcher,
 } from "./types";
 
-export type Page = "today" | "conversation" | "inbox" | "connectors" | "routines" | "memory" | "spoken" | "settings";
+export type Page = "today" | "conversation" | "inbox" | "connectors" | "routines" | "memory" | "meetings" | "spoken" | "settings";
 
 /** Opening the port resets the S3: it's up again after about this long. */
 const BOOT_MS = 1100;
@@ -85,6 +88,26 @@ class Store {
   schedule = $state<(ScheduleEvent & { at: number })[]>([]);
   onboarding = $state<Onboarding | null>(null);
 
+  // Meetings.
+  /** The recording that runs. */
+  recording = $state<Meeting | null>(null);
+  /** Its tracks' loudness, 0 to 1. */
+  levels = $state<Record<string, number>>({});
+  recordingError = $state<{ message: string; code?: string } | null>(null);
+  /** The last recording that finished, or meeting that got its transcript, for the Meetings page to pick up. */
+  recorded = $state<Meeting | null>(null);
+  /** How far each meeting's transcript is, 0 to 1, while it is made. */
+  transcribing = $state<Record<string, number>>({});
+  /** Why a meeting's transcript failed. */
+  transcribeErrors = $state<Record<string, string>>({});
+  /** The transcription model's download, 0 to 1, while it runs. */
+  modelDownload = $state<number | null>(null);
+  /** How far each meeting's summary is, 0 to 1, while it is written. */
+  summarizing = $state<Record<string, number>>({});
+  summaryErrors = $state<Record<string, string>>({});
+  /** The last summary written, for the Meetings page to pick up. */
+  summarized = $state<{ id: string; summary: Summary } | null>(null);
+
   unread = $derived(this.inbox.filter((n) => !n.read).length);
 
   #started = false;
@@ -101,6 +124,7 @@ class Store {
     on<ScheduleEvent>("schedule", (e) => this.#onSchedule(e));
     on<ConnectorStatus[]>("connectors", (list) => (this.connectors = list));
     on<AssistantInfo>("assistant", (info) => (this.info = info));
+    on<MeetingEvent>("meeting", (e) => this.#onMeeting(e));
     void this.#load();
   }
 
@@ -125,6 +149,47 @@ class Store {
     void this.refreshTimers();
     call<Habit[]>("habits").then((h) => (this.habits = h), () => {});
     call<Preset[]>("connector_presets").then((p) => (this.presets = p), () => {});
+    call<Meeting | null>("meeting_active").then((m) => (this.recording = m), () => {});
+    call<string[]>("meetings_transcribing").then((ids) => {
+      this.transcribing = Object.fromEntries(ids.filter((id) => !id.startsWith("summary:")).map((id) => [id, 0]));
+      this.summarizing = Object.fromEntries(ids.filter((id) => id.startsWith("summary:")).map((id) => [id.slice(8), 0]));
+    }, () => {});
+  }
+
+  #onMeeting(e: MeetingEvent) {
+    if (e.kind === "level") this.levels = e.levels;
+    else if (e.kind === "error") this.recordingError = { message: e.message, code: e.code };
+    else if (e.kind === "progress") {
+      // Loading the model counts as the start; the tracks share the bar.
+      this.transcribing = { ...this.transcribing, [e.id]: e.phase === "load" ? 0 : e.fraction };
+      const { [e.id]: _, ...rest } = this.transcribeErrors;
+      this.transcribeErrors = rest;
+    } else if (e.kind === "transcribed" || e.kind === "failed") {
+      const id = e.kind === "failed" ? e.id : e.meeting.id;
+      const { [id]: _, ...rest } = this.transcribing;
+      this.transcribing = rest;
+      if (e.kind === "failed") this.transcribeErrors = { ...this.transcribeErrors, [id]: e.message };
+      else this.recorded = e.meeting;
+    } else if (e.kind === "model") this.modelDownload = e.fraction;
+    else if (e.kind === "summarizing") {
+      this.summarizing = { ...this.summarizing, [e.id]: e.fraction };
+      const { [e.id]: _, ...rest } = this.summaryErrors;
+      this.summaryErrors = rest;
+    } else if (e.kind === "summarized" || e.kind === "summary_failed") {
+      const id = e.kind === "summary_failed" ? e.id : e.meeting.id;
+      const { [id]: _, ...rest } = this.summarizing;
+      this.summarizing = rest;
+      if (e.kind === "summary_failed") this.summaryErrors = { ...this.summaryErrors, [id]: e.message };
+      else {
+        this.recorded = e.meeting;
+        this.summarized = { id, summary: e.summary };
+      }
+    }
+    else {
+      this.recording = null;
+      this.levels = {};
+      this.recorded = e.meeting;
+    }
   }
 
   #applyStatus(s: Status) {

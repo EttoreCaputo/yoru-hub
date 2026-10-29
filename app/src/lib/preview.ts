@@ -14,6 +14,9 @@ import type {
   ConnectorConfig,
   ConnectorStatus,
   Habit,
+  Meeting,
+  MeetingSettings,
+  MeetingSources,
   Notification,
   Preset,
   SpokenClip,
@@ -154,6 +157,77 @@ let spoken: SpokenClip[] = [
   { id: "2", at: now() - 50 * MIN, text: "Hai una riunione alle 14:30 con Marco.", language: "it", voice: "elevenlabs:voice/x", duration_ms: 2600 },
   { id: "1", at: now() - 26 * 60 * MIN, text: "[whispers] Good night. I'll keep watch.", language: "en", voice: "elevenlabs:voice/x", duration_ms: 2100 },
 ];
+
+const meetingSources: MeetingSources = {
+  apps: [
+    { id: "us.zoom.xos", name: "zoom.us", playing: true },
+    { id: "com.google.Chrome", name: "Google Chrome", playing: false },
+  ],
+  microphones: [
+    { id: "BuiltInMicrophoneDevice", name: "MacBook Pro Microphone", default: true },
+    { id: "usb-mic", name: "USB Microphone", default: false },
+  ],
+};
+
+let meetings: Meeting[] = [
+  {
+    id: "20261029-143000",
+    title: "Weekly with Marco",
+    started_at: now() - 3 * 60 * MIN,
+    duration_ms: 41 * 60_000,
+    state: "done",
+    transcribed_at: now() - 2 * 60 * MIN,
+    summarized_at: now() - 2 * 60 * MIN,
+    tracks: [
+      { name: "others", source: "zoom.us", kind: "others", file: "others.m4a", duration_ms: 41 * 60_000, rate: 48000, channels: 2 },
+      { name: "mic", source: "MacBook Pro Microphone", kind: "mic", file: "mic.m4a", duration_ms: 41 * 60_000, rate: 48000, channels: 1 },
+    ],
+  },
+  {
+    id: "20261028-091500",
+    title: null,
+    started_at: now() - 30 * 60 * MIN,
+    duration_ms: 7 * 60_000,
+    state: "interrupted",
+    transcribed_at: null,
+    summarized_at: null,
+    tracks: [{ name: "others", source: "System audio", kind: "others", file: "others.caf", duration_ms: 7 * 60_000, rate: 48000, channels: 2 }],
+  },
+];
+let recording: Meeting | null = null;
+let meetingSettings: MeetingSettings = { transcribe: "after", language: "", speakers: true, summary_by: "local", auto_summary: true };
+let meters: ReturnType<typeof setInterval> | undefined;
+
+function startMeeting(a: Record<string, any>): Meeting {
+  const r = a.request;
+  const tracks: Meeting["tracks"] = [];
+  if (r.system || r.app) {
+    const source = r.app ? (meetingSources.apps.find((x) => x.id === r.app)?.name ?? r.app) : "System audio";
+    tracks.push({ name: "others", source, kind: "others", file: null, duration_ms: 0, rate: 48000, channels: 2 });
+  }
+  (r.microphones as string[]).forEach((id, i) =>
+    tracks.push({ name: i ? `mic-${i + 1}` : "mic", source: meetingSources.microphones.find((m) => m.id === id)?.name ?? id, kind: "mic", file: null, duration_ms: 0, rate: 48000, channels: 1 }),
+  );
+  recording = { id: "20261029-170000", title: r.title, started_at: now(), duration_ms: 0, state: "recording", tracks, transcribed_at: null, summarized_at: null };
+  const names = tracks.map((x) => x.name);
+  meters = setInterval(() => emit("meeting", { kind: "level", levels: Object.fromEntries(names.map((n) => [n, Math.random() * 0.6])) }), 250);
+  return recording;
+}
+
+function stopMeeting() {
+  if (!recording) return;
+  clearInterval(meters);
+  const duration = now() - recording.started_at;
+  const done: Meeting = {
+    ...recording,
+    state: "done",
+    duration_ms: duration,
+    tracks: recording.tracks.map((x) => ({ ...x, file: `${x.name}.m4a`, duration_ms: duration })),
+  };
+  recording = null;
+  meetings = [done, ...meetings];
+  setTimeout(() => emit("meeting", { kind: "done", meeting: done }), 600);
+}
 
 function tone(): ArrayBuffer {
   const n = 8000;
@@ -404,6 +478,66 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   delete_spoken: (a) => (spoken = spoken.filter((c) => c.id !== a.id)),
   clear_spoken: () => void (spoken = []),
   export_spoken: () => "/Users/you/Downloads/yoru-spoken-20261022-153012.zip",
+  meeting_sources: () => meetingSources,
+  meetings_list: () => meetings,
+  meeting_active: () => recording,
+  meeting_start: startMeeting,
+  meeting_stop: stopMeeting,
+  rename_meeting: (a) => {
+    meetings = meetings.map((m) => (m.id === a.id ? { ...m, title: String(a.title).trim() || null } : m));
+    return meetings.find((m) => m.id === a.id);
+  },
+  delete_meeting: (a) => (meetings = meetings.filter((m) => m.id !== a.id)),
+  meeting_audio: () => tone(),
+  meeting_settings: () => meetingSettings,
+  set_meeting_settings: (a) => (meetingSettings = a.settings),
+  meeting_model: () => true,
+  meeting_model_download: () => undefined,
+  meetings_transcribing: () => [],
+  meeting_transcribe: (a) => {
+    setTimeout(() => emit("meeting", { kind: "progress", id: a.id, track: "others", phase: "transcribe", fraction: 0.5 }), 300);
+    setTimeout(() => {
+      meetings = meetings.map((m) => (m.id === a.id ? { ...m, transcribed_at: now() } : m));
+      emit("meeting", { kind: "transcribed", meeting: meetings.find((m) => m.id === a.id) });
+    }, 1200);
+  },
+  meeting_transcript: () => ({
+    engine: "parakeet-ultra",
+    language: null,
+    lines: [
+      { track: "others", kind: "others", start_ms: 0, end_ms: 4200, text: "Ciao, mi senti? Partiamo dalla scadenza di venerdì.", speaker: 0 },
+      { track: "mic", kind: "mic", start_ms: 4600, end_ms: 9100, text: "Sì, ti sento. Per venerdì manca solo la revisione del firmware.", speaker: 0 },
+      { track: "others", kind: "others", start_ms: 9800, end_ms: 15000, text: "Perfetto, allora la fai tu e io aggiorno il documento.", speaker: 0 },
+      { track: "others", kind: "others", start_ms: 15400, end_ms: 19000, text: "Io intanto preparo le schede per i test.", speaker: 1 },
+    ],
+    speakers: [
+      { key: "others/0", number: 1, name: "Marco" },
+      { key: "mic/0", number: 0, name: null },
+      { key: "others/1", number: 2, name: null },
+    ],
+  }),
+  meeting_export: () => "/Users/you/Downloads/Weekly with Marco.md",
+  meeting_import: () => null,
+  meeting_summarizers: () => ({ local: true, brain: "OpenAI · gpt-6-luna" }),
+  meeting_summary: (a) =>
+    a.id === "20261029-143000"
+      ? {
+          title: "Firmware review before Friday",
+          overview: "Marco and you went over Friday's deadline. Only the firmware review is left; Marco updates the document meanwhile.",
+          points: ["The firmware review is the last open item", "The test boards are being prepared"],
+          decisions: ["Ship on Friday"],
+          actions: [{ text: "Review the firmware", owner: "Tu", due: "venerdì" }, { text: "Update the document", owner: "Marco", due: "" }],
+          questions: [],
+          by: "Qwen3.5-4B-Q4_K_M",
+          made_at: now(),
+        }
+      : null,
+  meeting_summarize: () => undefined,
+  rename_speaker: (a) => {
+    const t = COMMANDS.meeting_transcript(a) as { speakers: { key: string; name: string | null }[] };
+    t.speakers = t.speakers.map((s) => (s.key === a.key ? { ...s, name: String(a.name).trim() || null } : s));
+    return t;
+  },
   watchers: () => watchers,
   habits: () => habits,
   add_habit: (a) =>

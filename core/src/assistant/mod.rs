@@ -619,8 +619,8 @@ impl Assistant {
     }
 
     /// One answer in JSON matching `schema`, with no tools: the watchers'
-    /// triage. Its text, to be parsed by the caller.
-    pub(crate) fn complete_json(&self, prompt: &str, schema: &Value) -> Result<String, String> {
+    /// triage, a meeting's summary. Its text, to be parsed by the caller.
+    pub fn complete_json(&self, prompt: &str, schema: &Value) -> Result<String, String> {
         let settings = self.settings();
         match settings.brain() {
             Some(Brain::Anthropic) => {

@@ -33,6 +33,7 @@
 
 mod assistant;
 mod instances;
+mod meetings;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
@@ -519,7 +520,7 @@ fn installed_path(id: &str, kind: Kind) -> Option<PathBuf> {
 }
 
 /// The app's language (`it`, `en`): the one picked, else the system's.
-fn app_language(state: &AppState) -> String {
+pub(crate) fn app_language(state: &AppState) -> String {
     state.settings.lock().unwrap().ui_language.clone().unwrap_or_else(|| yoru_core::intents::system_language().into())
 }
 
@@ -1776,6 +1777,7 @@ pub fn run() {
             let manager = start_bridge(handle, port);
             *app.state::<AppState>().manager.lock().unwrap() = Some(manager);
             assistant::start(handle);
+            meetings::start(handle);
             build_tray(handle)?;
             Ok(())
         })
@@ -1795,6 +1797,10 @@ pub fn run() {
             confirmations, confirm, mcp_info, claude_mcp,
             voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine,
             spoken_clips, spoken_audio, delete_spoken, clear_spoken, export_spoken,
+            meetings::meeting_sources, meetings::meetings_list, meetings::meeting_active, meetings::meeting_start, meetings::meeting_stop,
+            meetings::rename_meeting, meetings::delete_meeting, meetings::meeting_audio, meetings::open_audio_privacy,
+            meetings::meeting_transcribe, meetings::meetings_transcribing, meetings::meeting_transcript, meetings::meeting_export, meetings::rename_speaker, meetings::meeting_summarize, meetings::meeting_summary, meetings::meeting_summarizers,
+            meetings::meeting_settings, meetings::set_meeting_settings, meetings::meeting_model, meetings::meeting_model_download, meetings::meeting_import,
             board_voice, set_board_volume, set_board_wake_sound, play_board_sound, test_voice,
             yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu,
             timers_info, timer_tool, set_timer_screen, dismiss_timers,
@@ -1811,6 +1817,10 @@ pub fn run() {
         .expect("failed to build the Yoru app")
         .run(|app, event| match event {
             tauri::RunEvent::Exit => {
+                // A recording keeps what it has: its tracks are finalized first.
+                if let Some(meetings) = app.try_state::<meetings::Meetings>() {
+                    meetings.shutdown();
+                }
                 // Release the serial port before the process goes away.
                 if let Some(state) = app.try_state::<AppState>() {
                     state.services.shutdown();
