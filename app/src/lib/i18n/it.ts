@@ -475,6 +475,8 @@ const it: Messages = {
       wake_on: "Si sveglia con",
       language: "Lingua",
       wake_sound: "Suono di attivazione",
+      power_saver: "Risparmio a batteria (microfoni spenti mentre dorme)",
+      hibernate: "Letargo dopo (min al buio, 0 mai)",
     },
     logs: "Log della scheda",
     noLogs: "Ancora niente nel log.",

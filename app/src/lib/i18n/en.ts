@@ -474,6 +474,8 @@ const en = {
       wake_on: "Wakes on",
       language: "Language",
       wake_sound: "Wake chime",
+      power_saver: "Power saver on battery (mics off while asleep)",
+      hibernate: "Hibernate after (min in the dark, 0 never)",
     } as Record<string, string>,
     logs: "Board log",
     noLogs: "Nothing logged yet.",
