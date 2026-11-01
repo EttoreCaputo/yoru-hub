@@ -4,9 +4,9 @@ The host program of Yoru (`../yoru`): Rust core, CLI, Tauri + Svelte app. The fo
 
 Since 2026-10-19 it is Yoru's personal assistant, for Yoru only: MCP connectors with OAuth (`core/src/connectors/`), the assistant on four brains (`core/src/assistant/`: Claude in `core/src/cloud/anthropic.rs`, Groq, OpenAI and Ollama in `assistant/compat.rs`), voice, watchers, notifications, memory, routines. The plan is `docs/assistant.md`. DualEye is gone from here (it keeps its own `host/`); `docs/multiboard.md` is history.
 
-## Rule: the user makes the commits
+## Rule: Claude commits, the user pushes
 
-Never run `git commit`, `git push` or anything else that writes history. Leave the changes in the working tree; the user commits them.
+At the end of every piece of work, commit it: stage only that work's files and write a message that says what changed and why. Never run `git push`, and never rewrite history that is already committed (no amend, rebase or reset of existing commits); the user pushes.
 
 ## Rule: everything in the code is in English
 
