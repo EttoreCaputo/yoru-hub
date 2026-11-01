@@ -64,7 +64,7 @@
     dance: "sway",
     love: "hold",
   };
-  const HAPPY_EYES = new Set(["happy", "excited", "proud", "love", "relieved", "charged", "dance", "clap", "wink"]);
+  const HAPPY_EYES = new Set(["happy", "excited", "proud", "love", "relieved", "charged", "plugged", "dance", "clap", "wink"]);
   const CLOSED_EYES = new Set(["sleepy", "yawn", "tired", "drowsy", "sigh", "blink"]);
   const WIDE_EYES = new Set(["surprised", "scared", "falling", "lifted"]);
 
