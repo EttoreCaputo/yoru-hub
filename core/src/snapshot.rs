@@ -54,7 +54,7 @@ mod tests {
         snap.ts = 5;
         assert!(!snap.is_sendable());
         assert_eq!(String::from_utf8(snap.to_payload()).unwrap(), "{\"v\":2,\"ts\":5}");
-        snap.pet = Some(Presence { min: 600, idle: Some(3) });
+        snap.pet = Some(Presence { min: 600, idle: Some(3), tz: None });
         assert!(snap.is_sendable());
         assert_eq!(String::from_utf8(snap.to_payload()).unwrap(), "{\"v\":2,\"ts\":5,\"pet\":{\"min\":600,\"idle\":3}}");
     }

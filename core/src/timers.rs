@@ -105,6 +105,10 @@ pub struct Timer {
     /// up; `None` when set from the app, the CLI or a hub client.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<String>,
+    /// The board's own id for a timer the board started and the hub took
+    /// over (`timer_new`); the board's list says it back as `was`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub was: Option<String>,
 }
 
 impl Timer {
@@ -314,7 +318,7 @@ struct State {
 impl State {
     fn add(&mut self, kind: Kind, label: Option<String>, total_s: u64, ends_at: i64, language: &str) -> Timer {
         self.next_id = self.next_id.wrapping_add(1).max(1);
-        let timer = Timer { id: self.next_id, kind, label, total_s, ends_at: Some(ends_at), paused_left_ms: 0, ringing_since: None, language: language.into(), board: None };
+        let timer = Timer { id: self.next_id, kind, label, total_s, ends_at: Some(ends_at), paused_left_ms: 0, ringing_since: None, language: language.into(), board: None, was: None };
         self.timers.push(timer.clone());
         timer
     }
@@ -724,6 +728,9 @@ impl Timers {
                 if let Some(label) = &t.label {
                     v["label"] = json!(label);
                 }
+                if let Some(was) = &t.was {
+                    v["was"] = json!(was);
+                }
                 if t.kind == Kind::Reminder
                     && let Some(end) = t.ends_at.and_then(|e| Local.timestamp_millis_opt(e).single())
                 {
@@ -733,6 +740,55 @@ impl Timers {
             })
             .collect();
         json!({"timers": list})
+    }
+
+    /// A timer the board started on its own (`timer_new`, firmware 0.13.0),
+    /// taken over as it stands: `{id, kind, state, left_s, total_s, label?,
+    /// language?, pomodoro?: {work_s, break_s, round, rounds}}`. A work or
+    /// break phase brings its pomodoro, replacing the one running. Offered
+    /// again, the same board timer is updated rather than added twice.
+    pub fn adopt(&self, offer: &Value, board: Option<&str>) -> Result<Timer, String> {
+        self.adopt_at(now_ms(), offer, board)
+    }
+
+    fn adopt_at(&self, now: i64, offer: &Value, board: Option<&str>) -> Result<Timer, String> {
+        let was = offer["id"].as_str().filter(|id| !id.is_empty()).ok_or("the board's timer needs its id")?.to_string();
+        let kind: Kind = serde_json::from_value(offer["kind"].clone()).unwrap_or(Kind::Timer);
+        let total_s = offer["total_s"].as_f64().filter(|s| *s >= 1.0).ok_or("total_s must be 1 or more")?.round() as u64;
+        let left_ms = (offer["left_s"].as_f64().unwrap_or(0.0).max(0.0) * 1000.0).round() as i64;
+        if total_s > MAX_SECS || left_ms <= 0 {
+            return Err("a timer lasts from 1 second to 24 hours".into());
+        }
+        let paused = offer["state"].as_str() == Some("pause");
+        let label = clean_label(offer["label"].as_str());
+        let language = if offer["language"].as_str() == Some("it") { "it" } else { "en" };
+        let pomodoro = offer["pomodoro"].as_object().map(|p| {
+            let n = |k: &str| p.get(k).and_then(Value::as_u64).unwrap_or(0);
+            Pomodoro { work_s: n("work_s").max(60), break_s: n("break_s").max(60), rounds: (n("rounds") as u32).clamp(1, 12), round: (n("round") as u32).max(1) }
+        });
+        let timer = self.change(|s| {
+            if let Some(t) = s.timers.iter_mut().find(|t| t.was.as_deref() == Some(was.as_str())) {
+                t.ends_at = (!paused).then_some(now + left_ms);
+                t.paused_left_ms = if paused { left_ms } else { 0 };
+                return Ok(t.clone());
+            }
+            if kind.is_pomodoro() {
+                s.timers.retain(|t| !t.kind.is_pomodoro());
+                s.pomodoro = pomodoro;
+            }
+            if s.timers.len() >= MAX_TIMERS {
+                return Err(format!("there are {MAX_TIMERS} timers already"));
+            }
+            let mut t = s.add(kind, label, total_s, now + left_ms, language);
+            if paused {
+                t.ends_at = None;
+                t.paused_left_ms = left_ms;
+            }
+            t.was = Some(was.clone());
+            *s.timers.last_mut().unwrap() = t.clone();
+            Ok(t)
+        })?;
+        Ok(self.set_board(timer, board))
     }
 
     /// What was tapped in the board's Timers app (`timer_action`): `pause`,
@@ -1178,6 +1234,25 @@ mod tests {
         assert!(timers.call_tool("set_reminder", &json!({"text": "stretch", "at": "7:05"}), "en").unwrap().is_ok());
         assert!(timers.call_tool("get_face", &json!({}), "en").is_none());
         assert!(timers.call_tool("control_timer", &json!({"action": "cancel", "which": "stretch"}), "en").unwrap().unwrap().contains("stretch"));
+    }
+
+    #[test]
+    fn adopts_the_boards_timers_once() {
+        let timers = Timers::default();
+        let offer = json!({"id": "b1a2b3c4", "kind": "timer", "state": "run", "left_s": 240.0, "total_s": 300, "label": "tea", "language": "it"});
+        let t = timers.adopt_at(T0, &offer, Some("board")).unwrap();
+        assert_eq!((t.total_s, t.left_ms(T0), t.label.as_deref(), t.language.as_str()), (300, 240_000, Some("tea"), "it"));
+        assert_eq!(timers.board_list_at(T0)["timers"][0]["was"], "b1a2b3c4");
+        // Offered again, paused: the same timer.
+        let again = json!({"id": "b1a2b3c4", "kind": "timer", "state": "pause", "left_s": 200.0, "total_s": 300});
+        let t2 = timers.adopt_at(T0 + 40_000, &again, None).unwrap();
+        assert_eq!((t2.id, t2.is_paused(), t2.left_ms(T0 + 99_000)), (t.id, true, 200_000));
+        assert_eq!(timers.list_at(T0).len(), 1);
+        // A pomodoro's phase brings its pomodoro.
+        let pomo = json!({"id": "b0000002", "kind": "break", "state": "run", "left_s": 60.0, "total_s": 300, "pomodoro": {"work_s": 1500, "break_s": 300, "round": 2, "rounds": 4}});
+        timers.adopt_at(T0, &pomo, None).unwrap();
+        assert_eq!(timers.state.lock().unwrap().pomodoro.map(|p| p.round), Some(2));
+        assert!(timers.adopt_at(T0, &json!({"kind": "timer", "left_s": 5, "total_s": 5}), None).is_err());
     }
 
     #[test]

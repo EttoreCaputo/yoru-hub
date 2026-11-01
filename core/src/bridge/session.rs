@@ -83,8 +83,10 @@ pub(super) fn run(
     let floor = targets.floor.clone();
     let number = info.number;
     let receiving = Mutex::new(Receiving::gated(pipeline, Box::new(move || floor.claim(number))));
+    let board_id = Arc::new(Mutex::new(None::<String>));
     let link = Arc::new({
         let heard = heard.clone();
+        let board = board_id.clone();
         let sink = on_event.clone();
         let speaker = speaker.clone();
         let voice_state = voice_state.clone();
@@ -144,6 +146,13 @@ pub(super) fn run(
                     sink(BridgeEvent::BoardLog { line: format!("host: timer_action {id} {action}: {e}") });
                 }
             }
+            LinkEvent::Notification { method, params } if method == "timer_new" => {
+                // A timer the board started without a host: the hub keeps it now.
+                let board = board.lock().unwrap().clone();
+                if let Err(e) = timers.adopt(&params, board.as_deref()) {
+                    sink(BridgeEvent::BoardLog { line: format!("host: timer_new: {e}") });
+                }
+            }
             LinkEvent::Notification { method, params } if method == "habit_check" => {
                 if let (Some(assistant), Some(id), Some(done)) = (&assistant, params["id"].as_str(), params["done"].as_u64())
                     && let Err(e) = assistant.habits.set_done(id, done as u32)
@@ -157,7 +166,6 @@ pub(super) fn run(
     });
     let _ = turn_link.set(Arc::downgrade(&link));
     let board_kind = Arc::new(Mutex::new(BoardKind::default()));
-    let board_id = Arc::new(Mutex::new(None::<String>));
     let floor = targets.floor.clone();
     let _ = link_slot_tx.send(Session {
         link: Arc::downgrade(&link),
