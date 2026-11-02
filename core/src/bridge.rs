@@ -27,6 +27,7 @@
 //!   the bridge always was.
 
 mod alerts;
+mod cloud;
 mod confirm;
 mod errands;
 mod floor;

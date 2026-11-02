@@ -300,7 +300,14 @@ pub(super) fn run(
 struct Lists {
     timers: Option<Sent<u64>>,
     habits: Option<Sent<(u64, chrono::NaiveDate)>>,
+    /// The services for talking without the computer, as sent, and when they
+    /// were last looked at: they're read from the settings and the memory.
+    cloud: Option<Sent<String>>,
+    cloud_checked: Option<Instant>,
 }
+
+/// How often the services sent to the board are looked at again.
+const CLOUD_EVERY: Duration = Duration::from_secs(30);
 
 /// One list: whether the board takes it, and what it got last.
 #[derive(Default)]
@@ -312,7 +319,12 @@ impl Lists {
     /// Nothing sent yet, for a board with these capabilities.
     fn for_board(capabilities: &[String]) -> Self {
         let has = |c: &str| capabilities.iter().any(|x| x == c);
-        Self { timers: has("timers").then(Sent::default), habits: has("habits").then(Sent::default) }
+        Self {
+            timers: has("timers").then(Sent::default),
+            habits: has("habits").then(Sent::default),
+            cloud: has("cloud").then(Sent::default),
+            cloud_checked: None,
+        }
     }
 
     /// Send what changed since last time. A list the board refused is tried
@@ -331,6 +343,17 @@ impl Lists {
             if sent.last != Some(now) {
                 sent.last = Some(now);
                 let _ = link.call_tool("set_habits", assistant.habits.board_list(), TOOL_TIMEOUT);
+            }
+        }
+        if let Some(sent) = &mut self.cloud
+            && self.cloud_checked.is_none_or(|t| t.elapsed() >= CLOUD_EVERY)
+        {
+            self.cloud_checked = Some(Instant::now());
+            let services = super::cloud::services(config);
+            let text = services.to_string();
+            // Refused or lost: tried again next time.
+            if sent.last.as_ref() != Some(&text) && link.call("cloud/set", services, TOOL_TIMEOUT).is_ok() {
+                sent.last = Some(text);
             }
         }
     }

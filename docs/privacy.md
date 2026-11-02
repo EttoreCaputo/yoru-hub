@@ -1,6 +1,6 @@
 # Yoru privacy policy
 
-Last updated: 2026-10-29
+Last updated: 2026-11-03
 
 Yoru is a personal assistant that runs on your computer, with a small round board on your desk as its body. This page says what Yoru does with your data. The short version: **Yoru works on your computer. We run no server and collect nothing about you.**
 
@@ -15,7 +15,7 @@ Everything Yoru knows lives in a folder on your computer (on macOS, `~/Library/A
 - your conversations, notifications and timers, and the clips Yoru spoke with ElevenLabs;
 - the meetings you record or import: the sound of each track and its transcript, on the Meetings page, until you delete them. Recording and transcribing them never sends anything anywhere (the models are downloaded once, from Hugging Face). Their summaries are written on this computer too, unless you pick the brain for them in the meetings' settings: then the transcript goes to that brain's provider.
 
-The sign-in tokens of your services and your API keys are kept in the macOS Keychain, never in a plain file.
+The sign-in tokens of your services and your API keys are kept in the macOS Keychain, never in a plain file. The API keys of the speech, brain and voice providers you picked are also copied to the board's own memory, so that it can talk with you while the computer is away (see The board, below).
 
 We have no account system, no analytics and no telemetry. We never receive your data, your tokens or your conversations.
 
@@ -26,7 +26,7 @@ Yoru sends data only to the services you choose, and only to do what you asked:
 - **The services you connect** (for example Gmail, Google Calendar, GitHub, Slack, Notion, Linear). Yoru signs in with your account, through the service's own sign-in page, and asks for the permissions listed there. It reads or acts on that service only when you ask, or when a watcher you set up checks it.
 - **The model that answers you.** To think, Yoru sends your request, your memory, and the results of the tools it used (for example the mails or events it was asked about) to the model provider you picked: Groq, OpenAI or Anthropic, with your own API key. Their handling of that data is covered by their own policies. If you pick Ollama, the model runs on your computer and nothing leaves it.
 - **The voice providers, if you pick them.** With an ElevenLabs or Groq voice, the text Yoru speaks is sent to that provider. Speech recognition runs on your computer, unless you pick a provider's Whisper (Groq or OpenAI): then what you say to the board is sent to it. What ElevenLabs spoke is kept on your computer, on the Spoken page, until you delete it.
-- **The board.** Yoru talks to the board over USB or your local WiFi. Nothing goes to the internet for that.
+- **The board.** Yoru talks to the board over USB or your local WiFi. Nothing goes to the internet for that. While the computer is away, the board talks to the same speech, brain and voice providers itself, over your WiFi, with the keys the app gave it: what you say to it, your memory (its first part) and today's timers and habits go to them, as they would from the computer. The keys reach the board only over USB or its encrypted WiFi link, and stay in its flash until the app tells it to forget them (when you remove a provider).
 
 ## Acting on your behalf
 
