@@ -244,18 +244,24 @@ pub fn run_scheduler(
                 }
                 on_event(run_and_record(assistant, watchers, &watcher, host));
             }
-            for task in assistant.tasks.take_due(Local::now()) {
-                if stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                let error = tasks::run(assistant, &task, live().as_ref()).err();
-                on_event(ScheduleEvent::Task { id: task.id, error });
-            }
+            run_tasks(assistant, assistant.tasks.take_due(Local::now()), live, stop, on_event);
         }
+        // The board's "Do it now" doesn't wait for the next tick.
+        run_tasks(assistant, assistant.tasks.take_asked(), live, stop, on_event);
         let until = std::time::Instant::now() + TICK;
-        while std::time::Instant::now() < until && !stop.load(Ordering::Relaxed) {
+        while std::time::Instant::now() < until && !stop.load(Ordering::Relaxed) && !assistant.tasks.has_asked() {
             thread::sleep(Duration::from_millis(200));
         }
+    }
+}
+
+fn run_tasks(assistant: &Assistant, list: Vec<tasks::Task>, live: &dyn Fn() -> Box<dyn Host>, stop: &AtomicBool, on_event: &(dyn Fn(ScheduleEvent) + Send + Sync)) {
+    for task in list {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let error = tasks::run(assistant, &task, live().as_ref()).err();
+        on_event(ScheduleEvent::Task { id: task.id, error });
     }
 }
 

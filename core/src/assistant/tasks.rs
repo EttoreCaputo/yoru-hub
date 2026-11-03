@@ -6,7 +6,9 @@
 //!
 //! Kept in `tasks.json` in the data folder; set in the app (the Tasks page)
 //! or by voice (the `tasks` tool, [`Tasks::call_tool`]). The scheduler
-//! ([`super::watchers::run_scheduler`]) runs the due ones with [`run`].
+//! ([`super::watchers::run_scheduler`]) runs the due ones with [`run`], and
+//! the ones the board asked for ("Do it now", `task_run`). The board's Tasks
+//! app shows them ([`Tasks::board_list`], `set_tasks`, firmware 0.16.0).
 //!
 //! A time missed while the computer was asleep or off is still done within
 //! [`GRACE`] of it; later than that it is counted as missed and the task
@@ -14,6 +16,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
@@ -32,6 +35,11 @@ pub const MAX: usize = 40;
 const SCAN_MAX: usize = 9_000;
 const NAME_MAX: usize = 60;
 const RESULT_MAX: usize = 600;
+/// The board's Tasks app shows this many (`TASKS_MAX` in its `tasks.h`).
+pub const BOARD_MAX: usize = 8;
+/// The board's fields: its name, and what to do and what was done.
+const BOARD_NAME: usize = 32;
+const BOARD_TEXT: usize = 100;
 
 /// When a task runs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -190,6 +198,9 @@ pub struct TaskEntry {
     /// Unix ms of its next time, for the app; not kept.
     #[serde(default, skip_deserializing)]
     pub next: Option<u64>,
+    /// Being done right now; not kept.
+    #[serde(default, skip_deserializing)]
+    pub running: bool,
 }
 
 pub type TasksListener = Arc<dyn Fn(&[TaskEntry]) + Send + Sync>;
@@ -198,6 +209,11 @@ pub struct Tasks {
     file: Option<PathBuf>,
     items: Mutex<Vec<TaskEntry>>,
     listeners: Mutex<Vec<TasksListener>>,
+    /// Goes up with every change, for the boards' copies.
+    revision: AtomicU64,
+    running: Mutex<Vec<String>>,
+    /// Asked for from the board, for the scheduler to do.
+    asked: Mutex<Vec<String>>,
 }
 
 impl std::fmt::Debug for Tasks {
@@ -210,7 +226,43 @@ impl Tasks {
     /// The tasks kept in `file` (`None`: in memory only).
     pub fn open(file: Option<PathBuf>) -> Self {
         let items = file.as_ref().and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { file, items: Mutex::new(items), listeners: Mutex::default() }
+        Self { file, items: Mutex::new(items), listeners: Mutex::default(), revision: AtomicU64::new(0), running: Mutex::default(), asked: Mutex::default() }
+    }
+
+    /// Changes whenever a task does, or starts or ends a run.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Relaxed)
+    }
+
+    /// The board asked for task `id` now: the scheduler does it next.
+    pub fn ask_run(&self, id: &str) -> Result<(), String> {
+        self.get(id).ok_or_else(|| format!("no task {id}"))?;
+        let mut asked = self.asked.lock().unwrap();
+        if !asked.iter().any(|a| a == id) {
+            asked.push(id.to_string());
+        }
+        Ok(())
+    }
+
+    pub fn has_asked(&self) -> bool {
+        !self.asked.lock().unwrap().is_empty()
+    }
+
+    /// The tasks the board asked for, taken.
+    pub fn take_asked(&self) -> Vec<Task> {
+        let ids = std::mem::take(&mut *self.asked.lock().unwrap());
+        ids.iter().filter_map(|id| self.get(id)).collect()
+    }
+
+    fn set_running(&self, id: &str, on: bool) {
+        {
+            let mut running = self.running.lock().unwrap();
+            running.retain(|r| r != id);
+            if on {
+                running.push(id.to_string());
+            }
+        }
+        self.told();
     }
 
     pub fn listen(&self, listener: TasksListener) {
@@ -227,9 +279,36 @@ impl Tasks {
             .iter()
             .map(|e| {
                 let next = e.task.enabled.then(|| e.task.schedule.next_after(ms_time(e.state.from), ms_time(e.state.since).max(now))).flatten();
-                TaskEntry { next: next.map(|n| n.timestamp_millis() as u64), ..e.clone() }
+                let running = self.running.lock().unwrap().contains(&e.task.id);
+                TaskEntry { next: next.map(|n| n.timestamp_millis() as u64), running, ..e.clone() }
             })
             .collect()
+    }
+
+    /// `set_tasks`' arguments: the list as the board's Tasks app takes it,
+    /// times in Unix seconds, texts cut to its fields.
+    pub fn board_list(&self) -> Value {
+        let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+        let list: Vec<Value> = self
+            .list()
+            .into_iter()
+            .take(BOARD_MAX)
+            .map(|e| {
+                let mut v = serde_json::to_value(&e.task.schedule).unwrap_or_else(|_| json!({}));
+                v["id"] = json!(e.task.id);
+                v["name"] = json!(cut(&e.task.name, BOARD_NAME));
+                v["what"] = json!(cut(&e.task.what, BOARD_TEXT));
+                v["acting"] = json!(e.task.acting);
+                v["enabled"] = json!(e.task.enabled);
+                v["next"] = json!(e.next.map_or(0, |n| n / 1000));
+                v["last"] = json!(e.state.last_run / 1000);
+                v["result"] = json!(cut(&e.state.last_result, BOARD_TEXT));
+                v["failed"] = json!(e.state.last_error.is_some());
+                v["running"] = json!(e.running);
+                v
+            })
+            .collect();
+        json!({"tasks": list})
     }
 
     /// Add `task`, or change the one with its id. A new schedule, or a task
@@ -275,7 +354,7 @@ impl Tasks {
                         return Err(format!("there are {MAX} tasks already"));
                     }
                     task.id = new_id(&task.name, items);
-                    items.push(TaskEntry { task, state: TaskState::default(), next: None });
+                    items.push(TaskEntry { task, state: TaskState::default(), next: None, running: false });
                     items.len() - 1
                 }
             };
@@ -351,12 +430,18 @@ impl Tasks {
             self.save(&items);
             out
         };
+        self.told();
+        Ok(out)
+    }
+
+    /// A new revision, and the listeners told.
+    fn told(&self) {
+        self.revision.fetch_add(1, Ordering::Relaxed);
         let list = self.list();
         let listeners = self.listeners.lock().unwrap().clone();
         for listener in listeners {
             listener(&list);
         }
-        Ok(out)
     }
 
     fn save(&self, items: &[TaskEntry]) {
@@ -492,7 +577,9 @@ to tell them only in some case and it didn't come up.",
         before = told_before(assistant, &task.id),
     );
     let first = assistant.inbox.list().first().map(|n| n.id.clone());
+    assistant.tasks.set_running(&task.id, true);
     let outcome = assistant.run_task(&prompt, host(task.acting, live).as_ref()).map(|r| r.text);
+    assistant.tasks.set_running(&task.id, false);
     let new: Vec<String> = assistant.inbox.list().into_iter().take_while(|n| Some(&n.id) != first.as_ref()).map(|n| n.id).collect();
     assistant.inbox.tag(&new, &task.id);
     assistant.tasks.record(&task.id, &outcome);
@@ -621,6 +708,29 @@ mod tests {
         assert_eq!(tasks.call_tool(&json!({"action": "remove", "name": "weekly"})).unwrap(), "removed Weekly issues");
         let v = serde_json::to_value(task(Schedule::Hourly { every: 2 })).unwrap();
         assert_eq!((v["repeat"].as_str(), v["every"].as_u64()), (Some("hourly"), Some(2)));
+    }
+
+    #[test]
+    fn the_board_list_and_its_asks() {
+        let tasks = Tasks::open(None);
+        let before = tasks.revision();
+        let long = "x".repeat(300);
+        tasks.put(Task { what: long, ..task(Schedule::Daily { at: "09:00".into(), days: vec![1, 3] }) }).unwrap();
+        assert!(tasks.revision() > before);
+        let list = tasks.board_list();
+        let t = &list["tasks"][0];
+        assert_eq!((t["id"].as_str(), t["repeat"].as_str(), t["days"][1].as_u64()), (Some("issues"), Some("daily"), Some(3)));
+        assert_eq!(t["what"].as_str().unwrap().len(), BOARD_TEXT);
+        assert!(t["next"].as_u64().unwrap() > 1_700_000_000 && t["next"].as_u64().unwrap() < 10_000_000_000, "seconds");
+        assert_eq!((t["acting"].as_str(), t["running"].as_bool(), t["failed"].as_bool()), (Some("ask"), Some(false), Some(false)));
+        assert!(tasks.ask_run("nope").is_err());
+        tasks.ask_run("issues").unwrap();
+        tasks.ask_run("issues").unwrap();
+        assert!(tasks.has_asked());
+        assert_eq!(tasks.take_asked().len(), 1);
+        assert!(!tasks.has_asked());
+        tasks.set_running("issues", true);
+        assert!(tasks.list()[0].running && tasks.board_list()["tasks"][0]["running"] == true);
     }
 
     #[test]

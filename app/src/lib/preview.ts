@@ -13,7 +13,6 @@ import type {
   Confirmation,
   ConnectorConfig,
   ConnectorStatus,
-  Habit,
   Meeting,
   MeetingSettings,
   MeetingSources,
@@ -127,18 +126,6 @@ let chat: ChatLine[] = [
   },
 ];
 
-let habits: Habit[] = [
-  { id: "water", name: "Water", goal: 8, done: 3, streak: 12, color: "#40C8E0" },
-  { id: "walk", name: "Walk", goal: 1, done: 0, streak: 4 },
-  { id: "read", name: "Read", goal: 1, done: 1, streak: 21 },
-];
-
-function habitChange(change: () => void): Habit[] {
-  change();
-  emit("habits", habits);
-  return habits;
-}
-
 const HOUR = 60 * MIN;
 
 let tasks: TaskEntry[] = [
@@ -146,16 +133,19 @@ let tasks: TaskEntry[] = [
     task: { id: "weekly-issues", name: "Weekly issues", what: "Sum up my open GitHub issues and tell me which ones have been stuck for more than a week.", repeat: "daily", at: "09:00", days: [1], enabled: true, acting: "never" },
     state: { last_run: now() - 26 * HOUR, last_error: null, last_result: "Told you about 6 open issues, 2 stuck: YOR-131 and YOR-140.", runs: 4, missed: 0 },
     next: now() + 5 * 24 * HOUR,
+    running: false,
   },
   {
     task: { id: "invoices", name: "Monthly invoices", what: "Find last month's invoices in my mail, sum them up and send the total to my accountant.", repeat: "monthly", day: 1, at: "10:00", enabled: true, acting: "ask" },
     state: { last_run: 0, last_error: null, last_result: "", runs: 0, missed: 0 },
     next: now() + 27 * 24 * HOUR,
+    running: false,
   },
   {
     task: { id: "server", name: "Server status", what: "Check status.example.com and tell me only if something is down.", repeat: "hourly", every: 3, enabled: false, acting: "never" },
     state: { last_run: now() - 50 * HOUR, last_error: null, last_result: "", runs: 12, missed: 1 },
     next: null,
+    running: false,
   },
 ];
 
@@ -576,7 +566,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
       const next = t.enabled ? now() + (t.repeat === "hourly" ? t.every * HOUR : 20 * HOUR) : null;
       if (!t.id) {
         t.id = t.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        tasks = [...tasks, { task: t, state: { last_run: 0, last_error: null, last_result: "", runs: 0, missed: 0 }, next }];
+        tasks = [...tasks, { task: t, state: { last_run: 0, last_error: null, last_result: "", runs: 0, missed: 0 }, next, running: false }];
       } else tasks = tasks.map((e) => (e.task.id === t.id ? { ...e, task: t, next } : e));
     }),
   remove_task: (a) => taskChange(() => (tasks = tasks.filter((e) => e.task.id !== a.id))),
@@ -587,24 +577,6 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     emit("schedule", { kind: "task", id: a.id, error: null });
     return line;
   },
-  habits: () => habits,
-  add_habit: (a) =>
-    habitChange(() => {
-      const name = String(a.name).trim();
-      if (!name) throw "a habit needs a name";
-      habits = [...habits, { id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name, goal: Number(a.goal) || 1, done: 0, streak: 0 }];
-    }),
-  edit_habit: (a) => habitChange(() => (habits = habits.map((h) => (h.id === a.id ? { ...h, name: (a.name as string) ?? h.name, goal: (a.goal as number) ?? h.goal } : h)))),
-  remove_habit: (a) => habitChange(() => (habits = habits.filter((h) => h.id !== a.id))),
-  check_habit: (a) =>
-    habitChange(() => {
-      habits = habits.map((h) => {
-        if (h.id !== a.id) return h;
-        const done = Math.max(0, Math.min(h.goal, h.done + Number(a.by)));
-        const streak = h.streak + (done >= h.goal ? 1 : 0) - (h.done >= h.goal ? 1 : 0);
-        return { ...h, done, streak };
-      });
-    }),
   put_watcher: (a) => {
     const w = a.watcher as Watcher;
     if (!w.id) w.id = w.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");

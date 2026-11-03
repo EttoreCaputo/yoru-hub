@@ -19,7 +19,6 @@ import type {
   ConnectorStatus,
   FlashEvent,
   Gaze,
-  Habit,
   Link,
   Task,
   TaskEntry,
@@ -86,7 +85,6 @@ class Store {
   connectorsError = $state("");
   presets = $state<Preset[]>([]);
   watchers = $state<WatchEntry[]>([]);
-  habits = $state<Habit[]>([]);
   tasks = $state<TaskEntry[]>([]);
   schedule = $state<(ScheduleEvent & { at: number })[]>([]);
   onboarding = $state<Onboarding | null>(null);
@@ -122,7 +120,6 @@ class Store {
     on<BridgeEvent>("bridge", (e) => this.#apply(e));
     on<FlashEvent>("flash", (e) => this.#applyFlash(e));
     on<Notification[]>("inbox", (items) => (this.inbox = items));
-    on<Habit[]>("habits", (items) => (this.habits = items));
     on<TaskEntry[]>("tasks", (items) => (this.tasks = items));
     on<ChatLine[]>("chat", (lines) => (this.chat = lines));
     on<ScheduleEvent>("schedule", (e) => this.#onSchedule(e));
@@ -151,7 +148,6 @@ class Store {
     void this.refreshConnectors();
     void this.refreshWatchers();
     void this.refreshTimers();
-    call<Habit[]>("habits").then((h) => (this.habits = h), () => {});
     call<TaskEntry[]>("tasks").then((t) => (this.tasks = t), () => {});
     call<Preset[]>("connector_presets").then((p) => (this.presets = p), () => {});
     call<Meeting | null>("meeting_active").then((m) => (this.recording = m), () => {});
@@ -335,22 +331,6 @@ class Store {
 
   async removeWatcher(id: string) {
     this.watchers = await call<WatchEntry[]>("remove_watcher", { id });
-  }
-
-  async addHabit(name: string, goal: number) {
-    this.habits = await call<Habit[]>("add_habit", { name, goal, color: null });
-  }
-
-  async editHabit(id: string, change: { name?: string; goal?: number }) {
-    this.habits = await call<Habit[]>("edit_habit", { id, name: change.name ?? null, goal: change.goal ?? null, color: null });
-  }
-
-  async removeHabit(id: string) {
-    this.habits = await call<Habit[]>("remove_habit", { id });
-  }
-
-  async checkHabit(id: string, by: 1 | -1) {
-    this.habits = await call<Habit[]>("check_habit", { id, by });
   }
 
   async putTask(task: Task) {

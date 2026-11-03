@@ -242,7 +242,7 @@ const it: Messages = {
 
   routines: {
     title: "Routine",
-    lede: "Quello che Yoru fa da solo: il riepilogo del mattino, le ore di silenzio, le tue abitudini e le cose che tiene d'occhio.",
+    lede: "Quello che Yoru fa da solo: il riepilogo del mattino, le ore di silenzio e le cose che tiene d'occhio.",
     recap: "Riepilogo del mattino",
     recapHint: "Posta, calendario e cose in sospeso, in poche righe, una volta al mattino.",
     at: "Alle",
@@ -275,19 +275,6 @@ const it: Messages = {
     logWatched: (name: string, n: number) => (n ? `${name}: ${n} novità` : `${name}: niente di nuovo`),
     logRecap: "Riepilogo del mattino fatto",
     logTask: (name: string, ok: boolean) => `${name}: ${ok ? "fatto" : "non fatto"}`,
-    habits: "Abitudini",
-    habitsHint: "Quello che vuoi fare ogni giorno. Sono nell'app Abitudini della board: tocca per spuntarne una, tieni premuto per toglierla.",
-    noHabits: "Ancora nessuna abitudine",
-    noHabitsHint: "Aggiungine una qui, o dillo a Yoru (\"voglio bere acqua 8 volte al giorno\").",
-    habitName: "Abitudine",
-    habitPlaceholder: "Acqua",
-    goal: "Volte al giorno",
-    addHabit: "Aggiungi",
-    today: (done: number, goal: number) => `${done} su ${goal} oggi`,
-    streak: (days: number) => (days === 1 ? "1 giorno di fila" : `${days} giorni di fila`),
-    doneOnce: "Fatta un'altra volta",
-    undoOnce: "Una in meno",
-    removeHabit: (name: string) => `Togliere l'abitudine "${name}"?`,
   },
 
   watcher: {

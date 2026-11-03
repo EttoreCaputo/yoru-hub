@@ -64,7 +64,7 @@
         {@const task = e.task}
         <li class="panel" class:off={!task.enabled}>
           <div class="t-head">
-            <span class="dot {e.state.last_error ? 'wrong' : task.enabled ? 'done' : ''}"></span>
+            <span class="dot {e.running ? 'think' : e.state.last_error ? 'wrong' : task.enabled ? 'done' : ''}"></span>
             <h3>{task.name}</h3>
             <span class="tag">{t.schedule(task)}</span>
             <span class="tag" class:acts={task.acting === "free"}>{t.actingTag[task.acting]}</span>
@@ -80,7 +80,7 @@
           {#if e.state.last_result && !e.state.last_error}<p class="result dim">{e.state.last_result}</p>{/if}
           {#if errors[task.id] ?? e.state.last_error}<p class="error-text">{errors[task.id] ?? e.state.last_error}</p>{/if}
           <div class="row actions">
-            <button class="btn small" disabled={running.has(task.id) || !store.info?.ready} onclick={() => runNow(task.id)}>{running.has(task.id) ? t.running : t.runNow}</button>
+            <button class="btn small" disabled={running.has(task.id) || e.running || !store.info?.ready} onclick={() => runNow(task.id)}>{running.has(task.id) || e.running ? t.running : t.runNow}</button>
             <button class="btn quiet small" onclick={() => (editing = structuredClone($state.snapshot(task)) as Task)}>{t.edit}</button>
             <ConfirmButton small label={t.remove} question={t.removeConfirm(task.name)} sure={t.removeSure} onconfirm={() => store.removeTask(task.id)} />
           </div>

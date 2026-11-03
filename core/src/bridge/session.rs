@@ -1,7 +1,8 @@
 //! One board's connection: the link and its reader, the protocol v2
 //! handshake (again after a reboot), the voice pipeline, the pointer for its
-//! eyes, each snapshot the sampler publishes, and the timers and habits
-//! lists of the menu's apps whenever they change (firmware 0.11.0).
+//! eyes, each snapshot the sampler publishes, and the timers and tasks
+//! lists of the menu's apps whenever they change (firmware 0.11.0, tasks
+//! since 0.16.0).
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -153,11 +154,12 @@ pub(super) fn run(
                     sink(BridgeEvent::BoardLog { line: format!("host: timer_new: {e}") });
                 }
             }
-            LinkEvent::Notification { method, params } if method == "habit_check" => {
-                if let (Some(assistant), Some(id), Some(done)) = (&assistant, params["id"].as_str(), params["done"].as_u64())
-                    && let Err(e) = assistant.habits.set_done(id, done as u32)
+            LinkEvent::Notification { method, params } if method == "task_run" => {
+                // "Do it now" on the board: the scheduler does it, with the board and the cards.
+                if let (Some(assistant), Some(id)) = (&assistant, params["id"].as_str())
+                    && let Err(e) = assistant.tasks.ask_run(id)
                 {
-                    sink(BridgeEvent::BoardLog { line: format!("host: habit_check {id}: {e}") });
+                    sink(BridgeEvent::BoardLog { line: format!("host: task_run {id}: {e}") });
                 }
             }
             LinkEvent::Audio(payload) => receiving.lock().unwrap().audio(&payload),
@@ -294,12 +296,13 @@ pub(super) fn run(
     Ok(())
 }
 
-/// What the board's Timers and Habits apps were last sent, to send them again
+/// What the board's Timers and Tasks apps were last sent, to send them again
 /// only when they change (and on every handshake).
 #[derive(Default)]
 struct Lists {
     timers: Option<Sent<u64>>,
-    habits: Option<Sent<(u64, chrono::NaiveDate)>>,
+    /// The revision, and the minute: a task's next time moves on by itself.
+    tasks: Option<Sent<(u64, i64)>>,
     /// The services for talking without the computer, as sent, and when they
     /// were last looked at: they're read from the settings and the memory.
     cloud: Option<Sent<String>>,
@@ -321,7 +324,7 @@ impl Lists {
         let has = |c: &str| capabilities.iter().any(|x| x == c);
         Self {
             timers: has("timers").then(Sent::default),
-            habits: has("habits").then(Sent::default),
+            tasks: has("tasks").then(Sent::default),
             cloud: has("cloud").then(Sent::default),
             cloud_checked: None,
         }
@@ -337,12 +340,12 @@ impl Lists {
                 let _ = link.call_tool("set_timers", config.timers.board_list(), TOOL_TIMEOUT);
             }
         }
-        if let (Some(sent), Some(assistant)) = (&mut self.habits, &config.assistant) {
-            // A new day starts every count again.
-            let now = (assistant.habits.revision(), crate::assistant::habits::today());
+        if let (Some(sent), Some(assistant)) = (&mut self.tasks, &config.assistant) {
+            // Every change, and every ten minutes for the times to come.
+            let now = (assistant.tasks.revision(), chrono::Local::now().timestamp() / 600);
             if sent.last != Some(now) {
                 sent.last = Some(now);
-                let _ = link.call_tool("set_habits", assistant.habits.board_list(), TOOL_TIMEOUT);
+                let _ = link.call_tool("set_tasks", assistant.tasks.board_list(), TOOL_TIMEOUT);
             }
         }
         if let Some(sent) = &mut self.cloud
