@@ -440,11 +440,13 @@ fn main() -> ExitCode {
     let scheduler = {
         let (assistant, watchers, stop) = (the_assistant.clone(), Arc::new(Watchers::open(watchers_file())), stop.clone());
         thread::spawn(move || {
-            watchers::run_scheduler(&assistant, &watchers, &TaskHost, &stop, &|e| match e {
+            watchers::run_scheduler(&assistant, &watchers, &TaskHost, &|| Box::new(TaskHost), &stop, &|e| match e {
                 watchers::ScheduleEvent::Watched { id, told, error: None } if told > 0 => println!("watcher {id}: {told} new"),
                 watchers::ScheduleEvent::Watched { id, error: Some(e), .. } => eprintln!("watcher {id}: {e}"),
                 watchers::ScheduleEvent::Recap { error: None } => println!("recap given"),
                 watchers::ScheduleEvent::Recap { error: Some(e) } => eprintln!("recap: {e}"),
+                watchers::ScheduleEvent::Task { id, error: None } => println!("task {id} done"),
+                watchers::ScheduleEvent::Task { id, error: Some(e) } => eprintln!("task {id}: {e}"),
                 _ => {}
             })
         })

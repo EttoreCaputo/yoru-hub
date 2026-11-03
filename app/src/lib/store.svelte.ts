@@ -1,6 +1,6 @@
 // What the window knows, kept current by the Rust side's events: the board,
 // the assistant (inbox, conversation, settings, the cards waiting for an
-// answer), the connectors and the watchers.
+// answer), the connectors, the watchers and the tasks.
 //
 // Pages read it and call its methods; the Rust side stays the source of
 // truth, so every change goes there and comes back as an event or a reply.
@@ -21,6 +21,8 @@ import type {
   Gaze,
   Habit,
   Link,
+  Task,
+  TaskEntry,
   Meeting,
   MeetingEvent,
   Notification,
@@ -35,7 +37,7 @@ import type {
   Watcher,
 } from "./types";
 
-export type Page = "today" | "conversation" | "inbox" | "connectors" | "routines" | "memory" | "meetings" | "spoken" | "settings";
+export type Page = "today" | "conversation" | "inbox" | "connectors" | "tasks" | "routines" | "memory" | "meetings" | "spoken" | "settings";
 
 /** Opening the port resets the S3: it's up again after about this long. */
 const BOOT_MS = 1100;
@@ -85,6 +87,7 @@ class Store {
   presets = $state<Preset[]>([]);
   watchers = $state<WatchEntry[]>([]);
   habits = $state<Habit[]>([]);
+  tasks = $state<TaskEntry[]>([]);
   schedule = $state<(ScheduleEvent & { at: number })[]>([]);
   onboarding = $state<Onboarding | null>(null);
 
@@ -120,6 +123,7 @@ class Store {
     on<FlashEvent>("flash", (e) => this.#applyFlash(e));
     on<Notification[]>("inbox", (items) => (this.inbox = items));
     on<Habit[]>("habits", (items) => (this.habits = items));
+    on<TaskEntry[]>("tasks", (items) => (this.tasks = items));
     on<ChatLine[]>("chat", (lines) => (this.chat = lines));
     on<ScheduleEvent>("schedule", (e) => this.#onSchedule(e));
     on<ConnectorStatus[]>("connectors", (list) => (this.connectors = list));
@@ -148,6 +152,7 @@ class Store {
     void this.refreshWatchers();
     void this.refreshTimers();
     call<Habit[]>("habits").then((h) => (this.habits = h), () => {});
+    call<TaskEntry[]>("tasks").then((t) => (this.tasks = t), () => {});
     call<Preset[]>("connector_presets").then((p) => (this.presets = p), () => {});
     call<Meeting | null>("meeting_active").then((m) => (this.recording = m), () => {});
     call<string[]>("meetings_transcribing").then((ids) => {
@@ -346,6 +351,18 @@ class Store {
 
   async checkHabit(id: string, by: 1 | -1) {
     this.habits = await call<Habit[]>("check_habit", { id, by });
+  }
+
+  async putTask(task: Task) {
+    this.tasks = await call<TaskEntry[]>("put_task", { task });
+  }
+
+  async removeTask(id: string) {
+    this.tasks = await call<TaskEntry[]>("remove_task", { id });
+  }
+
+  async runTask(id: string) {
+    await call<string>("run_task_now", { id });
   }
 
   async refreshTimers() {

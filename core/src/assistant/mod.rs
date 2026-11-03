@@ -8,7 +8,8 @@
 //! app, in one conversation that is forgotten after a quiet while (the
 //! memory carries what matters across them). [`Assistant::run_task`] does a
 //! job on its own, outside the conversation: a watcher that found something
-//! new ([`watchers`]), the morning recap ([`routines`]).
+//! new ([`watchers`]), the morning recap ([`routines`]), a task the user gave
+//! it ([`tasks`]).
 //!
 //! How a turn goes: the model gets Yoru's own tools (`notify`, `remember`,
 //! `forget`, `revise_memory`, `get_inbox`, the timers), the board's, web search (a server
@@ -40,6 +41,7 @@ pub mod inbox;
 pub mod memory;
 pub mod routines;
 pub mod select;
+pub mod tasks;
 pub mod watchers;
 
 use std::fs;
@@ -62,6 +64,7 @@ pub use external::{Errand, ErrandListener, ExternalTool, ExternalTools};
 pub use habits::{HabitView, Habits};
 pub use inbox::{Inbox, InboxChange, Notification, Urgency};
 pub use memory::Memory;
+pub use tasks::{TaskEntry, Tasks};
 
 /// Claude's model, unless the settings say otherwise.
 pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
@@ -274,6 +277,7 @@ pub struct Assistant {
     pub memory: Memory,
     pub inbox: Arc<Inbox>,
     pub habits: Arc<Habits>,
+    pub tasks: Arc<Tasks>,
     pub timers: Arc<Timers>,
     external: Mutex<Option<Arc<dyn ExternalTools>>>,
     /// Told of each external call the model makes (the bridge, while it runs).
@@ -316,6 +320,7 @@ impl Assistant {
             memory: Memory::open(file("memory.md")),
             inbox: Arc::new(Inbox::open(file("inbox.json"))),
             habits: Arc::new(Habits::open(file("habits.json"))),
+            tasks: Arc::new(Tasks::open(file("tasks.json"))),
             timers,
             settings: Mutex::new(settings),
             external: Mutex::default(),
@@ -657,6 +662,7 @@ impl Assistant {
             "forget" => return self.memory.forget(input["text"].as_str().unwrap_or_default()),
             "revise_memory" => return self.memory.revise(input["old"].as_str().unwrap_or_default(), input["text"].as_str().unwrap_or_default()),
             "habits" => return self.habits.call_tool(input),
+            "tasks" => return self.tasks.call_tool(input),
             "get_inbox" => {
                 let items: Vec<Value> = self
                     .inbox
@@ -771,6 +777,9 @@ short line, in the right section, no duplicates (merge them), nothing passing (a
 Don't announce every change; mention it briefly only when the user would want to know. The memory is in <memory> below.
 - Timers and reminders run on this computer and ring on your board. Daily habits (the habits tool) show in your board's Habits app, \
 with today's count and the streak: when the user says they did one, tick it with done.
+- The user can give you tasks to do on your own, once or on a schedule (the tasks tool): when they ask you to do something later or \
+regularly (\"every Monday at 9 sum up my issues\", \"tomorrow at 6 pm check whether Marco answered\"), add it as a task, with the job \
+in their words. A reminder that only rings is a timer; a task is work you do.
 
 # Notifying
 notify puts a line in the user's inbox and on your board. Urgency: low (inbox only), normal (a banner), high (you knock on the glass: \
@@ -842,6 +851,7 @@ tell (what they want to be told about), quiet (what they don't want to hear abou
             "input_schema": {"type": "object", "properties": {}},
         }),
         Habits::tool(),
+        Tasks::tool(),
     ]
 }
 

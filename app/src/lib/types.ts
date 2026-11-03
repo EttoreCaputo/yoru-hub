@@ -88,7 +88,26 @@ export type Habit = { id: string; name: string; goal: number; done: number; stre
 export type WatchState = { last_run: number; last_error: string | null; told: number };
 export type WatchEntry = { watcher: Watcher; state: WatchState };
 
-export type ScheduleEvent = { kind: "watched"; id: string; told: number; error: string | null } | { kind: "recap"; error: string | null };
+export type ScheduleEvent =
+  | { kind: "watched"; id: string; told: number; error: string | null }
+  | { kind: "recap"; error: string | null }
+  | { kind: "task"; id: string; error: string | null };
+
+/** When a task runs (`assistant/tasks.rs`): days are 1 (Monday) to 7, none for every day. */
+export type TaskSchedule =
+  | { repeat: "once"; date: string; at: string }
+  | { repeat: "daily"; at: string; days: number[] }
+  | { repeat: "monthly"; day: number; at: string }
+  | { repeat: "hourly"; every: number };
+
+/** How far a task may go: read and tell only, ask before acting, or act freely. */
+export type Acting = "never" | "ask" | "free";
+
+/** A job the user gave Yoru to do on his own. */
+export type Task = TaskSchedule & { id: string; name: string; what: string; enabled: boolean; acting: Acting };
+
+export type TaskState = { last_run: number; last_error: string | null; last_result: string; runs: number; missed: number };
+export type TaskEntry = { task: Task; state: TaskState; next: number | null };
 
 export type ConnectionState = "disabled" | "needs_login" | "connecting" | "connected" | "error";
 

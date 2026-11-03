@@ -70,7 +70,8 @@
 
   const toggle = (w: Watcher, enabled: boolean) => store.putWatcher({ ...w, enabled });
   const nameOf = (id: string) => store.watchers.find((e) => e.watcher.id === id)?.watcher.name ?? id;
-  const logLine = (e: ScheduleEvent) => (e.kind === "recap" ? t.logRecap : t.logWatched(nameOf(e.id), e.told));
+  const taskName = (id: string) => store.tasks.find((e) => e.task.id === id)?.task.name ?? id;
+  const logLine = (e: ScheduleEvent) => (e.kind === "recap" ? t.logRecap : e.kind === "task" ? t.logTask(taskName(e.id), !e.error) : t.logWatched(nameOf(e.id), e.told));
 </script>
 
 <div class="page">

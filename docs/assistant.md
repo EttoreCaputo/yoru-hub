@@ -98,6 +98,7 @@ Files in the data folder that the agent reads at the start of a turn and keeps u
 - **Triage.** The model decides, with the memory, whether something new is worth telling, how urgent it is, and says it in one line.
 - **Delivery** (`bridge/alerts.rs`). Every notification goes into the app's inbox and, with `show_notification`, into the board's at its urgency: `low` only in the inbox, `normal` with a banner and a chirp, `high` with Yoru knocking on the glass, `urgent` with the alarm, lighting the dark screen, and said aloud by the board that speaks once no conversation is on. In quiet hours anything below `urgent` arrives as `low`.
 - **Routines.** The morning recap (mail, calendar, what's pending) at a set time, and on request ("recap").
+- **Tasks** (added 2026-11-03; habits are the user's own things to do, tasks are Yoru's). `assistant/tasks.rs` keeps in `tasks.json` the jobs the user gives Yoru, in words: once (a date and a time), every day or on some weekdays, on a day of every month (the month's last day when it is shorter), or every 1 to 168 hours. The scheduler runs a due one as a job of its own (`tasks::run`, through `Assistant::run_task`), which ends with a notification tagged with the task; what Yoru says he did is kept as its last result. A time missed while the computer was off is still done within 6 hours, later it is counted as missed; a new schedule, or a task turned back on, counts from then. Each task says how far it may go: read and tell (anything that acts is refused), ask first (the board's Allow/Deny card and the app's, as in a conversation; unanswered, not done) or act without asking. Only the app sets the last one: the model's `tasks` tool (list, add, remove) always adds "ask first" tasks, so a mail a task reads can't set up one that sends freely. The app has a Tasks page with "do it now"; the CLI's scheduler runs them too, unable to ask.
 - **Firmware.** An inbox on the board: a `show_notification` tool (source, title, one line, urgency) and a list to scroll, in firmware 0.10.0; `notification_action` comes back when it is read, dismissed or opened.
 
 ## Coding agents
@@ -119,6 +120,7 @@ Until 2026-10-19 the window was DualEye's: a home with the board's mirror and pi
 | Conversation | The chat with Yoru, text and voice, with the tools it used folded away and the confirmations it is waiting for |
 | Inbox | Every notification with its source, read or not, and its actions: open, reply, dismiss, "don't tell me about this again" (which goes into the memory) |
 | Connectors | A card per service: connected or not, Connect and Disconnect, what it may read and what it may do, its watchers and how often |
+| Tasks | The jobs you give Yoru, once or on a schedule, how far each may go, when it runs next and what it did last (added 2026-11-03) |
 | Routines | The morning recap, quiet hours, the watchers' schedule |
 | Memory | What Yoru knows about you, editable |
 | Spoken | What ElevenLabs said, to play again, delete or export (added 2026-10-22) |
@@ -142,7 +144,7 @@ Status (2026-10-29): A0 to A5 are built, in the core, the CLI and the app, and t
 Left:
 - **macOS only.** Decided on 2026-10-29: Yoru supports only macOS (Apple Silicon and Intel) for now. The release workflow builds only for it, and new work, like the meetings in [meetings.md](meetings.md), can use Mac-only APIs without a fallback for Windows and Linux.
 - **Meetings.** Recording calls and other audio, transcribing, telling the speakers apart and summarizing, all on this computer: [meetings.md](meetings.md), phases M1 to M5 (planned 2026-10-29).
-- **Habits outside the app.** The MCP server and the CLI have no habits tools yet; the model and the app do.
+- **Habits and tasks outside the app.** The MCP server and the CLI have no tools to set habits or tasks yet; the model and the app do (the CLI's scheduler does run the tasks).
 - **The release.** `v0.1.0` is on GitHub, refreshed by each push to `main`; `main` stops at 2026-10-20, so everything from 2026-10-21 on is only on `develop`.
 
 - **A0. Yoru only.** Remove DualEye and the pet. Align with firmware 0.9.2 (no `get_pet`, push-to-talk accepted). The app, the CLI and the identifier are named Yoru. Done when the app runs with a Yoru on USB and nothing of DualEye is left.

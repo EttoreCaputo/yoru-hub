@@ -1,6 +1,6 @@
 //! The assistant's side of the app: Yoru's answers, inbox, memory, routines,
 //! watchers and connectors, as commands for the UI and the events that keep
-//! it current (`inbox`, `chat`, `habits`, `schedule`, `connectors`).
+//! it current (`inbox`, `chat`, `habits`, `tasks`, `schedule`, `connectors`).
 //!
 //! Everything the assistant does that can take a while (a turn of the model,
 //! a sign-in, a watcher) runs on a blocking thread, never on Tauri's.
@@ -14,6 +14,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+use yoru_core::assistant::tasks::{self, Task, TaskEntry};
 use yoru_core::assistant::watchers::{self, ScheduleEvent, WatchEntry, Watcher};
 use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, Confirmations, HabitView, Host, Notification, Reply, Settings, TaskHost};
 use yoru_core::cloud::{self, KeySource, Provider};
@@ -101,6 +102,12 @@ pub fn start(app: &AppHandle) {
             let _ = app.emit("habits", habits);
         }));
     }
+    {
+        let app = app.clone();
+        a.tasks.listen(Arc::new(move |tasks| {
+            let _ = app.emit("tasks", tasks);
+        }));
+    }
     start_connectors(app);
     start_scheduler(app);
 }
@@ -144,8 +151,10 @@ fn start_scheduler(app: &AppHandle) {
     let (assistant, watchers, stop) = (state.assistant.clone(), state.watchers.clone(), state.services.stop.clone());
     let app = app.clone();
     let handle = thread::Builder::new().name("yoru-scheduler".into()).spawn(move || {
-        // Jobs run with nobody watching: nothing that acts is allowed.
-        watchers::run_scheduler(&assistant, &watchers, &TaskHost, &stop, &|e| {
+        // Watchers run with nobody watching: nothing that acts is allowed.
+        // Tasks get the board and the cards, as far as each one may act.
+        let live = || -> Box<dyn Host> { Box::new(host(&app.state::<AppState>())) };
+        watchers::run_scheduler(&assistant, &watchers, &TaskHost, &live, &stop, &|e| {
             let _ = app.emit("schedule", &e);
         });
     });
@@ -303,6 +312,40 @@ pub fn remove_habit(state: State<AppState>, id: String) -> Result<Vec<HabitView>
 pub fn check_habit(state: State<AppState>, id: String, by: i32) -> Result<Vec<HabitView>, String> {
     state.assistant.habits.check(&id, by)?;
     Ok(state.assistant.habits.list())
+}
+
+// Tasks.
+
+#[tauri::command]
+pub fn tasks(state: State<AppState>) -> Vec<TaskEntry> {
+    state.assistant.tasks.list()
+}
+
+#[tauri::command]
+pub fn put_task(state: State<AppState>, task: Task) -> Result<Vec<TaskEntry>, String> {
+    state.assistant.tasks.put(task)?;
+    Ok(state.assistant.tasks.list())
+}
+
+#[tauri::command]
+pub fn remove_task(state: State<AppState>, id: String) -> Result<Vec<TaskEntry>, String> {
+    state.assistant.tasks.remove(&id)?;
+    Ok(state.assistant.tasks.list())
+}
+
+/// Do task `id` now; the `schedule` event says how it went, as for a
+/// scheduled run. Its schedule doesn't move.
+#[tauri::command]
+pub async fn run_task_now(app: AppHandle, id: String) -> Result<String, String> {
+    let emitter = app.clone();
+    let which = id.clone();
+    let result = blocking(app, move |state| {
+        let task = state.assistant.tasks.get(&which).ok_or("no such task")?;
+        tasks::run(&state.assistant, &task, &host(state))
+    })
+    .await;
+    let _ = emitter.emit("schedule", ScheduleEvent::Task { id, error: result.as_ref().err().cloned() });
+    result
 }
 
 // The inbox.

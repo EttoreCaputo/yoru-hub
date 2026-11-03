@@ -1,12 +1,17 @@
 // Every text the app shows, in English. `it.ts` mirrors it key for key; a
 // missing key fails `npm run check`.
 
+import type { TaskSchedule } from "../types";
+
+const ordinal = (n: number) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
+
 const en = {
   nav: {
     today: "Today",
     conversation: "Conversation",
     inbox: "Inbox",
     connectors: "Connectors",
+    tasks: "Tasks",
     routines: "Routines",
     memory: "Memory",
     meetings: "Meetings",
@@ -184,6 +189,59 @@ const en = {
     notRunning: "The connectors aren't running:",
   },
 
+  tasks: {
+    title: "Tasks",
+    lede: "Jobs you give Yoru to do on his own, once or on a schedule: he does them when it's time and tells you how it went.",
+    add: "Give a task",
+    new: "New task",
+    editTitle: "Edit task",
+    what: "What to do",
+    whatPlaceholder: "Every Monday, sum up my open GitHub issues and tell me which ones are stuck",
+    name: "Name",
+    namePlaceholder: "Weekly issues",
+    when: "When",
+    repeat: { once: "Once", daily: "Every day", monthly: "Every month", hourly: "Every few hours" },
+    date: "On",
+    dayOfMonth: "Day of the month",
+    everyHours: "Every (hours)",
+    at: "At",
+    days: "Days",
+    weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    everyDay: "every day",
+    acting: "How far it may go",
+    actingName: { never: "Read and tell", ask: "Ask before acting", free: "Act on its own" },
+    actingHint: {
+      never: "He looks things up and tells you, and changes nothing.",
+      ask: "Sending, creating or deleting asks you first, on the board and here. Unanswered, it isn't done.",
+      free: "He sends, creates and changes what the task says without asking. Only for tasks you trust.",
+    },
+    actingTag: { never: "reads only", ask: "asks first", free: "acts on its own" },
+    enabled: "On",
+    save: "Save",
+    cancel: "Cancel",
+    schedule: (s: TaskSchedule) => {
+      if (s.repeat === "once") return `once, ${new Date(`${s.date}T00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} at ${s.at}`;
+      if (s.repeat === "monthly") return `on the ${s.day}${ordinal(s.day)} of every month at ${s.at}`;
+      if (s.repeat === "hourly") return s.every === 1 ? "every hour" : `every ${s.every} hours`;
+      const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      return s.days.length && s.days.length < 7 ? `${s.days.map((d) => names[d - 1]).join(", ")} at ${s.at}` : `every day at ${s.at}`;
+    },
+    next: (when: string) => `next ${when}`,
+    doneOnce: "done",
+    off: "off",
+    lastRun: (when: string) => `last done ${when}`,
+    never: "not done yet",
+    missed: (n: number) => (n === 1 ? "missed once (computer off)" : `missed ${n} times (computer off)`),
+    runNow: "Do it now",
+    running: "Doing it…",
+    edit: "Edit",
+    remove: "Remove",
+    removeConfirm: (name: string) => `Remove the task "${name}"?`,
+    removeSure: "Remove it",
+    none: "No tasks yet",
+    noneHint: "Give Yoru one here, or say it (\"every morning at 9, tell me if there's mail from my boss\").",
+  },
+
   routines: {
     title: "Routines",
     lede: "What Yoru does on its own: the morning recap, the quiet hours, your habits and the things it keeps an eye on.",
@@ -218,6 +276,7 @@ const en = {
     log: "Recently",
     logWatched: (name: string, n: number) => (n ? `${name}: ${n} new` : `${name}: nothing new`),
     logRecap: "Morning recap given",
+    logTask: (name: string, ok: boolean) => `${name}: ${ok ? "done" : "not done"}`,
     habits: "Habits",
     habitsHint: "What you want to do every day. They're in the board's Habits app: tap to tick one off, hold to take it back.",
     noHabits: "No habits yet",

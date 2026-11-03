@@ -1,5 +1,6 @@
 // Every text the app shows, in Italian: key for key as `en.ts`.
 
+import type { TaskSchedule } from "../types";
 import type { Messages } from "./en";
 
 const it: Messages = {
@@ -8,6 +9,7 @@ const it: Messages = {
     conversation: "Conversazione",
     inbox: "Notifiche",
     connectors: "Servizi",
+    tasks: "Compiti",
     routines: "Routine",
     memory: "Memoria",
     meetings: "Riunioni",
@@ -185,6 +187,59 @@ const it: Messages = {
     notRunning: "I servizi non sono partiti:",
   },
 
+  tasks: {
+    title: "Compiti",
+    lede: "Lavori che dai a Yoru da fare da solo, una volta o con una cadenza: li fa quando è ora e ti dice com'è andata.",
+    add: "Assegna un compito",
+    new: "Nuovo compito",
+    editTitle: "Modifica il compito",
+    what: "Cosa fare",
+    whatPlaceholder: "Ogni lunedì, riassumi le mie issue aperte su GitHub e dimmi quali sono ferme",
+    name: "Nome",
+    namePlaceholder: "Issue della settimana",
+    when: "Quando",
+    repeat: { once: "Una volta", daily: "Ogni giorno", monthly: "Ogni mese", hourly: "Ogni tot ore" },
+    date: "Il",
+    dayOfMonth: "Giorno del mese",
+    everyHours: "Ogni (ore)",
+    at: "Alle",
+    days: "Giorni",
+    weekdays: ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"],
+    everyDay: "tutti i giorni",
+    acting: "Fin dove può spingersi",
+    actingName: { never: "Legge e riferisce", ask: "Chiede prima di agire", free: "Agisce da solo" },
+    actingHint: {
+      never: "Cerca, legge e ti dice cosa ha trovato, senza cambiare nulla.",
+      ask: "Per inviare, creare o cancellare ti chiede prima, sulla board e qui. Senza risposta non lo fa.",
+      free: "Invia, crea e modifica ciò che il compito dice senza chiedere. Solo per compiti di cui ti fidi.",
+    },
+    actingTag: { never: "solo lettura", ask: "chiede prima", free: "agisce da solo" },
+    enabled: "Attivo",
+    save: "Salva",
+    cancel: "Annulla",
+    schedule: (s: TaskSchedule) => {
+      if (s.repeat === "once") return `una volta, il ${new Date(`${s.date}T00:00`).toLocaleDateString("it-IT", { day: "numeric", month: "short" })} alle ${s.at}`;
+      if (s.repeat === "monthly") return `il ${s.day} di ogni mese alle ${s.at}`;
+      if (s.repeat === "hourly") return s.every === 1 ? "ogni ora" : `ogni ${s.every} ore`;
+      const names = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"];
+      return s.days.length && s.days.length < 7 ? `${s.days.map((d) => names[d - 1]).join(", ")} alle ${s.at}` : `ogni giorno alle ${s.at}`;
+    },
+    next: (when: string) => `prossima volta ${when}`,
+    doneOnce: "fatto",
+    off: "spento",
+    lastRun: (when: string) => `ultima volta ${when}`,
+    never: "non ancora fatto",
+    missed: (n: number) => (n === 1 ? "saltato una volta (computer spento)" : `saltato ${n} volte (computer spento)`),
+    runNow: "Fallo adesso",
+    running: "Lo faccio…",
+    edit: "Modifica",
+    remove: "Rimuovi",
+    removeConfirm: (name: string) => `Rimuovere il compito "${name}"?`,
+    removeSure: "Rimuovilo",
+    none: "Ancora nessun compito",
+    noneHint: "Assegnane uno qui, o dillo a Yoru (\"ogni mattina alle 9 dimmi se c'è posta dal mio capo\").",
+  },
+
   routines: {
     title: "Routine",
     lede: "Quello che Yoru fa da solo: il riepilogo del mattino, le ore di silenzio, le tue abitudini e le cose che tiene d'occhio.",
@@ -219,6 +274,7 @@ const it: Messages = {
     log: "Di recente",
     logWatched: (name: string, n: number) => (n ? `${name}: ${n} novità` : `${name}: niente di nuovo`),
     logRecap: "Riepilogo del mattino fatto",
+    logTask: (name: string, ok: boolean) => `${name}: ${ok ? "fatto" : "non fatto"}`,
     habits: "Abitudini",
     habitsHint: "Quello che vuoi fare ogni giorno. Sono nell'app Abitudini della board: tocca per spuntarne una, tieni premuto per toglierla.",
     noHabits: "Ancora nessuna abitudine",

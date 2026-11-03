@@ -13,6 +13,7 @@
     conversation: "M5 6h14v9H10l-4 3v-3H5z",
     inbox: "M4 13h4l1.5 2.5h5L16 13h4M5.5 6h13L20 13v5H4v-5z",
     connectors: "M9 7V4M15 7V4M7 7h10v4a5 5 0 0 1-10 0zM12 16v4",
+    tasks: "M9 6h10M9 12h10M9 18h10M4.5 5.5l1 1 2-2M4.5 11.5l1 1 2-2M4.5 17.5l1 1 2-2",
     routines: "M12 7v5l3 2M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z",
     memory: "M6 4h9l3 3v13H6zM9 10h6M9 14h6",
     meetings: "M12 4a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3ZM6 11a6 6 0 0 0 12 0M12 17v3",
@@ -20,7 +21,7 @@
     settings: "M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4",
   };
   const MOON = "M4 13a8 8 0 0 0 15 3.5A8 8 0 0 1 9 5a8 8 0 0 0-5 8Z";
-  const MAIN: Page[] = ["today", "conversation", "inbox", "connectors", "routines", "memory", "meetings", "spoken"];
+  const MAIN: Page[] = ["today", "conversation", "inbox", "connectors", "tasks", "routines", "memory", "meetings", "spoken"];
   const BODY: Page[] = ["settings"];
 
   const tint = $derived(

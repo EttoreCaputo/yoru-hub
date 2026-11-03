@@ -20,6 +20,8 @@ import type {
   Notification,
   Preset,
   SpokenClip,
+  Task,
+  TaskEntry,
   TimersInfo,
   ToolInfo,
   VoiceInfo,
@@ -135,6 +137,32 @@ function habitChange(change: () => void): Habit[] {
   change();
   emit("habits", habits);
   return habits;
+}
+
+const HOUR = 60 * MIN;
+
+let tasks: TaskEntry[] = [
+  {
+    task: { id: "weekly-issues", name: "Weekly issues", what: "Sum up my open GitHub issues and tell me which ones have been stuck for more than a week.", repeat: "daily", at: "09:00", days: [1], enabled: true, acting: "never" },
+    state: { last_run: now() - 26 * HOUR, last_error: null, last_result: "Told you about 6 open issues, 2 stuck: YOR-131 and YOR-140.", runs: 4, missed: 0 },
+    next: now() + 5 * 24 * HOUR,
+  },
+  {
+    task: { id: "invoices", name: "Monthly invoices", what: "Find last month's invoices in my mail, sum them up and send the total to my accountant.", repeat: "monthly", day: 1, at: "10:00", enabled: true, acting: "ask" },
+    state: { last_run: 0, last_error: null, last_result: "", runs: 0, missed: 0 },
+    next: now() + 27 * 24 * HOUR,
+  },
+  {
+    task: { id: "server", name: "Server status", what: "Check status.example.com and tell me only if something is down.", repeat: "hourly", every: 3, enabled: false, acting: "never" },
+    state: { last_run: now() - 50 * HOUR, last_error: null, last_result: "", runs: 12, missed: 1 },
+    next: null,
+  },
+];
+
+function taskChange(change: () => void): TaskEntry[] {
+  change();
+  emit("tasks", tasks);
+  return tasks;
 }
 
 let watchers: WatchEntry[] = [
@@ -539,6 +567,26 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     return t;
   },
   watchers: () => watchers,
+  tasks: () => tasks,
+  put_task: (a) =>
+    taskChange(() => {
+      const t = a.task as Task;
+      if (!t.what.trim()) throw "a task needs something to do";
+      if (!t.name) t.name = t.what.slice(0, 60);
+      const next = t.enabled ? now() + (t.repeat === "hourly" ? t.every * HOUR : 20 * HOUR) : null;
+      if (!t.id) {
+        t.id = t.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        tasks = [...tasks, { task: t, state: { last_run: 0, last_error: null, last_result: "", runs: 0, missed: 0 }, next }];
+      } else tasks = tasks.map((e) => (e.task.id === t.id ? { ...e, task: t, next } : e));
+    }),
+  remove_task: (a) => taskChange(() => (tasks = tasks.filter((e) => e.task.id !== a.id))),
+  run_task_now: async (a) => {
+    await sleep(2000);
+    const line = "Done: nothing worth telling this time.";
+    taskChange(() => (tasks = tasks.map((e) => (e.task.id === a.id ? { ...e, state: { ...e.state, last_run: now(), last_error: null, last_result: line, runs: e.state.runs + 1 } } : e))));
+    emit("schedule", { kind: "task", id: a.id, error: null });
+    return line;
+  },
   habits: () => habits,
   add_habit: (a) =>
     habitChange(() => {

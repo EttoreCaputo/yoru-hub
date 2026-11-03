@@ -1,5 +1,5 @@
 //! Watchers: what Yoru keeps an eye on for you, every so often, and the
-//! scheduler that runs them and the morning recap.
+//! scheduler that runs them, the morning recap and the tasks ([`super::tasks`]).
 //!
 //! A watcher is one of two kinds:
 //! - **tool**: a connector's read tool with fixed arguments ("unread mail
@@ -29,7 +29,7 @@ use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::{Assistant, Brain, Host, Urgency, inbox::now_ms};
+use super::{Assistant, Brain, Host, Urgency, inbox::now_ms, tasks};
 
 /// Keys remembered per watcher.
 const SEEN_KEEP: usize = 500;
@@ -212,12 +212,23 @@ impl Watchers {
 pub enum ScheduleEvent {
     Watched { id: String, told: u32, error: Option<String> },
     Recap { error: Option<String> },
+    /// A task done (or tried).
+    Task { id: String, error: Option<String> },
 }
 
-/// Run the watchers and the recap until `stop`, on the current thread.
-/// `host` is what their jobs may use: the board, and a card for anything
-/// that acts (a job shouldn't, and is told so).
-pub fn run_scheduler(assistant: &Assistant, watchers: &Watchers, host: &dyn Host, stop: &AtomicBool, on_event: &(dyn Fn(ScheduleEvent) + Send + Sync)) {
+/// Run the watchers, the recap and the tasks until `stop`, on the current
+/// thread. `host` is what the watchers and the recap may use (nothing that
+/// acts: nobody asked them to); `live` makes the host of a task, the board
+/// and the app's cards as they are when it runs, which [`tasks::host`]
+/// narrows to what the task may do.
+pub fn run_scheduler(
+    assistant: &Assistant,
+    watchers: &Watchers,
+    host: &dyn Host,
+    live: &dyn Fn() -> Box<dyn Host>,
+    stop: &AtomicBool,
+    on_event: &(dyn Fn(ScheduleEvent) + Send + Sync),
+) {
     while !stop.load(Ordering::Relaxed) {
         if assistant.is_ready() {
             let routines = assistant.settings().routines;
@@ -232,6 +243,13 @@ pub fn run_scheduler(assistant: &Assistant, watchers: &Watchers, host: &dyn Host
                     return;
                 }
                 on_event(run_and_record(assistant, watchers, &watcher, host));
+            }
+            for task in assistant.tasks.take_due(Local::now()) {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                let error = tasks::run(assistant, &task, live().as_ref()).err();
+                on_event(ScheduleEvent::Task { id: task.id, error });
             }
         }
         let until = std::time::Instant::now() + TICK;
