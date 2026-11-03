@@ -84,7 +84,7 @@
   const hearing = $derived(uniq(whispers.map((m) => serviceOf(m.id))));
   const speaking = $derived(uniq([...voices.map((m) => serviceOf(m.id)), ...(info?.providers.some((p) => p.id === "elevenlabs") ? ["elevenlabs"] : [])]));
   // Every service gets a panel, and so does any voice-only provider with a key to set.
-  const services = $derived(uniq([...hearing, ...speaking, ...(info?.providers.filter((p) => !BRAINS.includes(p.id)).map((p) => p.id) ?? [])]));
+  const services = $derived(uniq([...hearing, ...speaking, ...(info?.providers.filter((p) => !BRAINS.includes(p.id) && p.id !== "tavily").map((p) => p.id) ?? [])]));
 
   /** A service's voices for a language: the catalog's, and for ElevenLabs the account's. */
   function voicesIn(svc: string, lang: string): { id: string; label: string }[] {

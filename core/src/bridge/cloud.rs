@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use super::BridgeConfig;
 use crate::assistant::Brain;
-use crate::cloud::{Api, CloudRef};
+use crate::cloud::{Api, CloudRef, TAVILY};
 use crate::stt::SttEngine;
 use crate::tts::Tts;
 
@@ -40,6 +40,10 @@ pub(super) fn services(config: &BridgeConfig) -> Value {
         return json!({"clear": true});
     };
     let mut out = json!({"name": "Yoru", "character": CHARACTER, "stt": stt, "llm": llm, "tts": tts});
+    // Optional: with a Tavily key the board looks things up on the web too.
+    if let Some(key) = TAVILY.api_key() {
+        out["search"] = json!({"url": format!("{}/search", TAVILY.url()), "key": key});
+    }
     if let (Some(assistant), Some(settings)) = (&config.assistant, &settings) {
         out["name"] = settings.name.clone().into();
         out["memory"] = assistant.memory.for_prompt_within(MEMORY_CHARS).into();
@@ -125,7 +129,7 @@ fn tts(tts: &Tts, language: Option<&str>) -> Option<Value> {
             "format": "wav",
             "max_chars": model.model.max_chars,
         })),
-        Api::Anthropic => None,
+        Api::Anthropic | Api::Tavily => None,
     }
 }
 

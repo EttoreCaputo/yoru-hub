@@ -562,6 +562,8 @@ const it: Messages = {
       ollama: "Ollama: su questo computer, gratis e privato",
     },
     openai: "Chiave API di OpenAI",
+    tavily: "Chiave API di Tavily",
+    tavilyHint: "Permette a Yoru di cercare sul web da solo quando il computer è via: la scheda interroga Tavily direttamente. Piano gratuito: 1.000 ricerche al mese. Quello che gli chiedi di cercare va a Tavily.",
     openaiHint: "GPT pensa per Yoru: quello che chiedi e quello che legge per te vanno a OpenAI. Si paga a consumo. La stessa chiave serve per la trascrizione con Whisper.",
     openaiModel: "Modello di OpenAI",
     ollama: "Ollama",

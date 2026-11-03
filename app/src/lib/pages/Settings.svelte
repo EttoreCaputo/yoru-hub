@@ -292,6 +292,14 @@
     {/if}
   </section>
 
+  <h2 class="section-title">Tavily</h2>
+  <section class="panel">
+    <div class="block">
+      <div class="what"><b>{t.tavily}</b><span class="dim">{t.tavilyHint}</span></div>
+      <KeyField provider="tavily" source={store.info?.tavily_key ?? null} placeholder="tvly-…" onchange={() => store.refreshInfo()} />
+    </div>
+  </section>
+
   {#if s}
     <h2 class="section-title">{t.ollama}</h2>
     <section class="panel" class:active={brain === "ollama"}>

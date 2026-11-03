@@ -564,6 +564,8 @@ const en = {
       ollama: "Ollama: on this computer, free and private",
     },
     openai: "OpenAI API key",
+    tavily: "Tavily API key",
+    tavilyHint: "Lets Yoru search the web on his own when the computer is away: the board asks Tavily directly. Free plan: 1,000 searches a month. What you ask him to look up goes to Tavily.",
     openaiHint: "GPT thinks for Yoru: what you ask and what it reads for you go to OpenAI. Paid by use. The same key serves Whisper's speech to text.",
     openaiModel: "OpenAI's model",
     ollama: "Ollama",

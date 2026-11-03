@@ -187,6 +187,8 @@ pub struct AssistantInfo {
     /// Where the OpenAI key comes from.
     openai_key: Option<KeySource>,
     openai_models: Vec<BrainModel>,
+    /// Where the Tavily key comes from: the board searches the web with it.
+    tavily_key: Option<KeySource>,
     /// Groq's free limit, while it is waited out: what the user reads.
     limited: Option<String>,
     /// Where its files are (memory.md, inbox.json…).
@@ -206,6 +208,7 @@ fn info_of(a: &Assistant) -> AssistantInfo {
         groq_models: brain_models(Brain::Groq),
         openai_key: Provider::by_id("openai").and_then(|p| p.key_source()).map(|(_, s)| s),
         openai_models: brain_models(Brain::OpenAi),
+        tavily_key: Provider::by_id("tavily").and_then(|p| p.key_source()).map(|(_, s)| s),
         limited: a.limited().map(|e| assistant::compat::brain_error(&e)),
         dir: a.dir().map(|d| d.display().to_string()),
         quiet_until: a.quiet_until(),

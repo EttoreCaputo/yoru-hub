@@ -28,6 +28,7 @@ pub mod anthropic;
 pub mod elevenlabs;
 mod ollama;
 mod openai;
+pub mod tavily;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -54,6 +55,8 @@ pub enum Api {
     ElevenLabs,
     /// Anthropic's Messages API: the assistant's brain ([`anthropic`]).
     Anthropic,
+    /// Tavily's web search: a key and no models ([`tavily`]).
+    Tavily,
 }
 
 /// An online service.
@@ -168,6 +171,22 @@ pub const ELEVENLABS: Provider = Provider {
     any_model: false,
 };
 
+/// [Tavily](https://tavily.com): web search, no models. Its key goes to the
+/// board, which searches for itself when the computer is away. The free plan
+/// (October 2026): 1,000 credits a month; a search costs one.
+pub const TAVILY: Provider = Provider {
+    id: "tavily",
+    name: "Tavily",
+    api: Api::Tavily,
+    base_url: "https://api.tavily.com",
+    key_env: "TAVILY_API_KEY",
+    keys_url: "https://app.tavily.com/home",
+    note: "Web search; free plan: 1,000 credits a month. What you ask Yoru to look up is sent to Tavily",
+    models: &[],
+    needs_key: true,
+    any_model: false,
+};
+
 /// What `elevenlabs:voice/<voice_id>` names: a voice of the person's
 /// account, which isn't in the catalog. Its id is the [`Client`]'s.
 const ACCOUNT_VOICE: CloudModel = CloudModel {
@@ -245,7 +264,7 @@ pub const OLLAMA: Provider = Provider {
 const ANY_MODEL: CloudModel = CloudModel { id: "model", kind: Kind::Llm, model: "", voice: None, language: None, note: "A model you have", params: "", max_chars: 0 };
 
 /// Every service Yoru can use.
-pub const PROVIDERS: &[Provider] = &[ANTHROPIC, OPENAI, GROQ, OLLAMA, ELEVENLABS];
+pub const PROVIDERS: &[Provider] = &[ANTHROPIC, OPENAI, GROQ, OLLAMA, ELEVENLABS, TAVILY];
 
 impl Provider {
     pub fn by_id(id: &str) -> Option<&'static Provider> {
@@ -276,6 +295,7 @@ impl Provider {
             },
             Api::ElevenLabs => elevenlabs::check_key(&key),
             Api::Anthropic => anthropic::check_key(&key),
+            Api::Tavily => tavily::check_key(&key),
         }
     }
 
@@ -509,6 +529,7 @@ impl Client {
             Api::OpenAi => openai::check(self),
             Api::ElevenLabs => elevenlabs::check(self),
             Api::Anthropic => anthropic::check_key(&self.key),
+            Api::Tavily => tavily::check_key(&self.key),
         }
     }
 
@@ -521,7 +542,7 @@ impl Client {
         self.limited(|| match self.model.provider.api {
             Api::OpenAi if self.model.provider.id == OLLAMA.id => ollama::chat(self, request),
             Api::OpenAi => openai::chat(self, request),
-            Api::ElevenLabs | Api::Anthropic => Err(self.unsupported("chat")),
+            Api::ElevenLabs | Api::Anthropic | Api::Tavily => Err(self.unsupported("chat")),
         })
     }
 
@@ -532,7 +553,7 @@ impl Client {
         self.limited(|| match self.model.provider.api {
             Api::OpenAi if self.model.provider.id == OLLAMA.id => ollama::chat_stream(self, request, on),
             Api::OpenAi => openai::chat_stream(self, request, on),
-            Api::ElevenLabs | Api::Anthropic => Err(self.unsupported("chat")),
+            Api::ElevenLabs | Api::Anthropic | Api::Tavily => Err(self.unsupported("chat")),
         })
     }
 
@@ -540,7 +561,7 @@ impl Client {
     pub fn transcribe(&self, wav: &[u8], language: Option<&str>, prompt: &str) -> Result<TranscriptionReply, CloudError> {
         self.limited(|| match self.model.provider.api {
             Api::OpenAi => openai::transcribe(self, wav, language, prompt),
-            Api::ElevenLabs | Api::Anthropic => Err(self.unsupported("transcription")),
+            Api::ElevenLabs | Api::Anthropic | Api::Tavily => Err(self.unsupported("transcription")),
         })
     }
 
@@ -550,7 +571,7 @@ impl Client {
         self.limited(|| match self.model.provider.api {
             Api::OpenAi => openai::speak(self, text),
             Api::ElevenLabs => elevenlabs::speak(self, text, language),
-            Api::Anthropic => Err(self.unsupported("speech")),
+            Api::Anthropic | Api::Tavily => Err(self.unsupported("speech")),
         })
     }
 
@@ -568,7 +589,7 @@ impl Client {
     pub fn speak_stream(&self, text: &str, language: Option<&str>, out: &mut dyn FnMut(Vec<i16>)) -> Result<(), CloudError> {
         self.limited(|| match self.model.provider.api {
             Api::ElevenLabs => elevenlabs::speak_stream(self, text, language, out),
-            Api::OpenAi | Api::Anthropic => Err(self.unsupported("streamed speech")),
+            Api::OpenAi | Api::Anthropic | Api::Tavily => Err(self.unsupported("streamed speech")),
         })
     }
 

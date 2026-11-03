@@ -312,6 +312,7 @@ const info: AssistantInfo = {
   groq_key: noKey ? null : onGroq ? "saved" : null,
   groq_models: groqModels,
   openai_key: null,
+  tavily_key: null,
   openai_models: [
     { id: "gpt-6-luna", note: "GPT-6 Luna: fast and cheap ($0.10 / $0.50 a million tokens)" },
     { id: "gpt-5.4-mini", note: "GPT-5.4 Mini: smarter, still quick ($0.75 / $4.50)" },
@@ -387,6 +388,7 @@ const voice: VoiceInfo = {
     { id: "groq", name: "Groq", note: "Free with daily limits.", keys_url: "https://console.groq.com/keys", key_env: "GROQ_API_KEY", key: info.groq_key },
     { id: "ollama", name: "Ollama", note: "Models on this computer.", keys_url: "https://ollama.com/search?c=tools", key_env: "OLLAMA_API_KEY", key: null },
     { id: "elevenlabs", name: "ElevenLabs", note: "Natural voices.", keys_url: "https://elevenlabs.io/app/settings/api-keys", key_env: "ELEVENLABS_API_KEY", key: null },
+    { id: "tavily", name: "Tavily", note: "Web search.", keys_url: "https://app.tavily.com/home", key_env: "TAVILY_API_KEY", key: null },
   ],
 };
 
@@ -641,6 +643,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     if (a.provider === "anthropic") info.key = a.key ? "saved" : null;
     if (a.provider === "groq") info.groq_key = a.key ? "saved" : null;
     if (a.provider === "openai") info.openai_key = a.key ? "saved" : null;
+    if (a.provider === "tavily") info.tavily_key = a.key ? "saved" : null;
     resolveBrain();
     return voice;
   },

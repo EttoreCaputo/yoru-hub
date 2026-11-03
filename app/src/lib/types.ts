@@ -63,6 +63,7 @@ export type AssistantInfo = {
   groq_key: KeySource | null;
   groq_models: { id: string; note: string }[];
   openai_key: KeySource | null;
+  tavily_key: KeySource | null;
   openai_models: { id: string; note: string }[];
   /** Groq's free limit, while it is waited out. */
   limited: string | null;
