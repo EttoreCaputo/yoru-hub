@@ -34,6 +34,7 @@ pub mod models;
 pub(crate) mod paths;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod ota;
 pub mod pointer;
 pub mod presence;
 pub mod profile;

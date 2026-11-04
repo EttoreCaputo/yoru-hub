@@ -15,7 +15,7 @@
 //! | `hello` `{"token","client"}` | `{"bridge", "boards": [BoardInfo], "board": Hello or null, "port"}` (`board` and `port` for older clients: the board a call without `board` would reach) |
 //! | `host/boards` | `[BoardInfo]`: the boards attached |
 //! | `host/hello` | The `hello` of the board the request reaches |
-//! | `tools/list`, `tools/call`, `media/...`, `wifi/...` | Passed to the board as they are |
+//! | `tools/list`, `tools/call`, `media/...`, `wifi/...`, `ota/...` | Passed to the board as they are (`ota/...`: an update, see [`crate::ota`]) |
 //! | `host/snapshot` | `{"snapshot": Snapshot or null, "age_ms"}`: the bridge's latest sample |
 //! | `host/say` `{"text","language"?}` | How it was spoken, once played |
 //! | `host/timers` `{"name","arguments","language"?}` | `{"text","is_error"}`: a [`Timers::tools`] tool, run on the bridge's timers |
@@ -62,6 +62,9 @@ const SAY_TIMEOUT: Duration = Duration::from_secs(90);
 pub const TOOL_TIMEOUT: Duration = Duration::from_secs(3);
 /// A WiFi scan (`wifi/scan`) goes over every channel.
 pub const SCAN_TIMEOUT: Duration = Duration::from_secs(12);
+/// An update's step (`ota/...`): a chunk's write erases a flash sector, the
+/// end checks the whole image.
+pub const OTA_TIMEOUT: Duration = Duration::from_secs(30);
 /// A client waits this long for the hub, which waits [`TOOL_TIMEOUT`] for the board.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL: Duration = Duration::from_millis(100);
@@ -461,7 +464,7 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
         "tools/call" => {}
         // Image uploads (firmware 1.1), writes taking a moment when the flash
         // erases; the WiFi set-up (firmware 1.4.3), a scan taking seconds.
-        m if m.starts_with("media/") || m.starts_with("wifi/") => {}
+        m if m.starts_with("media/") || m.starts_with("wifi/") || m.starts_with("ota/") => {}
         "host/say" => {
             let text = params.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty());
             let Some(text) = text else { return Err((INVALID_PARAMS, "expected {\"text\": string, \"language\"?: \"it\" | \"en\"}".into())) };
@@ -505,7 +508,11 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
     }
     let tool = (method == "tools/call").then(|| params.get("name").and_then(Value::as_str).unwrap_or("").to_string());
     let board = shared.pick(wanted, tool.as_deref())?;
-    let timeout = if method == "wifi/scan" { SCAN_TIMEOUT } else { TOOL_TIMEOUT };
+    let timeout = match method {
+        "wifi/scan" => SCAN_TIMEOUT,
+        m if m.starts_with("ota/") => OTA_TIMEOUT,
+        _ => TOOL_TIMEOUT,
+    };
     let reply = board.call(method, params, timeout);
     if let Some(tool) = tool {
         shared.calls.fetch_add(1, Ordering::Relaxed);

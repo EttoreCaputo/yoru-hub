@@ -53,6 +53,7 @@ use yoru_core::cloud::elevenlabs::{self, AccountVoice};
 use yoru_core::cloud::{self, CloudError, CloudRef, KeySource, Provider};
 use yoru_core::llm::{self, Llm, LlmConfig, LocalLlm};
 use yoru_core::models::{self, Kind, Model};
+use yoru_core::ota;
 use yoru_core::pointer;
 use yoru_core::spoken;
 use yoru_core::stt::{self, Stt, SttConfig, SttEngine, SttLanguage, Transcript};
@@ -1448,7 +1449,12 @@ async fn identify_board(app: AppHandle, port: Option<String>) -> Result<ChipInfo
 async fn flash_board(app: AppHandle, port: Option<String>, kind: Option<BoardKind>) -> Result<(), String> {
     let kind = kind.unwrap_or_default();
     let image = firmware_for(kind);
-    firmware::check_image(kind, image)?;
+    let info = firmware::check_image(kind, image)?;
+    // The board shown is on WiFi: it's updated over its link. esptool needs
+    // USB, and must not take another board found there instead.
+    if port.is_none() && let Some(id) = shown_wifi_board(&app.state::<AppState>()) {
+        return update_over_link(app, id, image, info.version).await;
+    }
     {
         let state = app.state::<AppState>();
         let target = port.clone().or_else(|| state.settings.lock().unwrap().port.clone()).or_else(|| current_usb_port(&state));
@@ -1566,6 +1572,35 @@ fn dismiss_timers(state: State<AppState>) -> TimersInfo {
 }
 
 /// The serial port of the board the UI shows, when it's on USB.
+/// The id of the board the window shows, when it's reached over WiFi.
+fn shown_wifi_board(state: &AppState) -> Option<String> {
+    let primary = state.primary.lock().unwrap().clone();
+    let devices = state.devices.lock().unwrap();
+    let link = devices.current(primary.as_deref())?;
+    wifi::target(link.target.as_deref()?).is_some().then(|| link.id.clone()).flatten()
+}
+
+/// Update board `id` over its link (`ota/...`, see `yoru_core::ota`), with
+/// the app's part of the merged `image`; progress goes out as `flash` events,
+/// as esptool's does.
+async fn update_over_link(app: AppHandle, id: String, image: &'static [u8], version: String) -> Result<(), String> {
+    let app_part = ota::app_image(image).ok_or("the firmware image has no app to send")?;
+    let board = app.state::<AppState>().board(Some(id));
+    tauri::async_runtime::spawn_blocking(move || {
+        board
+            .session(|call| Ok(ota::update(call, app_part, &version, |p| {
+                let percent = match p {
+                    ota::Progress::Sent(f) => f * 100.0,
+                    ota::Progress::Restarting => 100.0,
+                };
+                emit_flash(&app, FlashEvent::Progress { percent });
+            })))
+            .map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn current_usb_port(state: &AppState) -> Option<String> {
     let primary = state.primary.lock().unwrap().clone();
     let target = state.devices.lock().unwrap().current(primary.as_deref())?.target.clone()?;

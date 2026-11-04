@@ -70,15 +70,20 @@ pub fn check_image(kind: BoardKind, image: &[u8]) -> Result<ImageInfo, String> {
     }
 }
 
-/// Read the app descriptor of a merged image (bootloader + partition table +
-/// app): the first app partition in the table, at its offset in the image.
-pub fn image_info(image: &[u8]) -> Option<ImageInfo> {
+/// Where the first app partition starts in a merged image (bootloader +
+/// partition table + app), from its partition table.
+pub fn app_offset(image: &[u8]) -> Option<usize> {
     let table = image.get(PARTITION_TABLE..PARTITION_TABLE + 0xC00)?;
-    let app = table
+    table
         .chunks_exact(32)
         .take_while(|e| e[..2] == PARTITION_MAGIC)
         .find(|e| e[2] == 0)
-        .map(|e| u32::from_le_bytes(e[4..8].try_into().unwrap()) as usize)?;
+        .map(|e| u32::from_le_bytes(e[4..8].try_into().unwrap()) as usize)
+}
+
+/// Read the app descriptor of a merged image: the first app partition's.
+pub fn image_info(image: &[u8]) -> Option<ImageInfo> {
+    let app = app_offset(image)?;
     let desc = image.get(app + APP_DESC_OFFSET..app + APP_DESC_OFFSET + 256)?;
     if u32::from_le_bytes(desc[..4].try_into().unwrap()) != APP_DESC_MAGIC {
         return None;

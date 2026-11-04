@@ -111,6 +111,8 @@
     void call<{ follow_pointer: boolean }>("status").then((s) => (followPointer = s?.follow_pointer ?? true), () => {});
   });
   const running = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
+  // Updated over its link instead of esptool (core's ota.rs).
+  const overWifi = $derived(!!store.port?.startsWith("wifi:"));
 </script>
 
 <div>
@@ -186,18 +188,19 @@
       </div>
       <div class="how">
         {#if store.job === "flash"}
-          <span class="dim">{store.setup ? t.preparing : t.flashing(Math.round(store.flashPercent))}</span>
+          <span class="dim">{store.setup ? t.preparing : overWifi ? t.sending(Math.round(store.flashPercent)) : t.flashing(Math.round(store.flashPercent))}</span>
         {:else if store.update}
-          <button class="btn primary" onclick={() => store.flash()}>{t.updateTo(store.update.to)}</button>
+          <button class="btn primary" onclick={() => store.flash()}>{overWifi ? t.updateOverWifi(store.update.to) : t.updateTo(store.update.to)}</button>
         {:else}
           {#if live && running}<span class="tag">{t.upToDate}</span>{/if}
-          <button class="btn quiet" disabled={store.job !== "idle"} onclick={() => store.flash()}>{t.flash}</button>
+          <button class="btn quiet" disabled={store.job !== "idle"} onclick={() => store.flash()}>{overWifi ? t.sendOverWifi : t.flash}</button>
         {/if}
       </div>
     </div>
     {#if store.job === "flash"}
       <div class="bar"><span style:width="{store.flashPercent}%"></span></div>
     {/if}
+    {#if overWifi && store.job !== "idle"}<p class="dim">{t.overWifi}</p>{/if}
     {#if store.flashedAt && store.job === "idle"}<p class="dim">{t.flashed}</p>{/if}
     {#if store.flashError}<p class="error-text">{store.flashError}</p>{/if}
     {#if store.update?.changes.length}
