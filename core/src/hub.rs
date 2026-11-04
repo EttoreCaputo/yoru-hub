@@ -251,8 +251,11 @@ impl Hub {
     /// It replaces what was attached on that port, or with that id.
     pub(crate) fn attach(&self, link: Arc<Link>, hello: Hello, port: &str, say: SayFn, settings_changed: Arc<AtomicBool>) {
         let kind = BoardKind::from_hello(&hello);
+        // The same board on another port stays listed, behind this one: it
+        // comes back if this session ends first (a board on USB is also
+        // found on WiFi, and that session closes once it sees so).
         let mut boards = self.shared.boards.lock().unwrap();
-        boards.retain(|a| a.port != port && (hello.id.is_none() || a.hello.id != hello.id));
+        boards.retain(|a| a.port != port);
         boards.push(Arc::new(Attached {
             link,
             hello,
@@ -408,14 +411,22 @@ impl Shared {
         self.primary.lock().unwrap().as_ref().and_then(|p| p.lock().unwrap().clone())
     }
 
+    /// The boards attached, each once: of one board on two ports, the one
+    /// attached last.
+    fn boards(&self) -> Vec<Arc<Attached>> {
+        let all = self.boards.lock().unwrap().clone();
+        let later_same = |i: usize| all[i + 1..].iter().any(|b| b.hello.id.is_some() && b.hello.id == all[i].hello.id);
+        (0..all.len()).filter(|&i| !later_same(i)).map(|i| all[i].clone()).collect()
+    }
+
     fn infos(&self) -> Vec<BoardInfo> {
         let primary = self.primary();
-        self.boards.lock().unwrap().iter().map(|a| a.info(primary.as_deref())).collect()
+        self.boards().iter().map(|a| a.info(primary.as_deref())).collect()
     }
 
     /// The board a request goes to: the one `wanted` names, or as [`pick`] says.
     fn pick(&self, wanted: Option<&str>, tool: Option<&str>) -> Result<Arc<Attached>, (i64, String)> {
-        let boards = self.boards.lock().unwrap().clone();
+        let boards = self.boards();
         if boards.is_empty() {
             return Err((NO_BOARD, self.unavailable.lock().unwrap().clone()));
         }
@@ -529,10 +540,10 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
 /// `tools/list`: the board's, asked again; without `board` and with several
 /// boards, every board's, each name once.
 fn list_tools(shared: &Shared, wanted: Option<&str>) -> Result<Value, (i64, String)> {
-    let several = shared.boards.lock().unwrap().len() > 1;
-    if wanted.is_none() && several {
+    let boards = shared.boards();
+    if wanted.is_none() && boards.len() > 1 {
         let mut tools: Vec<Tool> = Vec::new();
-        for board in shared.boards.lock().unwrap().clone() {
+        for board in boards {
             for tool in board.tools() {
                 if !tools.iter().any(|t| t.name == tool.name) {
                     tools.push(tool);
