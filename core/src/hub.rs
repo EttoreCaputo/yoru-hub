@@ -15,7 +15,7 @@
 //! | `hello` `{"token","client"}` | `{"bridge", "boards": [BoardInfo], "board": Hello or null, "port"}` (`board` and `port` for older clients: the board a call without `board` would reach) |
 //! | `host/boards` | `[BoardInfo]`: the boards attached |
 //! | `host/hello` | The `hello` of the board the request reaches |
-//! | `tools/list`, `tools/call`, `media/...`, `wifi/...`, `ota/...` | Passed to the board as they are (`ota/...`: an update, see [`crate::ota`]) |
+//! | `tools/list`, `tools/call`, `media/...`, `wifi/...`, `ota/...`, `debug/...` | Passed to the board as they are (`ota/...`: an update, see [`crate::ota`]; `debug/...`: the board's test hooks) |
 //! | `host/snapshot` | `{"snapshot": Snapshot or null, "age_ms"}`: the bridge's latest sample |
 //! | `host/say` `{"text","language"?}` | How it was spoken, once played |
 //! | `host/timers` `{"name","arguments","language"?}` | `{"text","is_error"}`: a [`Timers::tools`] tool, run on the bridge's timers |
@@ -463,8 +463,9 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
         "tools/list" => return list_tools(shared, wanted),
         "tools/call" => {}
         // Image uploads (firmware 1.1), writes taking a moment when the flash
-        // erases; the WiFi set-up (firmware 1.4.3), a scan taking seconds.
-        m if m.starts_with("media/") || m.starts_with("wifi/") || m.starts_with("ota/") => {}
+        // erases; the WiFi set-up (firmware 1.4.3), a scan taking seconds;
+        // updates; the board's test hooks (`debug/friends`, `debug/life`...).
+        m if ["media/", "wifi/", "ota/", "debug/"].iter().any(|p| m.starts_with(p)) => {}
         "host/say" => {
             let text = params.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty());
             let Some(text) = text else { return Err((INVALID_PARAMS, "expected {\"text\": string, \"language\"?: \"it\" | \"en\"}".into())) };
