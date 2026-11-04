@@ -1,18 +1,25 @@
 <!--
   The board on the desk, as a page of Settings: how it's reached, its firmware
   (and updating it), its WiFi, and the settings it keeps itself. Its voice is
-  in Settings' voice page, with the cloud voices' keys.
+  in Settings' voice page, with the cloud voices' keys. With several boards,
+  first the list of them (name, how it's reached, firmware, the main one):
+  the rest of the page is about the one picked there.
 -->
 <script lang="ts">
   import { call, why } from "../api";
   import { BUNDLED_VERSION } from "../bundled";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { PortInfo, Transport, WifiInfo, WifiNetwork, YoruSetting, YoruSettings } from "../types";
+  import type { DeviceInfo, PortInfo, Transport, WifiInfo, WifiNetwork, YoruSetting, YoruSettings } from "../types";
   import { boldParts } from "../updates";
   import Toggle from "./Toggle.svelte";
 
   const t = $derived(i18n.t.board);
+  const tb = $derived(i18n.t.boards);
+  const several = $derived(store.boards.length > 1);
+  const boardDot = (link: string) => (link === "connected" ? "done" : link === "searching" ? "think" : "wrong");
+  const via = (b: DeviceInfo) => (b.port?.startsWith("wifi:") ? i18n.t.link.wifi : b.port ? i18n.t.link.usb : "");
+  const where = (b: DeviceInfo) => (b.port?.startsWith("wifi:") ? (b.id ?? "") : (b.port ?? "")).replace("/dev/cu.", "");
   const live = $derived(store.link === "connected");
 
   // Connection.
@@ -43,6 +50,7 @@
     }
   }
   $effect(() => {
+    void store.boardId;
     if (live) void readWifi();
   });
   async function scan() {
@@ -106,7 +114,45 @@
 </script>
 
 <div>
-  <h2 class="section-title">{t.connection}</h2>
+  {#if several}
+    <h2 class="section-title">{tb.title}</h2>
+    <p class="dim hint">{tb.hint}</p>
+    <div class="cards">
+      {#each store.boards as b (b.target)}
+        <section class="panel card" class:on={b.current}>
+          <div class="head">
+            <span class="dot {boardDot(b.link)}"></span>
+            <input
+              type="text"
+              class="bname"
+              value={b.name ?? ""}
+              placeholder={store.boardName({ ...b, name: null })}
+              maxlength="24"
+              aria-label={tb.name}
+              disabled={!b.id}
+              onchange={(e) => store.renameBoard(b, e.currentTarget.value)}
+              onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            />
+            {#if b.current}<span class="tag">{tb.shown}</span>{:else}<button class="btn small" onclick={() => store.showBoard(b)}>{tb.showThis}</button>{/if}
+          </div>
+          <div class="facts">
+            {#if b.link === "searching"}<span>{tb.joining}</span>{:else if via(b)}<span>{tb.via(via(b), where(b))}</span>{/if}
+            {#if b.firmware?.state === "version"}<span>{tb.firmware(b.firmware.version)}</span>{/if}
+          </div>
+          <div class="main">
+            {#if b.primary}
+              <button class="star on" title={tb.primary} onclick={() => store.setPrimary(null)}>★ {tb.main}</button>
+            {:else}
+              <button class="star" title={tb.primary} disabled={!b.id} onclick={() => store.setPrimary(b)}>☆ {tb.makeMain}</button>
+            {/if}
+          </div>
+        </section>
+      {/each}
+    </div>
+    {#if !store.boards.some((b) => b.primary)}<p class="faint hint">{tb.noMain}</p>{/if}
+    <h2 class="of">{tb.settingsOf(store.boardName(store.shown))}</h2>
+  {/if}
+  <h2 class="section-title" class:sub={several}>{t.connection}</h2>
   <section class="panel">
     {#if !live}
       <p class="dim nob">{store.permissionDenied ? t.permission : t.noBoard}</p>
@@ -232,6 +278,74 @@
 </div>
 
 <style>
+  .hint {
+    margin: -4px 0 12px;
+    font-size: 12.5px;
+    max-width: 620px;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    display: grid;
+    gap: 8px;
+    padding: 14px 16px;
+  }
+  .panel.card + .panel.card {
+    margin-top: 0;
+  }
+  .card.on {
+    border-color: var(--pearl-deep);
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  input.bname {
+    flex: 1;
+    min-width: 0;
+    min-height: 30px;
+    padding: 4px 8px;
+    border-color: transparent;
+    background: none;
+    font: 600 15px/1.2 var(--sans);
+  }
+  input.bname:hover:not(:disabled) {
+    border-color: var(--rim);
+  }
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    color: var(--haze);
+    font-size: 12.5px;
+  }
+  .star {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--dusk);
+    font: 500 12.5px/1.4 var(--sans);
+    cursor: pointer;
+  }
+  .star:hover:not(:disabled) {
+    color: var(--pearl);
+  }
+  .star.on {
+    color: var(--wait);
+  }
+  h2.of {
+    margin: 36px 0 0;
+    padding-top: 22px;
+    border-top: 1px solid var(--rim);
+    font: 650 18px/1.2 var(--display);
+  }
+  .section-title.sub {
+    margin-top: 16px;
+  }
   .nob {
     margin-bottom: 6px;
   }

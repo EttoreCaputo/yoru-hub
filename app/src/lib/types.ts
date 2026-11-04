@@ -188,8 +188,28 @@ export type Link = "searching" | "connected" | "offline";
 export type BoardState = "off" | "boot" | "waiting" | "live" | "stale";
 export type Gaze = { x: number; y: number; movedAt: number };
 
+/** One board the app knows: on USB, on WiFi, or still saying who it is. */
+export type DeviceInfo = {
+  /** Its session: a USB port, or `wifi:<id>`. */
+  target: string;
+  id: string | null;
+  /** The name it was given, if any. */
+  name: string | null;
+  kind: "yoru" | null;
+  /** `searching` until its `hello`, then `connected`. */
+  link: Link;
+  port: string | null;
+  firmware: BoardFirmware | null;
+  /** It says timers and alerts. */
+  primary: boolean;
+  /** The one the window shows. */
+  current: boolean;
+};
+
 export type Status = {
   board: string | null;
+  boards?: DeviceInfo[];
+  primary?: string | null;
   link: Link;
   port: string | null;
   message: string | null;

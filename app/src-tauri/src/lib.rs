@@ -95,6 +95,9 @@ struct Settings {
     /// clients reach when several could.
     #[serde(default)]
     primary: Option<String>,
+    /// The names given to the boards, by id.
+    #[serde(default)]
+    names: BTreeMap<String, String>,
     #[serde(default)]
     voice: VoiceSettings,
     /// Yoru's eyes look about on their own instead of at the mouse pointer.
@@ -308,6 +311,8 @@ struct Devices {
     host: Link,
     /// The target of the board picked in the UI's switcher, while it's there.
     shown: Option<String>,
+    /// The names given to the boards, by id (`Settings::names`).
+    names: BTreeMap<String, String>,
 }
 
 impl Devices {
@@ -357,6 +362,7 @@ impl Devices {
             .map(|l| DeviceInfo {
                 target: l.target.clone().unwrap_or_default(),
                 id: l.id.clone(),
+                name: l.id.as_ref().and_then(|id| self.names.get(id)).cloned(),
                 kind: l.board_kind,
                 link: l.kind,
                 port: l.port.clone(),
@@ -373,6 +379,8 @@ impl Devices {
 struct DeviceInfo {
     target: String,
     id: Option<String>,
+    /// The name it was given, if any.
+    name: Option<String>,
     kind: Option<BoardKind>,
     /// `searching` until its `hello`, then `connected`.
     link: &'static str,
@@ -1259,6 +1267,55 @@ fn boards(state: State<AppState>) -> Vec<DeviceInfo> {
     state.devices.lock().unwrap().infos(primary.as_deref())
 }
 
+/// Tell the window the boards changed, and hand them back.
+fn boards_changed(app: &AppHandle, state: State<AppState>) -> Vec<DeviceInfo> {
+    let infos = boards(state);
+    let _ = app.emit("boards", &infos);
+    infos
+}
+
+/// Show `board` (a target or an id) in the UI: the `bridge` events and the
+/// commands without `board` follow it. `None` goes back to the primary one.
+#[tauri::command]
+fn show_board(app: AppHandle, state: State<AppState>, board: Option<String>) -> Vec<DeviceInfo> {
+    {
+        let mut devices = state.devices.lock().unwrap();
+        let target = board.and_then(|b| devices.find(&b).and_then(|l| l.target.clone()));
+        devices.shown = target;
+    }
+    boards_changed(&app, state)
+}
+
+/// Make `board` (an id) the primary one: it says timers and alerts, and hub
+/// clients reach it when several could. `None` leaves it to the order they
+/// connected in.
+#[tauri::command]
+fn set_primary(app: AppHandle, state: State<AppState>, board: Option<String>) -> Vec<DeviceInfo> {
+    *state.primary.lock().unwrap() = board.clone();
+    state.settings.lock().unwrap().primary = board;
+    state.save_settings();
+    boards_changed(&app, state)
+}
+
+/// Give board `id` a name, so two Yorus can be told apart; an empty one
+/// takes it away.
+#[tauri::command]
+fn rename_board(app: AppHandle, state: State<AppState>, id: String, name: String) -> Vec<DeviceInfo> {
+    let name: String = name.trim().chars().take(24).collect();
+    let names = {
+        let mut settings = state.settings.lock().unwrap();
+        if name.is_empty() {
+            settings.names.remove(&id);
+        } else {
+            settings.names.insert(id, name);
+        }
+        settings.names.clone()
+    };
+    state.devices.lock().unwrap().names = names;
+    state.save_settings();
+    boards_changed(&app, state)
+}
+
 /// Yoru's eyes look at the mouse pointer, or about on their own.
 #[tauri::command]
 fn set_follow_pointer(state: State<AppState>, on: bool) {
@@ -1744,7 +1801,11 @@ pub fn run() {
                 Err(e) => (None, Some(e.to_string())),
             };
             app.manage(AppState {
-                devices: Mutex::new(Devices { host: Link { kind: "searching", ..Default::default() }, ..Default::default() }),
+                devices: Mutex::new(Devices {
+                    host: Link { kind: "searching", ..Default::default() },
+                    names: settings.names.clone(),
+                    ..Default::default()
+                }),
                 manager: Mutex::new(None),
                 settings: Mutex::new(settings),
                 settings_path,
@@ -1791,7 +1852,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            status, list_ports, set_port, set_transport, boards,
+            status, list_ports, set_port, set_transport, boards, show_board, set_primary, rename_board,
             wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair,
             firmware_info, identify_board, flash_board,
             confirmations, confirm, mcp_info, claude_mcp,

@@ -3,6 +3,7 @@
 //
 //   ?setup      opens the first-run setup
 //   ?board=off  no board on the desk
+//   ?boards=2   a second Yoru, on WiFi
 //   ?key=none   no brain's key yet (no Groq, no Anthropic)
 //   ?brain=groq Yoru thinks with Groq (its key only)
 
@@ -10,6 +11,7 @@ import type {
   AccountVoice,
   AssistantInfo,
   ChatLine,
+  DeviceInfo,
   Confirmation,
   ConnectorConfig,
   ConnectorStatus,
@@ -406,6 +408,16 @@ function resolveBrain() {
 }
 
 const offline = params.get("board") === "off";
+// ?boards=2: a second Yoru, on WiFi.
+const boards: DeviceInfo[] = offline
+  ? []
+  : [
+      { target: "/dev/cu.usbmodem101", id: "7c0c5f4233e4", name: null, kind: "yoru", link: "connected", port: "/dev/cu.usbmodem101", firmware: { state: "version", kind: "yoru", version: "0.18.0", idf: "v6.1", protocol: 2 }, primary: false, current: true },
+      ...(params.get("boards") === "2"
+        ? [{ target: "wifi:7c0c5f424b6c", id: "7c0c5f424b6c", name: "Camera", kind: "yoru" as const, link: "connected" as const, port: "wifi:7c0c5f424b6c", firmware: { state: "version" as const, kind: "yoru" as const, version: "0.17.0", idf: "v6.1", protocol: 2 }, primary: false, current: false }]
+        : []),
+    ];
+const shownBoard = () => boards.find((b) => b.current) ?? null;
 let onboardingDone = !params.has("setup");
 const handlers = new Map<string, Handler[]>();
 
@@ -461,12 +473,13 @@ async function login(id: string) {
 
 const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   status: () => ({
-    board: offline ? null : "yoru-4f2a",
+    board: shownBoard()?.id ?? null,
+    boards,
     link: offline ? "searching" : "connected",
-    port: offline ? null : "/dev/cu.usbmodem101",
+    port: shownBoard()?.port ?? null,
     message: offline ? "board not found on USB" : null,
     connected_age_ms: 60_000,
-    firmware: offline ? null : { state: "version", kind: "yoru", version: "0.9.2", idf: "v6.1", protocol: 2 },
+    firmware: shownBoard()?.firmware ?? null,
     logs: ["I (1203) yoru: link up", "I (1450) voice: wake word ready"],
     voice: "idle",
     port_setting: null,
@@ -661,6 +674,10 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   },
   wifi_info: () => ({ transport: "auto", paired: [{ id: "yoru-4f2a", ssid: "Casa" }], board: { enabled: true, ssid: "Casa", state: "connected", ip: "192.168.1.42", rssi: -54, paired: true }, error: null }),
   wifi_scan: async () => (await sleep(900), { networks: [{ ssid: "Casa", rssi: -50, secure: true }, { ssid: "Casa-5G", rssi: -61, secure: true }, { ssid: "Ospiti", rssi: -72, secure: false }] }),
+  boards: () => boards,
+  show_board: (a) => (boards.forEach((b) => (b.current = b.target === a.board)), boards),
+  set_primary: (a) => (boards.forEach((b) => (b.primary = b.id === a.board)), boards),
+  rename_board: (a) => (boards.forEach((b) => b.id === a.id && (b.name = a.name.trim() || null)), boards),
   list_ports: () => [{ name: "/dev/cu.usbmodem101", vid: 0x303a, pid: 0x1001, product: "Yoru", is_board: true }],
   firmware_info: () => ({ bundled: [{ kind: "yoru", size: 4081500, image: { version: "0.10.0", project: "yoru", idf: "v6.1", built: "Oct 19 2026 14:22:00" } }], esptool: { python: "3.12", version: "5.1" } }),
   flash_board: async () => {

@@ -71,6 +71,7 @@ Status: all ten steps are done. The core, the CLI and the app drive several boar
 
 ## Left over
 
+- **The window since the Yoru rewrite (2026-11-04).** The rewrite dropped the title bar's switcher; it's back in another form. With two boards or more the sidebar lists them (state, name, USB or WiFi, ★ for the main one) and a click shows that one. Settings → The board starts with a card per board: a name (`rename_board`, kept in `settings.json` as `names`), how it's reached, its firmware, "make it the main one" (`set_primary`); the rest of the page is about the one shown (`show_board`). `DeviceInfo` carries `name`. The browser preview has two with `?boards=2`.
 - Try it all with a Yoru and a DualEye at once: the voice floor (two boards hearing one wake word), the hub and MCP `board`, the switcher, flashing one while the other streams, and the WiFi path with the manager.
 - The follow-the-pointer setting is shared by every board.
 - `--board` in the CLI goes after the subcommand.

@@ -1,6 +1,7 @@
 <!--
   The sidebar: Yoru's own small presence at the top (lit by what it's doing),
-  the pages, and "do not disturb" at the bottom.
+  with two boards or more the list of them to pick the one shown, the pages,
+  and "do not disturb" at the bottom.
 -->
 <script lang="ts">
   import { i18n } from "./i18n/index.svelte";
@@ -35,6 +36,8 @@
   });
   const via = $derived(store.port?.startsWith("wifi:") ? t.link.wifi : store.port ? t.link.usb : "");
   const quietUntil = $derived(store.info?.quiet_until ?? null);
+  const several = $derived(store.boards.length > 1);
+  const boardDot = (link: string) => (link === "connected" ? "done" : link === "searching" ? "think" : "wrong");
 
   const badge = (p: Page): { n?: number; dot?: string } | null => {
     if (p === "inbox" && store.unread) return { n: store.unread };
@@ -72,6 +75,20 @@
       <div class="status" data-tauri-drag-region><span class="dot {status.dot}"></span>{status.text}{#if via && store.boardState === "live"}<span class="faint"> · {via}</span>{/if}</div>
     </div>
   </header>
+
+  {#if several}
+    <div class="boards" role="group" aria-label={t.boards.title}>
+      <div class="label">{t.boards.count(store.boards.length)}</div>
+      {#each store.boards as b (b.target)}
+        <button class:on={b.current} aria-pressed={b.current} title={t.boards.show(store.boardName(b))} onclick={() => store.showBoard(b)}>
+          <span class="dot {boardDot(b.link)}"></span>
+          <span class="bname">{store.boardName(b)}</span>
+          {#if b.primary}<span class="star" title={t.boards.primary}>★</span>{/if}
+          <span class="via">{b.port?.startsWith("wifi:") ? t.link.wifi : b.port ? t.link.usb : "…"}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   <ul>
     {#each MAIN as p (p)}{@render item(p)}{/each}
@@ -173,6 +190,58 @@
     color: var(--haze);
     font-size: 12px;
     white-space: nowrap;
+  }
+  .boards {
+    display: grid;
+    gap: 2px;
+    margin: -8px 0 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--rim);
+  }
+  .boards .label {
+    padding: 0 10px 6px;
+    color: var(--dusk);
+    font: 600 10.5px/1 var(--sans);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .boards button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: none;
+    color: var(--haze);
+    font: 500 13px/1 var(--sans);
+    cursor: pointer;
+    text-align: left;
+  }
+  .boards button:hover {
+    color: var(--pearl);
+    background: var(--ink-2);
+  }
+  .boards button.on {
+    color: var(--pearl);
+    background: var(--ink-2);
+    border-color: var(--rim-2);
+  }
+  .bname {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .star {
+    color: var(--wait);
+    font-size: 11px;
+  }
+  .via {
+    color: var(--dusk);
+    font-size: 11px;
   }
   ul {
     list-style: none;

@@ -16,6 +16,7 @@ import type {
   BridgeEvent,
   ChatLine,
   Confirmation,
+  DeviceInfo,
   ConnectorStatus,
   FlashEvent,
   Gaze,
@@ -47,6 +48,10 @@ class Store {
   readonly preview = inPreview;
   page = $state<Page>("today");
   now = $state(Date.now());
+
+  // Every board, and the one the window shows (the rest of "the board" below).
+  boards = $state<DeviceInfo[]>([]);
+  shown: DeviceInfo | null = $derived(this.boards.find((b) => b.current) ?? null);
 
   // The board.
   link = $state<Link>("searching");
@@ -119,6 +124,7 @@ class Store {
     setInterval(() => (this.now = Date.now()), 1000);
     on<BridgeEvent>("bridge", (e) => this.#apply(e));
     on<FlashEvent>("flash", (e) => this.#applyFlash(e));
+    on<DeviceInfo[]>("boards", (list) => (this.boards = list));
     on<Notification[]>("inbox", (items) => (this.inbox = items));
     on<TaskEntry[]>("tasks", (items) => (this.tasks = items));
     on<ChatLine[]>("chat", (lines) => (this.chat = lines));
@@ -201,6 +207,7 @@ class Store {
     this.firmware = s.firmware;
     this.voice = s.voice ?? "idle";
     this.logs = s.logs;
+    if (s.boards) this.boards = s.boards;
     if (s.link === "connected") this.connectedAt = Date.now() - (s.connected_age_ms ?? BOOT_MS);
   }
 
@@ -347,6 +354,33 @@ class Store {
 
   async refreshTimers() {
     this.timers = (await call<TimersInfo>("timers_info").catch(() => null)) ?? this.timers;
+  }
+
+  // The boards.
+
+  /** What to call a board: its name, else "Yoru" and the end of its id. */
+  boardName(b: DeviceInfo | null): string {
+    if (!b) return "Yoru";
+    return b.name ?? (b.id ? `Yoru ${b.id.slice(-4)}` : "Yoru");
+  }
+
+  /** Show `b` in the window: its state, firmware, WiFi and settings. */
+  async showBoard(b: DeviceInfo) {
+    this.boards = await call<DeviceInfo[]>("show_board", { board: b.target });
+    const s = await call<Status>("status").catch(() => null);
+    if (s) {
+      this.#applyStatus(s);
+      this.voice = s.voice ?? "idle";
+    }
+  }
+
+  async setPrimary(b: DeviceInfo | null) {
+    this.boards = await call<DeviceInfo[]>("set_primary", { board: b?.id ?? null });
+  }
+
+  async renameBoard(b: DeviceInfo, name: string) {
+    if (!b.id) return;
+    this.boards = await call<DeviceInfo[]>("rename_board", { id: b.id, name });
   }
 
   // The board.
