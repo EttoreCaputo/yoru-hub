@@ -10,6 +10,7 @@
 import type {
   AccountVoice,
   AssistantInfo,
+  BoardClip,
   ChatLine,
   DeviceInfo,
   Confirmation,
@@ -170,6 +171,14 @@ let watchers: WatchEntry[] = [
     watcher: { id: "notion-docs", name: "Shared Notion pages", kind: "tool", tool: "notion__search", arguments: { query: "", filter: "edited_recently" }, every_min: 60, enabled: false, instructions: "", max_urgency: "normal" },
     state: { last_run: now() - 2 * 24 * 60 * MIN, last_error: "notion needs you to sign in again", told: 0 },
   },
+];
+
+const boardClips: BoardClip[] = [
+  { name: "celebrate", seconds: 2.83, loop: false },
+  { name: "wake_stretch", seconds: 3.1, loop: false },
+  { name: "sneeze", seconds: 1.6, loop: false },
+  { name: "listen_loop", seconds: 1.2, loop: true },
+  { name: "search_loop", seconds: 1.8, loop: true },
 ];
 
 let spoken: SpokenClip[] = [
@@ -505,6 +514,9 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   open_key_page: () => undefined,
   memory: () => memory,
   set_memory: (a) => void (memory = a.text),
+  yoru_clips: () => boardClips,
+  yoru_play_clip: () => undefined,
+  yoru_stop_clip: () => undefined,
   spoken_clips: () => spoken,
   // Half a second of a quiet tone, as a 16 kHz WAV.
   spoken_audio: () => tone(),

@@ -286,6 +286,8 @@ export type KeyCheck = { state: "valid" | "invalid" | "unknown"; error: string |
 
 export type McpInfo = { command: string | null; args: string[]; registered: boolean; config_path: string | null; hub_error: string | null };
 /** A sentence Yoru said with ElevenLabs (`spoken_clips`). */
+/** One of a Yoru's animation clips (`yoru_clips`): looping ones play until stopped. */
+export type BoardClip = { name: string; seconds: number; loop: boolean };
 export type SpokenClip = { id: string; at: number; text: string; language: string; voice: string; duration_ms: number };
 /** A recorded track of a meeting: `others` is what the computer played, `mic` the user. */
 export type MeetingTrack = { name: string; source: string; kind: "others" | "mic"; file: string | null; duration_ms: number; rate: number; channels: number };

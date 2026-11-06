@@ -18,6 +18,9 @@ pub enum Delta<'a> {
     /// The model called a tool: the words so far may not be the answer,
     /// and it will be a while before more come.
     Tools,
+    /// The same, for a search of the web the service runs itself: nobody
+    /// here calls it, so this is the only sign of it.
+    Search,
 }
 
 /// Where a streamed request's pieces go.

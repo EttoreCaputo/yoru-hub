@@ -79,7 +79,9 @@ pub fn messages_stream(key: &str, body: &Value, on: OnDelta) -> Result<Value, Cl
             "message_start" => message = event["message"].clone(),
             "content_block_start" => {
                 let block = event["content_block"].clone();
-                if matches!(block["type"].as_str(), Some("tool_use" | "server_tool_use")) {
+                if block["type"] == "server_tool_use" && block["name"] == "web_search" {
+                    on(Delta::Search);
+                } else if matches!(block["type"].as_str(), Some("tool_use" | "server_tool_use")) {
                     on(Delta::Tools);
                 }
                 if blocks.len() <= index {

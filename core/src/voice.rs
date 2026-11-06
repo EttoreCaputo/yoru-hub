@@ -621,7 +621,7 @@ impl Aloud {
                 self.round.push_str(t);
                 self.say_sentences(false);
             }
-            Delta::Tools => {
+            Delta::Tools | Delta::Search => {
                 // What came before the call is said, unless it was the call.
                 if !held(&visible(&self.round, true)) {
                     self.say_sentences(true);

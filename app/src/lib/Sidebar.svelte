@@ -19,10 +19,11 @@
     memory: "M6 4h9l3 3v13H6zM9 10h6M9 14h6",
     meetings: "M12 4a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3ZM6 11a6 6 0 0 0 12 0M12 17v3",
     spoken: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2",
+    animations: "M4 6h16v12H4zM10 9.5v5l4-2.5z",
     settings: "M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4",
   };
   const MOON = "M4 13a8 8 0 0 0 15 3.5A8 8 0 0 1 9 5a8 8 0 0 0-5 8Z";
-  const MAIN: Page[] = ["today", "conversation", "inbox", "connectors", "tasks", "routines", "memory", "meetings", "spoken"];
+  const MAIN: Page[] = ["today", "conversation", "inbox", "connectors", "tasks", "routines", "memory", "meetings", "spoken", "animations"];
   const BODY: Page[] = ["settings"];
 
   const tint = $derived(

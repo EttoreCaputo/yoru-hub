@@ -37,7 +37,7 @@ import type {
   Watcher,
 } from "./types";
 
-export type Page = "today" | "conversation" | "inbox" | "connectors" | "tasks" | "routines" | "memory" | "meetings" | "spoken" | "settings";
+export type Page = "today" | "conversation" | "inbox" | "connectors" | "tasks" | "routines" | "memory" | "meetings" | "spoken" | "animations" | "settings";
 
 /** Opening the port resets the S3: it's up again after about this long. */
 const BOOT_MS = 1100;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { i18n } from "./lib/i18n/index.svelte";
+  import Animations from "./lib/pages/Animations.svelte";
   import Connectors from "./lib/pages/Connectors.svelte";
   import Conversation from "./lib/pages/Conversation.svelte";
   import Inbox from "./lib/pages/Inbox.svelte";
@@ -18,7 +19,7 @@
   store.start();
   i18n.start();
 
-  const PAGES = { today: Today, conversation: Conversation, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, settings: Settings };
+  const PAGES = { today: Today, conversation: Conversation, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
   let main: HTMLElement | undefined = $state();
   // Each page starts at its top.

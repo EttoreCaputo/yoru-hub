@@ -55,7 +55,7 @@ use serde_json::{Value, json};
 
 use crate::cloud::{self, CloudError, anthropic};
 use crate::link::Tool;
-use crate::stream::OnDelta;
+use crate::stream::{Delta, OnDelta};
 use crate::timers::Timers;
 
 pub use confirm::{Confirmation, Confirmations};
@@ -358,11 +358,22 @@ impl Assistant {
         *self.errands.lock().unwrap() = listener;
     }
 
-    fn errand(&self, id: &str, source: &str, state: &'static str) {
+    fn errand(&self, id: &str, source: &str, state: &'static str, kind: &'static str) {
         let listener = self.errands.lock().unwrap().clone();
         if let Some(listener) = listener {
-            listener(Errand { id: id.to_string(), source: source.to_string(), state });
+            listener(Errand { id: id.to_string(), source: source.to_string(), state, kind });
         }
+    }
+
+    fn next_errand(&self) -> String {
+        format!("e{}", self.errand_ids.fetch_add(1, Ordering::Relaxed) + 1)
+    }
+
+    /// A tool of Yoru's own that is over at once: shown as it starts.
+    fn show_done(&self, source: &str, kind: &'static str) {
+        let id = self.next_errand();
+        self.errand(&id, source, "start", kind);
+        self.errand(&id, source, "done", kind);
     }
 
     pub fn external(&self) -> Option<Arc<dyn ExternalTools>> {
@@ -544,11 +555,27 @@ impl Assistant {
                 "output_config": {"effort": effort},
                 "cache_control": {"type": "ephemeral"},
             });
+            // A web search runs on Claude's side: its start comes in the
+            // stream, its end with the answer.
+            let mut search: Option<String> = None;
             let response = match on.as_deref_mut() {
-                Some(on) => anthropic::messages_stream(&key, &body, on),
+                Some(on) => {
+                    let mut relay = |delta: Delta| {
+                        if delta == Delta::Search && search.is_none() {
+                            let id = self.next_errand();
+                            self.errand(&id, "Web", "start", "search");
+                            search = Some(id);
+                        }
+                        on(delta);
+                    };
+                    anthropic::messages_stream(&key, &body, &mut relay)
+                }
                 None => anthropic::messages(&key, &body),
+            };
+            if let Some(id) = &search {
+                self.errand(id, "Web", if response.is_ok() { "done" } else { "failed" }, "search");
             }
-            .map_err(|e| e.to_string())?;
+            let response = response.map_err(|e| e.to_string())?;
             if let Some(m) = response["model"].as_str() {
                 model = m.to_string();
             }
@@ -654,10 +681,35 @@ impl Assistant {
                 let id = self.inbox.post(source, title, input["text"].as_str().unwrap_or_default(), urgency, url, input["by"].as_str().map(str::to_string));
                 return Ok(format!("notified ({id}, {})", urgency.name()));
             }
-            "remember" => return self.memory.remember(input["section"].as_str().unwrap_or("notes"), input["text"].as_str().unwrap_or_default()),
-            "forget" => return self.memory.forget(input["text"].as_str().unwrap_or_default()),
-            "revise_memory" => return self.memory.revise(input["old"].as_str().unwrap_or_default(), input["text"].as_str().unwrap_or_default()),
-            "tasks" => return self.tasks.call_tool(input),
+            "remember" => {
+                let result = self.memory.remember(input["section"].as_str().unwrap_or("notes"), input["text"].as_str().unwrap_or_default());
+                if result.is_ok() {
+                    self.show_done("Memory", "remember");
+                }
+                return result;
+            }
+            "forget" => {
+                let result = self.memory.forget(input["text"].as_str().unwrap_or_default());
+                if result.is_ok() {
+                    self.show_done("Memory", "forget");
+                }
+                return result;
+            }
+            "revise_memory" => {
+                let result = self.memory.revise(input["old"].as_str().unwrap_or_default(), input["text"].as_str().unwrap_or_default());
+                if result.is_ok() {
+                    self.show_done("Memory", "remember");
+                }
+                return result;
+            }
+            "tasks" => {
+                let result = self.tasks.call_tool(input);
+                // Only a change is worth a stamp, not a look at the list.
+                if result.is_ok() && input["action"].as_str().is_some_and(|a| a != "list") {
+                    self.show_done("Tasks", "note");
+                }
+                return result;
+            }
             "get_inbox" => {
                 let items: Vec<Value> = self
                     .inbox
@@ -672,6 +724,9 @@ impl Assistant {
         }
         let language = self.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
         if let Some(result) = self.timers.call_tool(name, input, &language) {
+            if result.is_ok() {
+                self.show_done("Timers", "note");
+            }
             return result;
         }
         if board.iter().any(|t| t.name == name) {
@@ -687,10 +742,12 @@ impl Assistant {
                 None => return Err("the user didn't answer in time: it wasn't done".into()),
             }
         }
-        let errand = format!("e{}", self.errand_ids.fetch_add(1, Ordering::Relaxed) + 1);
-        self.errand(&errand, &tool.service, "start");
+        // A service that acts sends something off; one that reads is fetched from.
+        let kind = if tool.acts { "send" } else { "fetch" };
+        let errand = self.next_errand();
+        self.errand(&errand, &tool.service, "start", kind);
         let outcome = external.call(name, input, EXTERNAL_TIMEOUT);
-        self.errand(&errand, &tool.service, if matches!(outcome, Ok((_, false))) { "done" } else { "failed" });
+        self.errand(&errand, &tool.service, if matches!(outcome, Ok((_, false))) { "done" } else { "failed" }, kind);
         match outcome? {
             (text, false) => Ok(text),
             (text, true) => Err(text),

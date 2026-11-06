@@ -35,7 +35,7 @@ pub(super) fn errand_loop(stop: &AtomicBool, targets: &Targets, errands: Receive
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => return,
         };
-        let args = json!({"state": errand.state, "id": errand.id, "source": clip(&errand.source, 24)});
+        let args = json!({"state": errand.state, "id": errand.id, "source": clip(&errand.source, 24), "kind": errand.kind});
         for link in targets.all().into_iter().filter(|t| t.kind.profile().approvals).filter_map(|t| t.link.upgrade()) {
             // Firmware before 0.11.0 doesn't have the tool; nothing to do then.
             let _ = link.call_tool("show_fetch", args.clone(), TOOL_TIMEOUT);

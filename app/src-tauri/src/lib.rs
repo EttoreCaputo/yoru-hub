@@ -1023,6 +1023,49 @@ async fn yoru_react(state: State<'_, AppState>, board: Option<String>, name: Str
     call_board_on(state, board, "react", serde_json::json!({"name": name})).await
 }
 
+/// What a Yoru's animation clips need from it: `debug/...` test hooks, raw
+/// JSON-RPC rather than MCP tools (Yoru's `docs/protocol.md`).
+const CLIP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Send `method` to `board` and hand back its result. Firmware before 0.20.9
+/// doesn't know the clip hooks: that comes back as `old_firmware`, for the
+/// page to say so in words.
+async fn board_rpc(state: State<'_, AppState>, board: Option<String>, method: &'static str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    let board = state.board(board);
+    tauri::async_runtime::spawn_blocking(move || {
+        board.session(|call| call(method, params, CLIP_TIMEOUT)).map_err(|e| match e {
+            yoru_core::CallError::Rpc { code: -32601, .. } => "old_firmware".to_string(),
+            e => e.to_string(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Every animation clip a Yoru has: `{name, seconds, loop}` each.
+#[tauri::command]
+async fn yoru_clips(state: State<'_, AppState>, board: Option<String>) -> Result<serde_json::Value, String> {
+    let reply = board_rpc(state, board, "debug/clips", serde_json::json!({})).await?;
+    reply.get("clips").cloned().ok_or_else(|| "the board sent no clips".to_string())
+}
+
+/// Play one of a Yoru's clips now, mirrored if asked, in the colours of
+/// `source` (a service name) if given.
+#[tauri::command]
+async fn yoru_play_clip(state: State<'_, AppState>, board: Option<String>, name: String, mirror: bool, source: Option<String>) -> Result<(), String> {
+    let mut params = serde_json::json!({"name": name, "mirror": mirror});
+    if let Some(source) = source {
+        params["source"] = source.into();
+    }
+    board_rpc(state, board, "debug/clip", params).await.map(drop)
+}
+
+/// Stop the clip a Yoru plays: looping ones never end on their own.
+#[tauri::command]
+async fn yoru_stop_clip(state: State<'_, AppState>, board: Option<String>) -> Result<(), String> {
+    board_rpc(state, board, "debug/clip", serde_json::json!({"stop": true})).await.map(drop)
+}
+
 /// Open a Yoru's settings menu, on `page` if given, or close it.
 #[tauri::command]
 async fn yoru_show_menu(state: State<'_, AppState>, board: Option<String>, open: bool, page: Option<String>) -> Result<(), String> {
@@ -1898,7 +1941,7 @@ pub fn run() {
             meetings::meeting_transcribe, meetings::meetings_transcribing, meetings::meeting_transcript, meetings::meeting_export, meetings::rename_speaker, meetings::meeting_summarize, meetings::meeting_summary, meetings::meeting_summarizers,
             meetings::meeting_settings, meetings::set_meeting_settings, meetings::meeting_model, meetings::meeting_model_download, meetings::meeting_import,
             board_voice, set_board_volume, set_board_wake_sound, play_board_sound, test_voice,
-            yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu,
+            yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu, yoru_clips, yoru_play_clip, yoru_stop_clip,
             timers_info, timer_tool, set_timer_screen, dismiss_timers,
             set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze,
             assistant::assistant_info, assistant::ollama_models, assistant::set_assistant_settings, assistant::set_do_not_disturb, assistant::ask, assistant::chat, assistant::forget_conversation,
