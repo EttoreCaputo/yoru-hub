@@ -375,6 +375,15 @@ impl Tasks {
         })
     }
 
+    /// Turn the task `which` names off or back on, keeping it and what it did.
+    pub fn set_enabled(&self, which: &str, on: bool) -> Result<TaskEntry, String> {
+        let task = {
+            let items = self.items.lock().unwrap();
+            items[find(&items, which)?].task.clone()
+        };
+        self.put(Task { enabled: on, ..task })
+    }
+
     pub fn get(&self, id: &str) -> Option<Task> {
         self.items.lock().unwrap().iter().find(|e| e.task.id == id).map(|e| e.task.clone())
     }
@@ -465,11 +474,12 @@ impl Tasks {
             "description": "Jobs the user gives you to do on your own, once or on a schedule (\"every Monday at 9 sum up my open issues\", \
 \"tomorrow at 18 check whether Marco answered\"). Not for ringing at a time (that's a timer) nor for the user's own to-dos. \
 list them; add one: what (the job, in the user's words), name (a few words), repeat (once: date and at; daily: at, days to limit it; \
-monthly: day and at; hourly: every); remove one by name.",
+monthly: day and at; hourly: every); disable one by name to stop it while keeping it, enable it to turn it back on; \
+remove one by name only when the user wants it gone for good.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "add", "remove"]},
+                    "action": {"type": "string", "enum": ["list", "add", "disable", "enable", "remove"]},
                     "name": {"type": "string", "description": "A few words (\"Weekly issues\")"},
                     "what": {"type": "string", "description": "The job, as you'll be told it when it's time"},
                     "repeat": {"type": "string", "enum": ["once", "daily", "monthly", "hourly"]},
@@ -512,6 +522,10 @@ monthly: day and at; hourly: every); remove one by name.",
                     acting: Acting::Ask,
                 };
                 self.put(task).map(|e| format!("added {}", line(&e)))
+            }
+            "disable" | "enable" => {
+                let on = input["action"] == "enable";
+                self.set_enabled(text("name").ok_or("name is required")?, on).map(|e| format!("{} {}", if on { "enabled" } else { "disabled" }, line(&e)))
             }
             "remove" => self.remove(text("name").ok_or("name is required")?).map(|n| format!("removed {n}")),
             _ => {
@@ -705,7 +719,12 @@ mod tests {
         assert_eq!(tasks.list()[0].task.acting, Acting::Ask, "the model can't make a task act freely");
         assert!(tasks.call_tool(&json!({"action": "add", "what": "x", "repeat": "monthly", "at": "10:00"})).is_err());
         assert!(tasks.call_tool(&json!({"action": "list"})).unwrap().contains("Sum up"));
+        assert!(tasks.call_tool(&json!({"action": "disable", "name": "weekly"})).unwrap().ends_with(", off)"));
+        assert!(!tasks.list()[0].task.enabled, "disabled, still there");
+        assert!(tasks.call_tool(&json!({"action": "enable", "name": "weekly"})).unwrap().contains("next"));
+        assert!(tasks.list()[0].task.enabled);
         assert_eq!(tasks.call_tool(&json!({"action": "remove", "name": "weekly"})).unwrap(), "removed Weekly issues");
+        assert!(tasks.list().is_empty());
         let v = serde_json::to_value(task(Schedule::Hourly { every: 2 })).unwrap();
         assert_eq!((v["repeat"].as_str(), v["every"].as_u64()), (Some("hourly"), Some(2)));
     }
