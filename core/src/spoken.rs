@@ -1,6 +1,7 @@
 //! What Yoru said with ElevenLabs: the text sent and the sound that came
 //! back, one clip per sentence, kept in `spoken/` in the data folder so the
-//! app can list them, play them again and export them. Each clip is
+//! app can list them, play them again and export them, and so the same
+//! sentence said again is played from here instead of asked for again. Each clip is
 //! `<id>.wav` with `<id>.json` beside it; they stay until the user deletes them.
 
 use std::fs;
@@ -75,6 +76,32 @@ fn list_in(dir: &Path) -> Vec<Clip> {
         .collect();
     clips.sort_by(|a, b| b.id.cmp(&a.id));
     clips
+}
+
+/// The sound of a clip that said `text` in `language` with `voice`, the
+/// newest such: the same sentence again needn't be asked of ElevenLabs.
+pub fn find(text: &str, language: &str, voice: &str) -> Option<Vec<i16>> {
+    find_in(&dir().ok()?, text, language, voice)
+}
+
+fn find_in(dir: &Path, text: &str, language: &str, voice: &str) -> Option<Vec<i16>> {
+    let clip = list_in(dir).into_iter().find(|c| c.text == text && c.language == language && c.voice == voice)?;
+    samples(&fs::read(dir.join(format!("{}.wav", clip.id))).ok()?)
+}
+
+/// The PCM of a WAV [`crate::voice::wav`] wrote: 16-bit mono, chunks walked
+/// to `data`.
+fn samples(wav: &[u8]) -> Option<Vec<i16>> {
+    let mut at = 12;
+    while at + 8 <= wav.len() {
+        let len = u32::from_le_bytes(wav[at + 4..at + 8].try_into().ok()?) as usize;
+        let body = wav.get(at + 8..(at + 8 + len).min(wav.len()))?;
+        if &wav[at..at + 4] == b"data" {
+            return Some(body.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect());
+        }
+        at += 8 + len + (len & 1);
+    }
+    None
 }
 
 /// The WAV of clip `id`.
@@ -259,6 +286,18 @@ mod tests {
             let t = std::process::Command::new("unzip").arg("-tq").arg(&zip).output().unwrap();
             assert!(t.status.success(), "{}", String::from_utf8_lossy(&t.stdout));
         }
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn finds_a_sentence_said_before() {
+        let dir = std::env::temp_dir().join(format!("yoru-spoken-find-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let t = chrono::Local.with_ymd_and_hms(2026, 10, 22, 15, 30, 12).unwrap();
+        save_in(&dir, "Ciao!", "it", "elevenlabs:voice/x", &[7, -7, 300], t).unwrap();
+        assert_eq!(find_in(&dir, "Ciao!", "it", "elevenlabs:voice/x"), Some(vec![7, -7, 300]));
+        assert_eq!(find_in(&dir, "Ciao!", "it", "elevenlabs:voice/y"), None);
+        assert_eq!(find_in(&dir, "Ciao", "it", "elevenlabs:voice/x"), None);
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -61,6 +61,8 @@ use crate::tts::{self, Tts};
 pub const SAMPLE_RATE: u32 = 16_000;
 /// Bytes before the PCM in each `audio_up` frame: utterance id, flags, sequence (u16 LE).
 const HEADER: usize = 4;
+/// Below this a sample is the room, not a voice: -40 dBFS.
+const SILENCE: u16 = 328;
 /// A gap longer than this is a broken stream, not a few lost frames.
 const MAX_GAP_FRAMES: u16 = 64;
 
@@ -84,6 +86,14 @@ pub struct Utterance {
 impl Utterance {
     pub fn duration_ms(&self) -> u64 {
         self.samples.len() as u64 * 1000 / SAMPLE_RATE as u64
+    }
+
+    /// How long it ends in silence: the user had stopped talking that long
+    /// before the board ended it.
+    pub fn trailing_silence_ms(&self) -> u64 {
+        // -40 dBFS: the room, not a voice.
+        let quiet = self.samples.iter().rev().take_while(|s| s.unsigned_abs() < SILENCE).count();
+        quiet as u64 * 1000 / SAMPLE_RATE as u64
     }
 
     /// Peak level in dBFS; `None` for silence.
@@ -386,6 +396,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             continue;
         }
         let Some(link) = session.link.upgrade() else { break };
+        let mut times = Times { heard: Some(Instant::now()), silence_ms: utterance.trailing_silence_ms(), ..Times::default() };
         // The board shows thinking meanwhile, however long the model takes.
         let mut thinking = StillThinking::start(session);
         let follow_up = utterance.trigger == "follow_up";
@@ -398,7 +409,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 sink(BridgeEvent::VoiceError { message: "nothing transcribes what Yoru hears: turn voice on and pick a speech-to-text model".into() });
                 Err(if follow_up { "idle" } else { "error" })
             }
-            Some(stt) => match stt.transcribe(&utterance.samples) {
+            Some(stt) => match times.transcribed(stt.transcribe(&utterance.samples)) {
                 Ok(t) if is_non_speech(&t.text) => {
                     sink(BridgeEvent::Transcript { id: utterance.id, transcript: None });
                     // Nothing said after an answer is no mistake.
@@ -424,10 +435,11 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             },
         };
         let next = match transcript {
-            Ok(t) => respond(&link, session, &config, sink, utterance.id, &t.text, &t.language, follow_up, &mut thinking),
+            Ok(t) => respond(&link, session, &config, sink, utterance.id, &t.text, &t.language, follow_up, &mut thinking, &mut times),
             Err(state) => Next::State(state),
         };
         thinking.stop();
+        times.report(sink);
         let over = match next {
             Next::State(state) => {
                 set_state(&link, state);
@@ -455,6 +467,74 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
     (session.conversation_over)();
 }
 
+/// Where an answer's wait went, from the end of the utterance: logged once
+/// it was said, and kept in `voice-times.log` in the data folder.
+#[derive(Default)]
+struct Times {
+    heard: Option<Instant>,
+    /// The silence the utterance ended with: the board's wait for the end of the sentence.
+    silence_ms: u64,
+    stt_ms: Option<u64>,
+    asked: Option<Instant>,
+    first_words: Option<Instant>,
+    first_sentence: Option<Instant>,
+    /// Times the brain went off to call tools.
+    tools: u32,
+    answered: Option<Instant>,
+    /// From the first sentence to its first sound: the voice.
+    voice_ms: Option<u64>,
+}
+
+impl Times {
+    fn transcribed<T>(&mut self, result: T) -> T {
+        self.stt_ms = self.heard.map(|h| h.elapsed().as_millis() as u64);
+        result
+    }
+
+    fn delta(&mut self, aloud: &mut Aloud, d: Delta) {
+        match &d {
+            Delta::Text(t) if !t.trim().is_empty() => {
+                self.first_words.get_or_insert_with(Instant::now);
+            }
+            Delta::Tools | Delta::Search => self.tools += 1,
+            Delta::Text(_) => {}
+        }
+        aloud.add(d);
+        if aloud.has_spoken() {
+            self.first_sentence.get_or_insert_with(Instant::now);
+        }
+    }
+
+    fn line(&self) -> Option<String> {
+        let heard = self.heard?;
+        let at = |t: Option<Instant>| t.map_or("-".to_string(), |t| format!("{} ms", t.saturating_duration_since(heard).as_millis()));
+        // The first sound: the first sentence (or the whole answer) plus the voice's wait.
+        let said = self.first_sentence.or(self.answered);
+        let sound = said.zip(self.voice_ms).map(|(t, v)| t + Duration::from_millis(v));
+        Some(format!(
+            "host: timing: end of sentence waited {} ms, then transcribed {}, brain's first words {}, first sentence {}, answer done {}, first sound {} (voice {}), tool rounds {}",
+            self.silence_ms,
+            self.stt_ms.map_or("-".to_string(), |m| format!("{m} ms")),
+            at(self.first_words),
+            at(self.first_sentence),
+            at(self.answered),
+            at(sound),
+            self.voice_ms.map_or("-".to_string(), |m| format!("{m} ms")),
+            self.tools,
+        ))
+    }
+
+    fn report(&self, sink: &EventSink) {
+        let Some(line) = self.line() else { return };
+        if let Some(path) = crate::paths::data_dir().map(|d| d.join("voice-times.log")) {
+            use std::io::Write as _;
+            let stamped = format!("{} {line}\n", Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(stamped.as_bytes()));
+        }
+        sink(BridgeEvent::BoardLog { line });
+    }
+}
+
 /// What the board does once the host has answered.
 enum Next {
     /// Show this state (`idle`, `error`): nothing was said.
@@ -468,8 +548,9 @@ enum Next {
 
 /// Act on the words and answer.
 #[allow(clippy::too_many_arguments)]
-fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSink, id: u8, text: &str, language: &str, follow_up: bool, thinking: &mut StillThinking) -> Next {
+fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSink, id: u8, text: &str, language: &str, follow_up: bool, thinking: &mut StillThinking, times: &mut Times) -> Next {
     let started = Instant::now();
+    times.asked = Some(started);
     // "Stop" or "5 more minutes" for an alarm needs no language model: the rules, at once.
     let alarm = session.timers.is_ringing() || session.timers.dismissed_within(ALARM_FOLLOW_UP);
     let quick = alarm && intents::understand(text, language, &Context { alarm, ..Context::default() }).calls.iter().any(|(t, _)| matches!(t.as_str(), "control_timer" | "update_timer"));
@@ -483,7 +564,7 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
         let talker = tts.map(|tts| scope.spawn(move || talk(link, session, tts, to_say, thinking)));
         let mut aloud = Aloud::new(said, language);
         let assistant = session.assistant.as_ref().filter(|a| !quick && a.is_ready());
-        let answer = assistant.and_then(|a| match a.respond_aloud(text, Some(heard), crate::assistant::Channel::Voice, follow_up, &VoiceHost { link, session }, &mut |d| aloud.add(d)) {
+        let answer = assistant.and_then(|a| match a.respond_aloud(text, Some(heard), crate::assistant::Channel::Voice, follow_up, &VoiceHost { link, session }, &mut |d| times.delta(&mut aloud, d)) {
             Ok(reply) => Some((reply.text, reply.actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect(), true, "assistant", language)),
             // Its free limits ran out: say so and when, rather than a worse answer.
             Err(e) if a.limited().is_some() => {
@@ -502,7 +583,7 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
         });
         let agent = config.agent.as_ref().filter(|_| !quick && answer.is_none());
         let answer = answer.or_else(|| {
-            agent.and_then(|agent| match agent.respond_aloud(text, language, &BoardToolbox { link, session, language }, &mut |d| aloud.add(d)) {
+            agent.and_then(|agent| match agent.respond_aloud(text, language, &BoardToolbox { link, session, language }, &mut |d| times.delta(&mut aloud, d)) {
                 Ok(turn) => Some((turn.reply, turn.actions.iter().map(action_line).collect(), true, "llm", language)),
                 Err(e) if aloud.has_spoken() => {
                     sink(BridgeEvent::VoiceError { message: e.to_string() });
@@ -524,11 +605,13 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
             aloud.say_all(&reply, language);
         }
         drop(aloud);
+        times.answered = Some(Instant::now());
         let elapsed_ms = started.elapsed().as_millis() as u64;
         sink(BridgeEvent::Reply { id, text: reply.clone(), language: language.to_string(), actions, understood, by: by.into(), elapsed_ms });
         let Some(talker) = talker else { return Next::State("idle") };
         match talker.join().unwrap_or_else(|_| Err("the voice stopped".into())) {
             Ok(Some(spoken)) => {
+                times.voice_ms = Some(spoken.first_audio_ms);
                 let next = match spoken.reason.as_str() {
                     "done" => Next::Spoken { question: asks(&spoken.text) },
                     "barge_in" => Next::Interrupted,
