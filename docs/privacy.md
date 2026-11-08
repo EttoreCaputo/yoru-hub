@@ -1,6 +1,6 @@
 # Yoru privacy policy
 
-Last updated: 2026-11-03
+Last updated: 2026-11-08
 
 Yoru is a personal assistant that runs on your computer, with a small round board on your desk as its body. This page says what Yoru does with your data. The short version: **Yoru works on your computer. We run no server and collect nothing about you.**
 
@@ -26,6 +26,7 @@ Yoru sends data only to the services you choose, and only to do what you asked:
 - **The services you connect** (for example Gmail, Google Calendar, GitHub, Slack, Notion, Linear). Yoru signs in with your account, through the service's own sign-in page, and asks for the permissions listed there. It reads or acts on that service only when you ask, or when a watcher you set up checks it.
 - **The model that answers you.** To think, Yoru sends your request, your memory, and the results of the tools it used (for example the mails or events it was asked about) to the model provider you picked: Groq, OpenAI or Anthropic, with your own API key. Their handling of that data is covered by their own policies. If you pick Ollama, the model runs on your computer and nothing leaves it.
 - **The voice providers, if you pick them.** With an ElevenLabs or Groq voice, the text Yoru speaks is sent to that provider. Speech recognition runs on your computer, unless you pick a provider's Whisper (Groq or OpenAI): then what you say to the board is sent to it. What ElevenLabs spoke is kept on your computer, on the Spoken page, until you delete it.
+- **The services' icons.** To show a service's icon on the board (Spotify, ClickUp...), Yoru first looks for an app of that name on this computer; if there is none it downloads the public icon from the service's site (`<name>.com/apple-touch-icon.png`, Google's icon page for Gmail, Calendar, Drive and Meet). Only the service's name is in that request, nothing about you or what you asked. The icons are kept on your computer.
 - **The board.** Yoru talks to the board over USB or your local WiFi. Nothing goes to the internet for that. While the computer is away, the board talks to the same speech, brain and voice providers itself, over your WiFi, with the keys the app gave it: what you say to it, your memory (its first part) and today's timers and the names and times of your tasks go to them, as they would from the computer. The keys reach the board only over USB or its encrypted WiFi link, and stay in its flash until the app tells it to forget them (when you remove a provider).
 
 ## Acting on your behalf

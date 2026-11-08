@@ -71,6 +71,8 @@ const YORU: BoardProfile = BoardProfile {
         "show_notification",
         "hide_notification",
         "clear_notifications",
+        "set_icon",
+        "set_meeting",
     ],
     agent_body: "a small round screen on the user's desk, where you appear as a matte sphere with two eyes and two floating hands, \
 with a microphone and a speaker",

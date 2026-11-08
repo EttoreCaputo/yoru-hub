@@ -25,6 +25,7 @@ pub mod firmware;
 pub mod flasher;
 pub mod hardware;
 pub mod hub;
+pub mod icons;
 pub mod intent;
 pub mod intents;
 pub mod link;

@@ -469,3 +469,42 @@ mod tests {
         assert_eq!(tracks[0].duration_ms, 1200);
     }
 }
+
+/// What the board shows of the meetings (`set_meeting`, firmware 0.20.15):
+/// the recording, the transcript and the summary being made, and how it
+/// ended. The app sets it; every bridge sends it when it changes.
+#[derive(Debug, Default)]
+pub struct BoardMeeting {
+    now: Mutex<(String, String, Option<Instant>)>,
+    revision: std::sync::atomic::AtomicU64,
+}
+
+/// How long an ending (`done`, `failed`) is still sent to a board that connects.
+const ENDING_KEPT: Duration = Duration::from_secs(30);
+
+impl BoardMeeting {
+    /// `state`: `idle`, `recording`, `transcribing`, `summarizing`, `done`
+    /// or `failed`; `source`: the app recorded, as the user knows it.
+    pub fn set(&self, state: &str, source: Option<&str>) {
+        let mut now = self.now.lock().unwrap();
+        let source = source.map(str::to_string).unwrap_or_else(|| now.1.clone());
+        *now = (state.to_string(), source, Some(Instant::now()));
+        self.revision.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The state and the source to send now: an ending a while ago is idle.
+    pub fn board_state(&self) -> (String, String) {
+        let now = self.now.lock().unwrap();
+        let state = match now.0.as_str() {
+            "" => "idle",
+            "done" | "failed" if now.2.is_none_or(|t| t.elapsed() > ENDING_KEPT) => "idle",
+            s => s,
+        };
+        (state.to_string(), now.1.clone())
+    }
+}
+

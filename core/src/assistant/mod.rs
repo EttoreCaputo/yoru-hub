@@ -276,6 +276,8 @@ pub struct Assistant {
     pub inbox: Arc<Inbox>,
     pub tasks: Arc<Tasks>,
     pub timers: Arc<Timers>,
+    /// What the boards show of the meetings recorded.
+    pub meeting: Arc<crate::meetings::BoardMeeting>,
     external: Mutex<Option<Arc<dyn ExternalTools>>>,
     /// Told of each external call the model makes (the bridge, while it runs).
     errands: Mutex<Option<ErrandListener>>,
@@ -318,6 +320,7 @@ impl Assistant {
             inbox: Arc::new(Inbox::open(file("inbox.json"))),
             tasks: Arc::new(Tasks::open(file("tasks.json"))),
             timers,
+            meeting: Arc::default(),
             settings: Mutex::new(settings),
             external: Mutex::default(),
             errands: Mutex::default(),

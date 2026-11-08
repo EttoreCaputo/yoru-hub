@@ -37,6 +37,30 @@ impl Meetings {
     }
 }
 
+/// What every board shows of the meetings: `state` as
+/// [`meetings::BoardMeeting::set`] takes it.
+fn board(app: &AppHandle, state: &str, source: Option<&str>) {
+    app.state::<AppState>().assistant.meeting.set(state, source);
+}
+
+/// The recording of `request` started: the boards show it with the app's
+/// name and icon (looked up on a thread: `sources` asks the helper).
+fn board_recording(app: &AppHandle, request: &Request) {
+    if request.system || request.app.is_none() {
+        board(app, "recording", Some("Computer"));
+        return;
+    }
+    let (app, id) = (app.clone(), request.app.clone().unwrap_or_default());
+    thread::spawn(move || {
+        let found = meetings::sources().ok().and_then(|s| s.apps.into_iter().find(|a| a.id == id));
+        let name = found.as_ref().map_or_else(|| id.rsplit('.').next().unwrap_or(&id).to_string(), |a| a.name.clone());
+        if let Some(b64) = found.and_then(|a| a.icon) {
+            yoru_core::icons::remember_base64(&name, &b64);
+        }
+        board(&app, "recording", Some(&name));
+    });
+}
+
 /// At launch: finalize what an app that quit while recording left behind.
 pub fn start(app: &AppHandle) {
     app.manage(Meetings::default());
@@ -71,6 +95,7 @@ pub async fn meeting_start(app: AppHandle, request: Request) -> Result<Meeting, 
         return Err("a recording is already running".into());
     }
     let events = app.clone();
+    let shown = request.clone();
     let recording = blocking(move || {
         Recording::start(&request, move |event| {
             let done = match &event {
@@ -79,6 +104,7 @@ pub async fn meeting_start(app: AppHandle, request: Request) -> Result<Meeting, 
             };
             if done.is_some() {
                 events.state::<Meetings>().active.lock().unwrap().take();
+                board(&events, "idle", None);
             }
             let _ = events.emit("meeting", &event);
             if let Some(id) = done {
@@ -89,6 +115,7 @@ pub async fn meeting_start(app: AppHandle, request: Request) -> Result<Meeting, 
     .await?;
     let meeting = recording.meeting();
     *app.state::<Meetings>().active.lock().unwrap() = Some(recording);
+    board_recording(&app, &shown);
     Ok(meeting)
 }
 
@@ -146,6 +173,7 @@ fn queue(app: &AppHandle, id: String) {
         let state = app.state::<Meetings>();
         let _turn = state.worker.lock().unwrap();
         let settings = meetings::settings();
+        board(&app, "transcribing", None);
         let language = Some(settings.language).filter(|l| !l.is_empty());
         let result = meetings::transcribe(&id, language.as_deref(), settings.speakers, |track, phase, fraction| {
             let event = Event::Progress { id: id.clone(), track: track.into(), phase: phase.into(), fraction };
@@ -161,6 +189,8 @@ fn queue(app: &AppHandle, id: String) {
         drop(_turn);
         if transcribed && meetings::settings().auto_summary && summarizer(&app).is_ok() {
             queue_summary(&app, id);
+        } else {
+            board(&app, if transcribed { "done" } else { "failed" }, None);
         }
     });
 }
@@ -175,6 +205,7 @@ fn queue_summary(app: &AppHandle, id: String) {
     thread::spawn(move || {
         let state = app.state::<Meetings>();
         let _turn = state.worker.lock().unwrap();
+        board(&app, "summarizing", None);
         let result = summarizer(&app).and_then(|model| {
             let (you, person) = if crate::app_language(&app.state::<AppState>()).starts_with("it") { ("Tu", "Persona") } else { ("You", "Person") };
             let progress = |fraction| {
@@ -190,6 +221,7 @@ fn queue_summary(app: &AppHandle, id: String) {
             Ok((meeting, summary)) => Event::Summarized { meeting, summary },
             Err(message) => Event::SummaryFailed { id, message },
         };
+        board(&app, if matches!(event, Event::Summarized { .. }) { "done" } else { "failed" }, None);
         let _ = app.emit("meeting", &event);
     });
 }

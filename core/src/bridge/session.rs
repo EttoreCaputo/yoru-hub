@@ -307,6 +307,8 @@ struct Lists {
     /// were last looked at: they're read from the settings and the memory.
     cloud: Option<Sent<String>>,
     cloud_checked: Option<Instant>,
+    /// The meeting's revision (firmware 0.20.15).
+    meeting: Option<Sent<u64>>,
 }
 
 /// How often the services sent to the board are looked at again.
@@ -327,6 +329,7 @@ impl Lists {
             tasks: has("tasks").then(Sent::default),
             cloud: has("cloud").then(Sent::default),
             cloud_checked: None,
+            meeting: has("meetings").then(Sent::default),
         }
     }
 
@@ -346,6 +349,17 @@ impl Lists {
             if sent.last != Some(now) {
                 sent.last = Some(now);
                 let _ = link.call_tool("set_tasks", assistant.tasks.board_list(), TOOL_TIMEOUT);
+            }
+        }
+        if let (Some(sent), Some(assistant)) = (&mut self.meeting, &config.assistant) {
+            let revision = assistant.meeting.revision();
+            if sent.last != Some(revision) {
+                sent.last = Some(revision);
+                let (state, source) = assistant.meeting.board_state();
+                if state == "recording" && !source.is_empty() {
+                    crate::icons::send(link, &source);
+                }
+                let _ = link.call_tool("set_meeting", json!({"state": state, "source": source}), TOOL_TIMEOUT);
             }
         }
         if let Some(sent) = &mut self.cloud
