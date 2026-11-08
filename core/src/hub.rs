@@ -17,7 +17,7 @@
 //! | `host/hello` | The `hello` of the board the request reaches |
 //! | `tools/list`, `tools/call`, `media/...`, `wifi/...`, `ota/...`, `debug/...` | Passed to the board as they are (`ota/...`: an update, see [`crate::ota`]; `debug/...`: the board's test hooks) |
 //! | `host/snapshot` | `{"snapshot": Snapshot or null, "age_ms"}`: the bridge's latest sample |
-//! | `host/say` `{"text","language"?}` | How it was spoken, once played |
+//! | `host/say` `{"text","language"?,"recorded"?}` | How it was spoken, once played; `recorded` (tests) replays what ElevenLabs already said, sentence by sentence, and asks no voice |
 //! | `host/timers` `{"name","arguments","language"?}` | `{"text","is_error"}`: a [`Timers::tools`] tool, run on the bridge's timers |
 //! | `host/notify` `{"title","text"?,"urgency"?,"source"?,"url"?}` | `{"id"}`: a notification in the assistant's inbox, delivered to the board |
 //!
@@ -464,7 +464,8 @@ fn pick(boards: &[BoardInfo], wanted: Option<&str>, has_tool: impl Fn(usize) -> 
 }
 
 /// Speak `text` (in `language`, or the one it looks like) and return how it went.
-pub(crate) type SayFn = Arc<dyn Fn(&str, Option<&str>) -> Result<Value, String> + Send + Sync>;
+/// Text, language, and whether to replay ElevenLabs' recordings instead of asking a voice (tests).
+pub(crate) type SayFn = Arc<dyn Fn(&str, Option<&str>, bool) -> Result<Value, String> + Send + Sync>;
 
 fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i64, String)> {
     // Which board, for the hub only: the board itself isn't told.
@@ -481,7 +482,8 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
             let text = params.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty());
             let Some(text) = text else { return Err((INVALID_PARAMS, "expected {\"text\": string, \"language\"?: \"it\" | \"en\"}".into())) };
             let board = shared.pick(wanted, None)?;
-            return (board.say)(text, params.get("language").and_then(Value::as_str)).map_err(|e| (NO_BOARD, e));
+            let recorded = params.get("recorded").and_then(Value::as_bool).unwrap_or(false);
+            return (board.say)(text, params.get("language").and_then(Value::as_str), recorded).map_err(|e| (NO_BOARD, e));
         }
         "host/boards" => return Ok(json!(shared.infos())),
         "host/hello" => return Ok(serde_json::to_value(&shared.pick(wanted, None)?.hello).unwrap_or(Value::Null)),

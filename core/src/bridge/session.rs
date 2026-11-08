@@ -439,11 +439,15 @@ fn gaze_loop(link: &Weak<Link>, ready: &AtomicBool, over: &AtomicBool, follow: &
 /// `host/say` for the hub: speak with the voice config of the moment.
 fn say_fn(link: &Arc<Link>, speaker: &Arc<Speaker>, config: &BridgeConfig) -> crate::hub::SayFn {
     let (link, speaker, voice) = (Arc::downgrade(link), speaker.clone(), config.voice.clone());
-    Arc::new(move |text: &str, language: Option<&str>| {
-        let tts = voice.lock().unwrap().tts.clone().ok_or("the bridge isn't speaking: turn on spoken replies in the app, or run companion --tts")?;
+    Arc::new(move |text: &str, language: Option<&str>, recorded: bool| {
         let link = link.upgrade().ok_or("the board disconnected")?;
         let language = language.unwrap_or_else(|| intents::guess_language(text));
-        let spoken = speaker.speak(&link, &tts, text, language)?;
+        let spoken = if recorded {
+            speaker.speak_recorded(&link, text, language)?
+        } else {
+            let tts = voice.lock().unwrap().tts.clone().ok_or("the bridge isn't speaking: turn on spoken replies in the app, or run companion --tts")?;
+            speaker.speak(&link, &tts, text, language)?
+        };
         Ok(serde_json::to_value(spoken).unwrap_or_default())
     })
 }

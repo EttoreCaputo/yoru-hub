@@ -1094,6 +1094,18 @@ impl Speaker {
         Ok(Spoken { text: text.to_string(), ..spoken })
     }
 
+    /// Play `text` from the clips ElevenLabs already spoke (`spoken/`), a
+    /// sentence each, without asking any voice: for tests. Fails on a
+    /// sentence never spoken before.
+    pub fn speak_recorded(&self, link: &Link, text: &str, language: &str) -> Result<Spoken, String> {
+        let mut audio = Vec::new();
+        for sentence in tts::sentences(&tts::speakable(text, language)) {
+            let samples = crate::spoken::find(&sentence, language).ok_or_else(|| format!("no recording of {sentence:?}"))?;
+            audio.push(Ok(samples));
+        }
+        Ok(Spoken { text: text.to_string(), ..self.play(link, audio)? })
+    }
+
     /// Play `first` and the sentences after it in `said` as one stream on the
     /// board, each synthesized while the one before plays, until a
     /// [`Said::Pause`] (`true`) or the end. Returns once the board played it.

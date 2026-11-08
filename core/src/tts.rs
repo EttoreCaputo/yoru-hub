@@ -49,8 +49,6 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a cloud voice that failed is left to its fallback before it's
 /// asked again (one over its limits says how long itself).
 pub const CLOUD_RETRY: Duration = Duration::from_secs(60);
-/// A sentence played again from `spoken/` goes out a tenth of a second at a time, as the cloud streams it.
-const REPLAY_CHUNK: usize = 1600;
 
 /// The audio tags the assistant may write when its voice acts them out
 /// ([`Tts::reads_audio_tags`]): a short list from ElevenLabs' v4 guide that
@@ -385,13 +383,6 @@ impl Tts {
                     let mut heard = false;
                     // ElevenLabs' sentences are kept for the app (crate::spoken).
                     let keep = client.model.provider.api == cloud::Api::ElevenLabs;
-                    // A sentence said before is played again: no wait, no credit spent.
-                    if keep && let Some(samples) = crate::spoken::find(said, language, &voice) {
-                        for chunk in samples.chunks(REPLAY_CHUNK) {
-                            out(chunk.to_vec());
-                        }
-                        return Ok(());
-                    }
                     let mut kept = Vec::new();
                     match self.speak_cloud(client, said, language, &mut |samples| {
                         heard |= !samples.is_empty();
