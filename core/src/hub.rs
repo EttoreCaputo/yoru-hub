@@ -475,7 +475,7 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
         "tools/call" => {}
         // Image uploads (firmware 1.1), writes taking a moment when the flash
         // erases; the WiFi set-up (firmware 1.4.3), a scan taking seconds;
-        // updates; the board's test hooks (`debug/friends`, `debug/life`...).
+        // updates; the board's test hooks (`debug/life`, `debug/clips`...).
         m if ["media/", "wifi/", "ota/", "debug/"].iter().any(|p| m.starts_with(p)) => {}
         "host/say" => {
             let text = params.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty());
