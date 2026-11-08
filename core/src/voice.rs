@@ -238,9 +238,25 @@ pub struct VoiceConfig {
     /// Judge at each pause whether the sentence is finished with Smart
     /// Turn; without it, the board's own pause ends it.
     pub turn: Option<Arc<SmartTurn>>,
+    /// Who speaks, by their voice print (docs/memory.md, Knowing who speaks).
+    pub voiceprint: Option<Arc<crate::voiceprint::Voiceprinter>>,
     /// The language every answer is in (`it`, `en`), the one picked in the
     /// app; `None` answers in the one heard.
     pub language: Option<String>,
+}
+
+/// The voice print of `samples` (once the helper's models are here: the
+/// first utterance starts their download) and their prosody.
+fn listen_to(printer: Option<&Arc<crate::voiceprint::Voiceprinter>>, samples: &[i16]) -> (Option<Vec<f32>>, (f32, Option<f32>, f32)) {
+    let prosody = crate::voiceprint::prosody(samples);
+    let print = printer.filter(|_| samples.len() >= 16_000).and_then(|p| {
+        if !p.is_ready() {
+            p.prepare();
+            return None;
+        }
+        p.print(samples).map_err(|e| eprintln!("voice print: {e}")).ok()
+    });
+    (print, prosody)
 }
 
 /// Whisper's output for silence or noise rather than words.
@@ -409,7 +425,17 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 sink(BridgeEvent::VoiceError { message: "nothing transcribes what Yoru hears: turn voice on and pick a speech-to-text model".into() });
                 Err(if follow_up { "idle" } else { "error" })
             }
-            Some(stt) => match times.transcribed(stt.transcribe(&utterance.samples)) {
+            Some(stt) => match times.transcribed({
+                // Whose voice and how it sounded, while the words are transcribed.
+                let (transcribed, heard) = thread::scope(|scope| {
+                    let heard = session.assistant.as_ref().map(|_| scope.spawn(|| listen_to(config.voiceprint.as_ref(), &utterance.samples)));
+                    (stt.transcribe(&utterance.samples), heard.and_then(|h| h.join().ok()))
+                });
+                if let (Some(a), Some((print, (loudness, pitch, seconds)))) = (&session.assistant, heard) {
+                    a.hear(print, loudness, pitch, seconds);
+                }
+                transcribed
+            }) {
                 Ok(t) if is_non_speech(&t.text) => {
                     sink(BridgeEvent::Transcript { id: utterance.id, transcript: None });
                     // Nothing said after an answer is no mistake.
@@ -456,7 +482,13 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 None => true,
             },
             Next::Spoken { .. } => true,
-            Next::Interrupted => false,
+            Next::Interrupted => {
+                // Cut short: a measure of how Yoru talks (docs/memory.md, Style).
+                if let Some(a) = &session.assistant {
+                    a.interrupted();
+                }
+                false
+            }
         };
         if over {
             chain = FollowUp::default();

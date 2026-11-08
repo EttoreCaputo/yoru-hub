@@ -6,7 +6,7 @@
 
 Yoru is a personal assistant that lives on your computer and has a body: [a round ESP32-S3 board](https://github.com/EttoreCaputo/Yoru) on the desk, a pearl sphere on true black. It connects to the services you use (mail, calendar, issues, documents…) through MCP connectors, keeps an eye on them, tells you when something is worth knowing, and answers when you ask, typed in the app or said to the board.
 
-This repository is its host program: the Rust core, the `yoru` command line and the desktop app. The plan and where it stands: [assistant.md](assistant.md); recording and summarizing meetings, planned: [meetings.md](meetings.md); the memory as a graph, planned: [memory.md](memory.md); the app's code: [app.md](app.md).
+This repository is its host program: the Rust core, the `yoru` command line and the desktop app. The plan and where it stands: [assistant.md](assistant.md); recording and summarizing meetings, planned: [meetings.md](meetings.md); the memory as a graph, with feelings and voices: [memory.md](memory.md); the app's code: [app.md](app.md).
 
 Status: early development (0.1.0).
 
@@ -18,7 +18,7 @@ Platform: **macOS only** for now (Apple Silicon and Intel). Some code still buil
 - **Watches**: watchers check a connector's tool or do a task every so often, and only what's new and matters becomes a notification. A morning recap, quiet hours and do-not-disturb.
 - **Does what you give it to do**: tasks you assign Yoru in words, once or on a schedule (every day or some weekdays, every month, every few hours), done on his own when it's time; each one reads and tells only, asks before acting, or acts without asking, as you choose. The board's Tasks app shows them, with "Do it now".
 - **Keeps time**: timers, a pomodoro and reminders, shown and handled in the board's Timers app.
-- **Remembers**: `memory.md` in the data folder, read every turn, kept up to date by Yoru as you talk, edited in the app.
+- **Remembers**: a graph of the people and things in your life and the facts about them (`memory.db`), searched for each answer, learnt from conversations and meetings while Yoru rests, edited in the app. It knows who is speaking by their voice and keeps feelings for each person.
 - **Talks**: after the wake word or with PWR held on the board, it transcribes on this computer (whisper.cpp) or with your provider's Whisper, and speaks with Piper on this computer or with ElevenLabs or Groq. It keeps listening after an answer, tells a goodbye from a new request (EmbeddingGemma) and hears when you finished the sentence (Smart Turn); the Spoken page keeps what ElevenLabs said.
 - **Records meetings**: what the computer plays (everything, or one app such as a call) and your microphones, each as a track of its own, or an audio or video file you bring in; transcribed on this computer with Parakeet, who speaks told apart with Nemotron (up to 8 people per track, each nameable), saved as Markdown, SRT or text, and summarized (points, decisions, things to do, open questions) by the local model or the brain ([meetings.md](meetings.md)).
 - **Has a body**: the board shows notifications, timers, tasks and Allow/Deny cards, goes on an errand while a connector is called, listens after its wake word, and speaks. Any MCP client (Claude Code, Claude Desktop…) can make it react, speak, notify you and set timers, through its MCP server.

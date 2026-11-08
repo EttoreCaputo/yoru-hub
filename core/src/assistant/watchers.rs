@@ -359,7 +359,7 @@ Write the title (a few words) and the text (one or two sentences) in the user's 
 <seen_keys>\n{seen}\n</seen_keys>\n\n<output>\n{output}\n</output>",
         name = watcher.name,
         instructions = if watcher.instructions.trim().is_empty() { "(none)" } else { watcher.instructions.trim() },
-        memory = assistant.memory.for_prompt(),
+        memory = assistant.memory.core(8000, assistant.settings().brain() != Some(super::Brain::Ollama)),
     );
     let prompt = if baseline { format!("{prompt}\n\nThis is the first run: just list the items; nothing will be told.") } else { prompt };
     let schema = json!({

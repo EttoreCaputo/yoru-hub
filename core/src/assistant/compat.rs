@@ -133,9 +133,13 @@ For several topics call it once per topic in the same turn: the searches run at 
 - Use the tools instead of guessing; never invent facts about the user's data.
 - Tools that change something ask the user first; if they say no, accept it.
 - Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
-- Look after the memory unasked: save lasting facts about the user with remember as they come up, correct or merge lines with revise_memory, remove stale ones with forget. One short fact per line, no duplicates. The memory is in <memory>.
+- {memory}
 - Always reply in the language the context line names (reply in: ...), even when the user speaks another one; without one, in the user's. Channel voice: one to three plain sentences a text-to-speech voice reads well: no markdown, lists, emoji, URLs, symbols or special characters; units and abbreviations written as they are said. Channel text: short Markdown is fine.
-- Friendly and to the point; never chatty or servile; don't end with offers of help."
+- Friendly and to the point; never chatty or servile; don't end with offers of help.
+
+{feelings}",
+        memory = super::MEMORY_RULE,
+        feelings = super::feelings_rule(),
     )
 }
 
@@ -320,7 +324,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     let system = json!({"role": "system", "content": format!(
         "{}\n\n<memory>\n{}\n</memory>{language}{tags}",
         system_prompt(&settings.name, &services_line(&findable), searches_web(&external_tools)),
-        a.memory.for_prompt_within(budget.memory_max)
+        a.memory.core(budget.memory_max, brain != Brain::Ollama)
     )});
     let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));
     let mut actions: Vec<Action> = Vec::new();

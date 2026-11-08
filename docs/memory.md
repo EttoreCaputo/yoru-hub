@@ -1,8 +1,8 @@
 # Yoru's memory: a graph, and feelings for each person
 
-Decided on 2026-11-08. Today Yoru's memory is one Markdown file (`memory.md`, `core/src/assistant/memory.rs`) put whole into every prompt; it becomes a graph of the people and things in your life, with facts that know when they were true, searched for what each answer needs, and kept tidy by Yoru while it sleeps. On top of it, Yoru's feelings become a relationship with each person, and its way of talking adapts slowly within limits you set.
+Decided and built on 2026-11-08 (where it stands: How it works, below). Yoru's memory was one Markdown file (`memory.md`) put whole into every prompt; it is now a graph of the people and things in your life, with facts that know when they were true, searched for what each answer needs, and kept tidy by Yoru while it sleeps. On top of it, Yoru's feelings become a relationship with each person, and its way of talking adapts slowly within limits you set.
 
-## What is wrong today
+## What was wrong with the file
 
 - The whole file goes into every prompt, cut from its head past the brain's budget (12,000 characters for Claude and OpenAI, 3,000 for Groq and Ollama, 1,200 for the board): the Notes go first.
 - Lines have no date and no source; nothing says a fact stopped being true.
@@ -24,7 +24,7 @@ Decided on 2026-11-08. Today Yoru's memory is one Markdown file (`memory.md`, `c
 ## Decisions
 
 - **One brain.** Everything the memory asks a language model (extracting facts, merging, consolidating, the style's tuning) goes to Yoru's brain, the one model the user picked. No second model for the memory, no fallback model.
-- **One SQLite file**, `memory.db` in the data folder, with FTS5 and sqlite-vec, written by our own small module on `rusqlite`. The Rust crates that do this (`sqlite-graphrag`, `grit-core`) are young; their ideas are taken, not their code.
+- **One SQLite file**, `memory.db` in the data folder, with FTS5, written by our own small module on `rusqlite` (`core/src/assistant/memory/`). Vectors are kept as blobs and compared one by one, not with sqlite-vec: a personal memory is a few thousand facts, read in milliseconds. The Rust crates that do this (`sqlite-graphrag`, `grit-core`) are young; their ideas are taken, not their code.
 - **Embeddings with EmbeddingGemma**, the model Yoru Hub already runs on this computer for `intent.rs`.
 - **`memory.md` is imported**, as the first episode, so nothing is lost; afterwards it is no longer the memory.
 
@@ -79,6 +79,21 @@ After the memory, in the same sleep and with the same brain:
 - At night the style with each person (formality, humour, sentence length) moves by a small step at most.
 
 Bip also rewrites its own code with the owner's approval; Yoru won't: Yoru Hub is a signed, installed app and the firmware is built and flashed.
+
+## How it works
+
+What was built on 2026-11-08, all of G1 to G5 below, in `core/src/assistant/memory/`.
+
+- **The store** (`mod.rs`): episodes, entities (with aliases, gender, placeholders and the user's node), relations, facts in sections (about you, what matters to you, tell me about, don't tell me about, notes) with `valid_from` / `valid_to`, importance and a private flag. `memory.md` is imported once as the first episode and renamed `memory.md.imported`.
+- **The prompt**: the core (about you, what to tell and not, and every important fact; 12,000 characters for Claude and OpenAI, the brain's budget for Groq and Ollama, 1,200 for the board) always, plus `<memory_found>`, the facts found for the message (30 at most, 4,000 characters). Facts and entities carry ids (`[f12]`, `[e4]`). With a cloud brain (anything but Ollama) private facts stay home.
+- **Search** (`search.rs`): FTS5 words, EmbeddingGemma's vectors (cosine 0.35 or more, when the model is installed) and the facts of the people named, fused with RRF (k = 60, 50 from each list), then weighed by recency (45-day half-life) and importance. Without EmbeddingGemma it is words and people only.
+- **The tools**: `remember` (`text`, `about`, `section`, `important`, `private`), `revise_memory` (`id`, `text`: the old fact is closed, not deleted), `forget` (`ids` or `text`: by text it only lists what matches, so the model forgets by id), `recall` (`query`), `relate` (`person`, `relation`: parent, child, partner, sibling, friend, colleague, `of`, `gender`) and `this_is` (`name`, `is_user`: who is speaking, enrolling the voice just heard). Kinship words (mother-in-law, brother-in-law...) are computed from the asker's side (`kin.rs`).
+- **The Memory page**: the people and things, each with its card (name, kind, gender, summary, aliases, relations, voice), its facts by section, editable one by one, with history, merge and remove.
+- **Sleep** (`sleep.rs`, `Assistant::start_sleep`): every 2 minutes the episodes that have been quiet for 15 minutes (a conversation, a meeting's summary with its decisions and to-dos) are reread by the brain, which returns people, relations and facts as JSON, merged with the graph (a fact nearly identical to one known, cosine 0.93, is not added; one that contradicts closes the old). An episode that fails three times is given up. Once a night between 3 and 5 the brain tidies the graph (duplicates, placeholders now known, stale facts) and the style is tuned.
+- **Feelings** (`feelings.rs`): for each person, affection and trust that move slowly, and irritation, amusement, hurt, confusion and pride that fade on half-lives of 10, 5, 60, 3 and 20 minutes. How the speaker seems to feel now comes from their words (praise, thanks, rudeness, sadness, laughter, capitals and exclamations) and their voice against their usual loudness and pitch; the prompt gets it as advice. Each reply starts with `[face NAME]` (one of the board's scenes: happy, excited, love, curious, thinking, proud, wink, giggle, relieved, surprised, shy, sad, sigh, annoyed, sleepy), taken out of the stream before it is shown or said and sent to the board with `set_feeling` (firmware 0.20.17) as the voice starts; once the reply is done the board also gets `praised`, `scolded` or `amused` when the words call for it.
+- **Who speaks** (`voice.rs`, `core/src/voiceprint.rs`): the `yoru-audio voiceprint` helper (FluidAudio's WeSpeaker, about 30 MB, downloaded after the first request said aloud, then kept running) prints every utterance alongside the transcription; it is someone's when the cosine with their print is 0.6 or more, and joins their print when it is 0.7 or more. Prints are also learnt from meetings: the microphone's voice is the user's, and a speaker the user names in a transcript becomes that person's voice. An unknown voice, once voices are known, is "someone Yoru doesn't know", and the model can ask and call `this_is`.
+- **Style** (`style.rs`): length, humour, formality and warmth, each set by the user (Settings) and moved by Yoru with each person in steps of 5 within 20 points of it, at most 6 changes a day, 2 hours apart, each judged after 8 turns against the measure it should improve (fewer interruptions, a better mood, more follow-ups) and kept or undone; late at night it is softer for that night only.
+- **Not done**: Personalized PageRank (not needed yet); names replaced by roles before a cloud call (only private facts are held back); the board's own memory is still the core's first 1,200 characters, not a synced graph.
 
 ## Milestones
 

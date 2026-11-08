@@ -270,29 +270,34 @@ function tone(): ArrayBuffer {
   return buf;
 }
 
-let memory = `# What Yoru knows about you
-
-## About you
-
-- Ettore, in Milan. Works on Yoru, the firmware and the app.
-- Mornings are for deep work: no meetings before 10.
-
-## What matters to you
-
-- Yoru: the board (ESP32-S3), the app, the host.
-- Giulia and Marco: they review my work.
-
-## Tell me about
-
-- Issues assigned to me, and comments on mine.
-- Releases of ESP-IDF and LVGL.
-
-## Don't tell me about
-
-- Newsletters and promotions.
-
-## Notes
-`;
+// The memory as a graph (docs/memory.md): made-up people and facts.
+const DAY = 86_400_000;
+const memory = {
+  entities: [
+    { id: 1, name: "Ettore", kind: "person", aliases: [], summary: "Works on Yoru, in Milan", gender: "m", placeholder: false, is_user: true, label: null },
+    { id: 2, name: "Sofia", kind: "person", aliases: ["wife"], summary: "", gender: "f", placeholder: false, is_user: false, label: "your wife" },
+    { id: 3, name: "mother-in-law", kind: "person", aliases: [], summary: "", gender: "f", placeholder: true, is_user: false, label: "your mother-in-law" },
+    { id: 4, name: "Giulia", kind: "person", aliases: [], summary: "Reviews my work", gender: "f", placeholder: false, is_user: false, label: "your colleague" },
+    { id: 5, name: "Yoru", kind: "project", aliases: [], summary: "The board, the app and the host", gender: null, placeholder: false, is_user: false, label: null },
+  ] as { id: number; name: string; kind: string; aliases: string[]; summary: string; gender: string | null; placeholder: boolean; is_user: boolean; label: string | null }[],
+  facts: [
+    { id: 1, about: 1, section: "about", text: "Mornings are for deep work: no meetings before 10", from: Date.now() - 40 * DAY, to: null, importance: 0.7, private: false, episode: 1 },
+    { id: 2, about: 1, section: "about", text: "Works from home", from: Date.now() - 90 * DAY, to: Date.now() - 6 * DAY, importance: 0.5, private: false, episode: 1 },
+    { id: 3, about: 1, section: "about", text: "Works at the office since Monday", from: Date.now() - 6 * DAY, to: null, importance: 0.5, private: false, episode: 2 },
+    { id: 4, about: 1, section: "tell", text: "Issues assigned to me, and comments on mine", from: Date.now() - 40 * DAY, to: null, importance: 0.7, private: false, episode: 1 },
+    { id: 5, about: 1, section: "quiet", text: "Newsletters and promotions", from: Date.now() - 40 * DAY, to: null, importance: 0.7, private: false, episode: 1 },
+    { id: 6, about: 2, section: "matters", text: "Loves tulips", from: Date.now() - 6 * DAY, to: null, importance: 0.6, private: false, episode: 2 },
+    { id: 7, about: 2, section: "notes", text: "Birthday on 14 March", from: Date.now() - 6 * DAY, to: null, importance: 0.9, private: false, episode: 2 },
+    { id: 8, about: 5, section: "matters", text: "The memory is being rebuilt as a graph", from: Date.now() - DAY, to: null, importance: 0.5, private: false, episode: 3 },
+  ] as { id: number; about: number | null; section: string; text: string; from: number; to: number | null; importance: number; private: boolean; episode: number | null }[],
+  relations: [
+    { id: 1, a: 2, kind: "partner", b: 1, from: Date.now() - 6 * DAY, to: null },
+    { id: 2, a: 3, kind: "parent", b: 2, from: Date.now() - 2 * DAY, to: null },
+    { id: 3, a: 4, kind: "colleague", b: 1, from: Date.now() - 30 * DAY, to: null },
+  ],
+  voices: [1],
+};
+let memoryIds = 100;
 
 const noKey = params.get("key") === "none";
 const onGroq = params.get("brain") === "groq";
@@ -512,8 +517,39 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   },
   open_web: (a) => void window.open(a.url, "_blank"),
   open_key_page: () => undefined,
-  memory: () => memory,
-  set_memory: (a) => void (memory = a.text),
+  memory_graph: () => structuredClone(memory),
+  memory_put_fact: (a) => {
+    const f = a.fact;
+    if (!f.id) {
+      const id = ++memoryIds;
+      memory.facts.push({ ...f, id, from: Date.now() });
+      return id;
+    }
+    memory.facts = memory.facts.map((x) => (x.id === f.id ? { ...x, ...f } : x));
+    return f.id;
+  },
+  memory_close_fact: (a) => void (memory.facts = memory.facts.map((x) => (x.id === a.id ? { ...x, to: Date.now() } : x))),
+  memory_forget_fact: (a) => ((memory.facts = memory.facts.filter((x) => x.id !== a.id)), "forgot 1 fact(s)"),
+  memory_add_entity: (a) => {
+    const id = ++memoryIds;
+    memory.entities.push({ id, name: a.name, kind: a.kind, aliases: [], summary: "", gender: null, placeholder: false, is_user: false, label: null });
+    return id;
+  },
+  memory_put_entity: (a) => void (memory.entities = memory.entities.map((e) => (e.id === a.entity.id ? { ...e, ...a.entity } : e))),
+  memory_remove_entity: (a) => {
+    memory.entities = memory.entities.filter((e) => e.id !== a.id);
+    memory.facts = memory.facts.filter((f) => f.about !== a.id);
+    memory.relations = memory.relations.filter((r) => r.a !== a.id && r.b !== a.id);
+  },
+  memory_merge: (a) => {
+    const drop = memory.entities.find((e) => e.id === a.drop);
+    memory.entities = memory.entities.filter((e) => e.id !== a.drop).map((e) => (e.id === a.keep && drop ? { ...e, aliases: [...e.aliases, drop.name] } : e));
+    memory.facts = memory.facts.map((f) => (f.about === a.drop ? { ...f, about: a.keep } : f));
+    memory.relations = memory.relations.map((r) => ({ ...r, a: r.a === a.drop ? a.keep : r.a, b: r.b === a.drop ? a.keep : r.b }));
+  },
+  memory_relate: (a) => (memory.relations.push({ id: ++memoryIds, a: a.a, kind: a.kind, b: a.b, from: Date.now(), to: null }), "related"),
+  memory_unrelate: (a) => void (memory.relations = memory.relations.filter((r) => r.id !== a.id)),
+  memory_forget_voice: (a) => void (memory.voices = memory.voices.filter((v) => v !== a.id)),
   yoru_clips: () => boardClips,
   yoru_play_clip: () => undefined,
   yoru_stop_clip: () => undefined,

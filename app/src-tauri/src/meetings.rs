@@ -181,7 +181,10 @@ fn queue(app: &AppHandle, id: String) {
         });
         state.queued.lock().unwrap().remove(&id);
         let event = match result {
-            Ok(meeting) => Event::Transcribed { meeting },
+            Ok(meeting) => {
+                learn_voices(&app, &id, None);
+                Event::Transcribed { meeting }
+            }
             Err(e) => Event::Failed { id: id.clone(), message: e.to_string() },
         };
         let transcribed = matches!(event, Event::Transcribed { .. });
@@ -218,7 +221,11 @@ fn queue_summary(app: &AppHandle, id: String) {
         });
         state.queued.lock().unwrap().remove(&key);
         let event = match result.and_then(|summary| meetings::get(&id).map(|meeting| (meeting, summary)).map_err(|e| e.to_string())) {
-            Ok((meeting, summary)) => Event::Summarized { meeting, summary },
+            Ok((meeting, summary)) => {
+                // Its decisions and to-dos go to the memory, at the next sleep.
+                app.state::<AppState>().assistant.learn_meeting(meeting.title.as_deref().unwrap_or(&summary.title), &summary.for_memory());
+                Event::Summarized { meeting, summary }
+            }
             Err(message) => Event::SummaryFailed { id, message },
         };
         board(&app, if matches!(event, Event::Summarized { .. }) { "done" } else { "failed" }, None);
@@ -341,8 +348,21 @@ pub fn meeting_export(id: String, format: Format, you: String, person: String) -
 
 /// Name speaker `key` of meeting `id` (empty: back to their number).
 #[tauri::command]
-pub fn rename_speaker(id: String, key: String, name: String) -> Result<Transcript, String> {
-    meetings::rename_speaker(&id, &key, &name).map_err(|e| e.to_string())
+pub fn rename_speaker(app: AppHandle, id: String, key: String, name: String) -> Result<Transcript, String> {
+    let transcript = meetings::rename_speaker(&id, &key, &name).map_err(|e| e.to_string())?;
+    if !name.trim().is_empty() {
+        learn_voices(&app, &id, Some(key));
+    }
+    Ok(transcript)
+}
+
+/// Learn the voices heard in meeting `id` (only `key`'s, when given), on a
+/// thread of its own: Yoru knows them when they talk to him.
+fn learn_voices(app: &AppHandle, id: &str, key: Option<String>) {
+    let state = app.state::<AppState>();
+    let Some(printer) = state.voiceprinter.clone() else { return };
+    let (assistant, id) = (state.assistant.clone(), id.to_string());
+    thread::spawn(move || assistant.learn_voices(&id, &printer, key.as_deref()));
 }
 
 #[tauri::command]

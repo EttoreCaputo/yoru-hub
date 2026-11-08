@@ -251,6 +251,17 @@ case "transcribe":
     }
     guard let folder else { fail("transcribe: no --model") }
     run { try await transcribe(file: URL(fileURLWithPath: file), folder: URL(fileURLWithPath: folder, isDirectory: true), language: language, speakers: speakers) }
+case "voiceprint":
+    var rest = args.dropFirst()
+    var folder: String?
+    while let arg = rest.popFirst() {
+        switch arg {
+        case "--model": folder = value(&rest, for: arg)
+        default: fail("unknown option \(arg)")
+        }
+    }
+    guard let folder else { fail("voiceprint: no --model") }
+    run { try await voiceprint(folder: URL(fileURLWithPath: folder, isDirectory: true)) }
 case "record":
     let recording: Recording
     do {
@@ -281,5 +292,5 @@ case "record":
     keep = timer
     dispatchMain()
 default:
-    fail("usage: yoru-audio sources | record <folder> [--system | --app <bundle id>] [--mic <uid|default>]... | finalize <folder> | import <file> <folder> | model <folder> [--download] | transcribe <file> --model <folder> [--language <code>] [--speakers <folder>]")
+    fail("usage: yoru-audio sources | record <folder> [--system | --app <bundle id>] [--mic <uid|default>]... | finalize <folder> | import <file> <folder> | model <folder> [--download] | transcribe <file> --model <folder> [--language <code>] [--speakers <folder>] | voiceprint --model <folder>")
 }

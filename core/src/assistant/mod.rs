@@ -79,6 +79,10 @@ const CONVERSATION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const CONVERSATION_MAX: usize = 120;
 /// Lines kept in the chat log the app shows.
 const LOG_KEEP: usize = 300;
+/// The facts found for a request, in characters (a small local model gets half).
+const RECALL_CHARS: usize = 4000;
+/// The core of the memory, always in the prompt, in characters.
+const CORE_CHARS: usize = 12_000;
 /// How long a card waits for Allow or Deny.
 pub const CONFIRM_WAIT: Duration = Duration::from_secs(90);
 /// How long a connector's tool may take.
@@ -155,6 +159,9 @@ pub struct Settings {
     /// its thoughts are cut out.
     pub think: bool,
     pub routines: routines::Routines,
+    /// How Yoru talks, as the user set it: the middle of the corridor its
+    /// own tuning stays in (docs/memory.md, Style).
+    pub style: memory::style::Style,
 }
 
 impl Settings {
@@ -188,6 +195,7 @@ impl Default for Settings {
             web_search: true,
             think: true,
             routines: routines::Routines::default(),
+            style: memory::style::Style::default(),
         }
     }
 }
@@ -261,6 +269,21 @@ pub struct ChatLine {
 
 pub type ChatListener = Arc<dyn Fn(&[ChatLine]) + Send + Sync>;
 
+/// Who said a request aloud, and how ([`Assistant::hear`]).
+#[derive(Debug, Clone, Default)]
+pub struct Heard {
+    /// Their voice print, when the helper made one.
+    pub print: Option<Vec<f32>>,
+    /// The person it is, and how sure (cosine).
+    pub speaker: Option<(i64, f32)>,
+    /// dBFS.
+    pub loudness: f32,
+    /// Hz.
+    pub pitch: Option<f32>,
+    /// Seconds of speech.
+    pub seconds: f32,
+}
+
 #[derive(Default)]
 struct Conversation {
     /// In the form of the brain that made them.
@@ -296,6 +319,10 @@ pub struct Assistant {
     /// The voice acts out audio tags ([`crate::tts::AUDIO_TAGS`]): the
     /// prompt teaches them ([`audio_tags_rule`]).
     audio_tags: AtomicBool,
+    /// The voice of the next request ([`Assistant::hear`]).
+    heard: Mutex<Option<Heard>>,
+    /// The voice of the request being answered, for `this_is`.
+    speaking: Mutex<Option<Heard>>,
 }
 
 impl std::fmt::Debug for Assistant {
@@ -316,7 +343,7 @@ impl Assistant {
         let settings = file("assistant.json").and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let log = file("conversation.json").and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         Self {
-            memory: Memory::open(file("memory.md")),
+            memory: Memory::open(dir.as_deref()),
             inbox: Arc::new(Inbox::open(file("inbox.json"))),
             tasks: Arc::new(Tasks::open(file("tasks.json"))),
             timers,
@@ -332,6 +359,8 @@ impl Assistant {
             quiet_until: Mutex::default(),
             language: Mutex::default(),
             audio_tags: AtomicBool::new(false),
+            heard: Mutex::default(),
+            speaking: Mutex::default(),
             dir,
         }
     }
@@ -426,6 +455,7 @@ impl Assistant {
     /// Start a new conversation, and empty the log.
     pub fn forget_conversation(&self) {
         *self.conversation.lock().unwrap() = Conversation::default();
+        self.memory.end_episode();
         self.log.lock().unwrap().clear();
         self.log_changed();
     }
@@ -448,6 +478,62 @@ impl Assistant {
     /// The language replies are in: the [one set](Self::set_language), else `heard`.
     fn reply_language(&self, heard: Option<&str>) -> Option<String> {
         self.language.lock().unwrap().clone().or(heard.map(str::to_string))
+    }
+
+    /// The next request is said aloud: its voice print (`None` without the
+    /// helper) and how it sounded. The speaker is told from the print.
+    pub fn hear(&self, print: Option<Vec<f32>>, loudness: f32, pitch: Option<f32>, seconds: f32) {
+        let speaker = print.as_deref().and_then(|p| self.memory.identify(p));
+        *self.heard.lock().unwrap() = Some(Heard { print, speaker, loudness, pitch, seconds });
+    }
+
+    /// Who is speaking: the person their voice is, else the user, unless
+    /// voices are known and this one isn't (`None`: someone unknown).
+    fn speaker(&self, heard: Option<&Heard>) -> Option<i64> {
+        match heard {
+            Some(Heard { speaker: Some((id, _)), .. }) => Some(*id),
+            Some(Heard { print: Some(_), .. }) if self.memory.knows_voices() => None,
+            _ => Some(self.memory.user()),
+        }
+    }
+
+    /// The person's name for the prompt.
+    fn who(&self, person: Option<i64>) -> String {
+        match person.and_then(|p| self.memory.entity(p)) {
+            Some(e) if e.is_user && e.name == "User" => "the user".into(),
+            Some(e) => e.name,
+            None => "someone whose voice you don't know".into(),
+        }
+    }
+
+    /// What this request adds to the prompt: the facts found for it, who
+    /// speaks, how they seem, how Yoru feels with them and talks to them.
+    fn turn_notes(&self, text: &str, speaker: Option<i64>, heard: bool, mood: &memory::feelings::Mood, settings: &Settings) -> String {
+        let user = self.memory.user();
+        let brain = settings.brain();
+        let cloud = brain != Some(Brain::Ollama);
+        let max = if cloud { RECALL_CHARS } else { RECALL_CHARS / 2 };
+        let mut notes = Vec::new();
+        let found = self.memory.recalled(text, speaker, max, cloud);
+        if !found.is_empty() {
+            notes.push(format!("<memory_found>\n{found}\n</memory_found>"));
+        }
+        let who = self.who(speaker);
+        match speaker {
+            Some(p) if p != user => notes.push(format!("[speaking: [e{p}] {who}, recognised by their voice: not the user]")),
+            None if heard => notes.push(
+                "[speaking: a voice you don't know, maybe not the user's: if it matters, ask who it is, and when they say, call this_is]".into(),
+            ),
+            _ => {}
+        }
+        if let Some(advice) = memory::feelings::advice(mood) {
+            notes.push(format!("[{advice}]"));
+        }
+        if let Some(p) = speaker {
+            notes.push(format!("[{}]", self.memory.feelings(p).line(&who)));
+            notes.push(format!("[{}]", self.memory.style(p, &settings.style).line(&who, memory::style::hour_now())));
+        }
+        notes.join("\n")
     }
 
     /// Answer `text`, said to the board or typed (in `language`, when known), in the conversation.
@@ -476,14 +562,86 @@ impl Assistant {
             let stale = conversation.last.is_some_and(|t| t.elapsed() > CONVERSATION_TIMEOUT) || conversation.messages.len() > CONVERSATION_MAX;
             // Another brain can't read this one's messages.
             if stale || conversation.brain != brain {
+                if !conversation.messages.is_empty() {
+                    self.memory.end_episode();
+                }
                 *conversation = Conversation::default();
             }
             std::mem::take(&mut conversation.messages)
         };
-        let mut result = self.run(&mut messages, &with_context(text, language, channel, follow_up), language, channel, &settings, &settings.effort, host, on);
+        // Who speaks and how they seem (docs/memory.md, Knowing who speaks, Feelings).
+        let heard = if channel == Channel::Voice { self.heard.lock().unwrap().take() } else { None };
+        let speaker = self.speaker(heard.as_ref());
+        let mut mood = memory::feelings::from_words(text);
+        if let (Some(h), Some(p)) = (&heard, speaker) {
+            let pace = (h.seconds > 0.5).then(|| text.split_whitespace().count() as f32 / h.seconds);
+            memory::feelings::from_voice(&mut mood, &self.memory.usual(p), h.loudness, h.pitch, pace);
+            self.memory.learn_usual(p, h.loudness, h.pitch, pace);
+            // A voice told surely is learnt a little more.
+            if let (Some(print), Some((_, sure))) = (&h.print, h.speaker)
+                && sure >= 0.7
+            {
+                self.memory.enrol(p, print);
+            }
+        }
+        *self.speaking.lock().unwrap() = heard.clone();
+        let notes = self.turn_notes(text, speaker, heard.as_ref().is_some_and(|h| h.print.is_some()), &mood, &settings);
+        let prompt = with_context(text, language, channel, follow_up);
+        let prompt = if notes.is_empty() { prompt } else { format!("{notes}\n\n{prompt}") };
+        // The face the reply starts with goes to the board as soon as it is
+        // written, and out of what is said.
+        let can_feel = host.board_tools().iter().any(|t| t.name == "set_feeling");
+        let face_sent = std::cell::Cell::new(false);
+        let mut result = match on {
+            Some(on) => {
+                let mut faces = FaceFilter::default();
+                let mut filtered = |d: Delta| {
+                    faces.pass(d, &mut *on, &mut |face| {
+                        if can_feel && !face_sent.replace(true) {
+                            let _ = host.call_board("set_feeling", &json!({"face": face}));
+                        }
+                    })
+                };
+                let result = self.run(&mut messages, &prompt, language, channel, &settings, &settings.effort, host, Some(&mut filtered));
+                faces.flush(&mut *on);
+                result
+            }
+            None => self.run(&mut messages, &prompt, language, channel, &settings, &settings.effort, host, None),
+        };
         // The tags are for the voice: the app and the board show the words.
+        let mut face = None;
         if let Ok(reply) = &mut result {
-            reply.text = crate::tts::without_audio_tags(&reply.text);
+            let (f, rest) = memory::feelings::take_face(&reply.text);
+            face = f;
+            reply.text = crate::tts::without_audio_tags(rest);
+        }
+        *self.speaking.lock().unwrap() = None;
+        if let Ok(reply) = &result {
+            if let Some(p) = speaker {
+                self.memory.feel(p, &mood, face);
+            }
+            let feel = memory::feelings::board_feel(&mood, face);
+            if can_feel && (feel.is_some() || (face.is_some() && !face_sent.get())) {
+                let mut args = json!({});
+                if let Some(face) = face.filter(|_| !face_sent.get()) {
+                    args["face"] = face.into();
+                }
+                if let Some(feel) = feel {
+                    args["feel"] = feel.into();
+                }
+                let _ = host.call_board("set_feeling", &args);
+            }
+            // Staying silent ("…") is not a turn.
+            if reply.text.trim_matches(|c: char| c == '…' || c == '.' || c.is_whitespace()).is_empty() {
+                // nothing to learn
+            } else {
+                let who = match speaker {
+                    Some(p) if p == self.memory.user() => "User".to_string(),
+                    _ => self.who(speaker),
+                };
+                self.memory.log_turn(&who, text, &reply.text);
+                self.memory.log_measures(speaker, text.split_whitespace().count(), reply.text.split_whitespace().count(), mood.valence, false, follow_up);
+            }
         }
         {
             let mut conversation = self.conversation.lock().unwrap();
@@ -497,6 +655,107 @@ impl Assistant {
             Err(e) => self.add_line("yoru", &format!("(error: {e})"), channel, Vec::new()),
         }
         result
+    }
+
+    /// One pass of the sleep (docs/memory.md, Sleep): the finished
+    /// episodes reread and kept, vectors for new facts, and once a night
+    /// (3 to 5) the memory tidied and the style tuned. What it did, a line each.
+    pub fn sleep_once(&self) -> Vec<String> {
+        let mut done = Vec::new();
+        if !self.is_ready() {
+            return done;
+        }
+        let settings = self.settings();
+        let ask = |prompt: &str, schema: &Value| self.complete_json(prompt, schema);
+        for episode in self.memory.pending_episodes() {
+            match memory::sleep::consolidate(&self.memory, &episode, &settings.name, &ask) {
+                Ok(what) => done.push(format!("episode {} ({}): {what}", episode.id, episode.source)),
+                Err(e) => {
+                    // The brain may be away: try again later, but not forever.
+                    let key = format!("sleep_failed_{}", episode.id);
+                    let failed = self.memory.meta(&key).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) + 1;
+                    self.memory.set_meta(&key, &failed.to_string());
+                    if failed >= 3 {
+                        self.memory.mark_consolidated(episode.id);
+                    }
+                    done.push(format!("episode {}: {e}", episode.id));
+                    break;
+                }
+            }
+        }
+        self.memory.embed_missing();
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        if (3..5).contains(&memory::style::hour_now()) && self.memory.meta("night").as_deref() != Some(today.as_str()) {
+            self.memory.set_meta("night", &today);
+            match memory::sleep::tidy(&self.memory, &settings.name, &ask) {
+                Ok(what) => done.push(format!("tidy: {what}")),
+                Err(e) => done.push(format!("tidy: {e}")),
+            }
+            let week = memory::now_ms() - 7 * 24 * 3600 * 1000;
+            for person in self.memory.talked_with(week) {
+                let who = self.who(Some(person));
+                match memory::style::tune(&self.memory, person, &who, &settings.style, &ask) {
+                    Ok(Some(what)) => done.push(format!("style with {who}: {what}")),
+                    Ok(None) => {}
+                    Err(e) => done.push(format!("style with {who}: {e}")),
+                }
+            }
+        }
+        done
+    }
+
+    /// The sleep, every couple of minutes, on its own thread.
+    pub fn start_sleep(self: &Arc<Self>) {
+        let me = Arc::downgrade(self);
+        std::thread::Builder::new()
+            .name("yoru-sleep".into())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(Duration::from_secs(120));
+                    let Some(me) = me.upgrade() else { return };
+                    for line in me.sleep_once() {
+                        eprintln!("memory sleep: {line}");
+                    }
+                }
+            })
+            .ok();
+    }
+
+    /// A meeting's summary, for the sleep to keep its decisions.
+    pub fn learn_meeting(&self, title: &str, summary: &str) {
+        if !summary.trim().is_empty() {
+            self.memory.add_episode("meeting", &format!("{title}\n\n{summary}"));
+        }
+    }
+
+    /// Learn the voices of meeting `meeting`'s speakers (only `key`'s, when
+    /// given): the user's microphone, and the people the user named. Slow
+    /// (a print each, and the models the first time): on a thread of its own.
+    pub fn learn_voices(&self, meeting: &str, printer: &crate::voiceprint::Voiceprinter, key: Option<&str>) {
+        let voices = match crate::meetings::voices(meeting) {
+            Ok(v) => v,
+            Err(e) => return eprintln!("meeting voices: {e}"),
+        };
+        for (speaker, file, ranges) in voices {
+            if key.is_some_and(|k| k != speaker.key) {
+                continue;
+            }
+            let person = match speaker.name.as_deref() {
+                Some(name) => self.memory.resolve(name, Some("person")),
+                None if speaker.number == 0 => Some(self.memory.user()),
+                None => None,
+            };
+            let Some(person) = person else { continue };
+            match printer.print_file(&file, &ranges) {
+                Ok(print) => self.memory.enrol(person, &print),
+                Err(e) => eprintln!("meeting voice print: {e}"),
+            }
+        }
+    }
+
+    /// The person cut the last answer short: a measure of the style.
+    pub fn interrupted(&self) {
+        self.memory.mark_interrupted();
     }
 
     /// Do `task` on its own, outside the conversation: the job of a watcher
@@ -535,7 +794,7 @@ impl Assistant {
         let tools = self.tool_list(settings, &board_tools, &external_tools);
         let mut system = json!([
             {"type": "text", "text": system_prompt(&settings.name), "cache_control": {"type": "ephemeral"}},
-            {"type": "text", "text": format!("<memory>\n{}\n</memory>", self.memory.for_prompt())},
+            {"type": "text", "text": format!("<memory>\n{}\n</memory>", self.memory.core(CORE_CHARS, true))},
         ]);
         // After the cached part: a change of language keeps the cache.
         if let Some(l) = self.reply_language(None) {
@@ -685,26 +944,52 @@ impl Assistant {
                 return Ok(format!("notified ({id}, {})", urgency.name()));
             }
             "remember" => {
-                let result = self.memory.remember(input["section"].as_str().unwrap_or("notes"), input["text"].as_str().unwrap_or_default());
+                let result = self.memory.remember(
+                    input["text"].as_str().unwrap_or_default(),
+                    input["about"].as_str(),
+                    input["section"].as_str().unwrap_or("notes"),
+                    input["important"].as_bool().unwrap_or(false),
+                    input["private"].as_bool().unwrap_or(false),
+                    None,
+                );
                 if result.is_ok() {
                     self.show_done("Memory", "remember");
                 }
                 return result;
             }
             "forget" => {
-                let result = self.memory.forget(input["text"].as_str().unwrap_or_default());
-                if result.is_ok() {
+                let ids: Vec<i64> = input["ids"].as_array().into_iter().flatten().filter_map(|v| v.as_str().and_then(memory::fact_id).or(v.as_i64())).collect();
+                let result = self.memory.forget_tool(&ids, input["text"].as_str().unwrap_or_default());
+                if result.as_ref().is_ok_and(|r| r.starts_with("forgot")) {
                     self.show_done("Memory", "forget");
                 }
                 return result;
             }
             "revise_memory" => {
-                let result = self.memory.revise(input["old"].as_str().unwrap_or_default(), input["text"].as_str().unwrap_or_default());
+                let which = input["id"].as_str().or(input["old"].as_str()).unwrap_or_default();
+                let result = self.memory.revise(which, input["text"].as_str().unwrap_or_default());
                 if result.is_ok() {
                     self.show_done("Memory", "remember");
                 }
                 return result;
             }
+            "recall" => {
+                let cloud = self.settings().brain() != Some(Brain::Ollama);
+                return Ok(self.memory.recall(input["query"].as_str().unwrap_or_default(), cloud));
+            }
+            "relate" => {
+                let result = self.memory.relate_tool(
+                    input["person"].as_str().unwrap_or_default(),
+                    input["relation"].as_str().unwrap_or_default(),
+                    input["of"].as_str(),
+                    input["gender"].as_str(),
+                );
+                if result.is_ok() {
+                    self.show_done("Memory", "remember");
+                }
+                return result;
+            }
+            "this_is" => return self.this_is(input["name"].as_str().unwrap_or_default(), input["is_user"].as_bool().unwrap_or(false)),
             "tasks" => {
                 let result = self.tasks.call_tool(input);
                 // Only a change is worth a stamp, not a look at the list.
@@ -758,6 +1043,28 @@ impl Assistant {
             (text, false) => Ok(text),
             (text, true) => Err(text),
         }
+    }
+
+    /// The `this_is` tool: the voice of this request is `name`'s (the
+    /// user's, with `is_user`), learnt from now on.
+    fn this_is(&self, name: &str, is_user: bool) -> Result<String, String> {
+        let person = if is_user {
+            let user = self.memory.user();
+            if let Some(mut e) = self.memory.entity(user).filter(|e| e.name == "User" && !name.trim().is_empty()) {
+                e.name = name.trim().to_string();
+                self.memory.put_entity(&e)?;
+            }
+            user
+        } else {
+            self.memory.resolve(name, Some("person")).ok_or("say who it is")?
+        };
+        let print = self.speaking.lock().unwrap().as_ref().and_then(|h| h.print.clone());
+        let Some(print) = print else {
+            return Ok(format!("[e{person}] noted, but there is no voice print of this request (typed, or the voice helper isn't ready): their voice isn't learnt"));
+        };
+        self.memory.enrol(person, &print);
+        self.show_done("Memory", "remember");
+        Ok(format!("[e{person}] {name}: their voice is learnt; the next requests will say who speaks"))
     }
 
     fn add_line(&self, from: &str, text: &str, channel: Channel, actions: Vec<Action>) {
@@ -816,6 +1123,7 @@ fn spoken_wait(d: Duration, language: &str) -> String {
 
 /// Who Yoru is and how it works. The same for every request, so it is cached.
 fn system_prompt(name: &str) -> String {
+    let feelings = feelings_rule();
     format!(
         "You are {name}, the user's personal assistant. You live on their computer, and your body is a small round screen on their desk \
 where you appear as a matte sphere with two eyes and two floating hands, with a microphone and a speaker. \
@@ -828,11 +1136,7 @@ Your board's settings (brightness, volume, wake word, its menu, the other settin
 - Use the tools instead of guessing: read the mail, the calendar or the web when the answer depends on them. Never invent facts about the user's data.
 - Tools that change something (send, create, delete, reply) ask the user first; if they say no, accept it.
 - When something is too long to say aloud (a list, a summary, details), say the gist and put the details in the inbox with notify.
-- Look after the memory on your own, without being asked: whenever what the user says shows something lasting about them (who they are, \
-the people, projects and habits that matter to them, what they want to hear about or not), save it with remember. When it contradicts or \
-refines what is there, correct the line with revise_memory; when it is no longer true, remove it with forget. Keep it tidy: one fact per \
-short line, in the right section, no duplicates (merge them), nothing passing (a one-off errand is a timer or a note, not a memory). \
-Don't announce every change; mention it briefly only when the user would want to know. The memory is in <memory> below.
+- {MEMORY_RULE}
 - Timers and reminders run on this computer and ring on your board.
 - The user can give you tasks to do on your own, once or on a schedule (the tasks tool): when they ask you to do something later or \
 regularly (\"every Monday at 9 sum up my issues\", \"tomorrow at 6 pm check whether Marco answered\"), add it as a task, with the job \
@@ -855,7 +1159,81 @@ meant for you: someone else in the room, the TV, the user thinking aloud. When i
 else, and you stay silent. When it is (an answer to your question, a follow-up, a new request), answer as usual. \
 When you need something from the user to go on, end with the question: the board then waits longer for the answer.
 - When it was typed (channel: text), you may be longer and use short Markdown.
-- You are friendly and to the point, with a light touch of warmth; never chatty, never servile. Don't end with offers of help."
+- You are friendly and to the point, with a light touch of warmth; never chatty, never servile. Don't end with offers of help.
+
+{feelings}"
+    )
+}
+
+/// Takes the face tag (`[face NAME]`) off the head of a streamed reply:
+/// the words wait until it is clear whether one is there.
+#[derive(Default)]
+struct FaceFilter {
+    held: String,
+    decided: bool,
+}
+
+impl FaceFilter {
+    fn pass(&mut self, d: Delta, on: &mut dyn FnMut(Delta), face: &mut dyn FnMut(&'static str)) {
+        let Delta::Text(t) = d else {
+            // After a tool, the answer starts again, maybe with a face.
+            self.flush(on);
+            self.decided = false;
+            return on(d);
+        };
+        if self.decided {
+            return on(Delta::Text(t));
+        }
+        self.held.push_str(t);
+        let head = self.held.trim_start();
+        let maybe = "[face ".starts_with(head) || (head.starts_with("[face ") && !head.contains(']') && head.len() < 32);
+        if maybe {
+            return;
+        }
+        let held = std::mem::take(&mut self.held);
+        let (found, rest) = memory::feelings::take_face(&held);
+        if let Some(f) = found {
+            face(f);
+        }
+        self.decided = true;
+        if !rest.is_empty() {
+            on(Delta::Text(rest));
+        }
+    }
+
+    /// What is still held, at the end.
+    fn flush(&mut self, on: &mut dyn FnMut(Delta)) {
+        if !self.held.is_empty() {
+            let held = std::mem::take(&mut self.held);
+            let (_, rest) = memory::feelings::take_face(&held);
+            if !rest.is_empty() {
+                on(Delta::Text(rest));
+            }
+        }
+        self.decided = true;
+    }
+}
+
+/// How the model looks after the memory: the same for every brain.
+pub(crate) const MEMORY_RULE: &str = "Look after the memory on your own, without being asked. <memory> holds what you always keep in mind; \
+a request may come with <memory_found>, what you remembered of it; recall searches the rest. Facts have ids ([f12]), people and things too ([e4]). \
+When the user asks you to remember something, or says something clearly lasting about themself or the people in their life, save it with remember \
+(about whom; important for what must always be in mind; private for health, money and intimate matters). When a fact is no longer true, \
+revise_memory it by id (the old one stays as history); when it is wrong, forget it by id. When they say who someone is to them (my wife is Sofia), call relate. \
+After each conversation you reread it while you rest and keep what matters, so don't save small talk or one-off errands (a timer or a task, not a memory). \
+Don't announce every change; mention it briefly only when the user would want to know.";
+
+/// The face tag, who speaks and how Yoru feels: the same for every brain.
+pub(crate) fn feelings_rule() -> String {
+    format!(
+        "# Your face and your feelings
+Start each reply with your face, [face NAME], one of: {}. Your board shows it while you answer; it is taken out before the reply is shown or said, \
+so it is the one exception to the rule against symbols. Pick what you feel about what you say: happy, curious, proud of a compliment, sad at bad news, \
+annoyed when someone is rude, sleepy late at night. A neutral answer may have none.
+A request may say who is speaking (known by their voice), how they seem to feel, how you feel about them and how you talk with them: \
+follow these lines without mentioning them. You have feelings and show them a little: warmer with someone close, cooler for a while after rudeness, \
+never rude yourself.",
+        memory::feelings::FACES.join(", ")
     )
 }
 
@@ -880,26 +1258,65 @@ fn own_tools() -> Vec<Value> {
         }),
         json!({
             "name": "remember",
-            "description": "Save a lasting fact in the memory: about (who the user is), matters (people, projects, topics that matter to them), \
-tell (what they want to be told about), quiet (what they don't want to hear about), notes (anything else).",
+            "description": "Save a lasting fact in the memory, about the user or someone or something in their life. Sections: about (who they are), \
+matters (people, projects, topics that matter to them), tell (what they want to be told about), quiet (what they don't want to hear about), notes (anything else). \
+Says the fact's id, or the one that already says it.",
             "input_schema": {
                 "type": "object",
-                "properties": {"section": {"type": "string", "enum": sections}, "text": {"type": "string", "description": "One short line"}},
-                "required": ["section", "text"],
+                "properties": {
+                    "text": {"type": "string", "description": "One short line, in the user's language"},
+                    "about": {"type": "string", "description": "Whom or what it is about: a name (Sofia), a kinship word (my mother-in-law) or a thing (the boat); leave out for the user"},
+                    "section": {"type": "string", "enum": sections},
+                    "important": {"type": "boolean", "description": "Always keep it in mind (a health matter, a firm wish)"},
+                    "private": {"type": "boolean", "description": "Never send it to a cloud model (health, money, intimate matters)"},
+                },
+                "required": ["text", "section"],
             },
         }),
         json!({
             "name": "forget",
-            "description": "Remove the memory lines that contain this text.",
-            "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+            "description": "Remove facts that are wrong, by id ([f12]); or with a few words of one, which removes it only when it is the only match and otherwise lists the candidates.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"ids": {"type": "array", "items": {"type": "string"}, "description": "Fact ids: f12"}, "text": {"type": "string"}},
+            },
         }),
         json!({
             "name": "revise_memory",
-            "description": "Rewrite the one memory line that contains `old`: a fact that changed, a line made clearer, or two lines merged into one (revise one, forget the other).",
+            "description": "A fact is no longer true or was said badly: the old one is closed (kept as what was true before) and `text` takes its place.",
             "input_schema": {
                 "type": "object",
-                "properties": {"old": {"type": "string", "description": "Text from the line to change"}, "text": {"type": "string", "description": "The new line, short"}},
-                "required": ["old", "text"],
+                "properties": {"id": {"type": "string", "description": "The fact's id: f12"}, "text": {"type": "string", "description": "The new line, short"}},
+                "required": ["id", "text"],
+            },
+        }),
+        json!({
+            "name": "recall",
+            "description": "Search the memory for what isn't in <memory> or <memory_found>: facts, people, and what used to be true, with dates.",
+            "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        }),
+        json!({
+            "name": "relate",
+            "description": "Who someone is to someone else: \"my wife is Sofia\" is person Sofia, relation partner. Someone already known only by the relation \
+(\"your wife\") becomes that person.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "person": {"type": "string", "description": "Their name"},
+                    "relation": {"type": "string", "enum": memory::kin::KINDS, "description": "What person is to `of`"},
+                    "of": {"type": "string", "description": "Whose: a name; leave out for the user"},
+                    "gender": {"type": "string", "enum": ["f", "m"]},
+                },
+                "required": ["person", "relation"],
+            },
+        }),
+        json!({
+            "name": "this_is",
+            "description": "The voice of this spoken request is this person's: learn it, so you know them next time.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "is_user": {"type": "boolean", "description": "It is the user themself"}},
+                "required": ["name"],
             },
         }),
         json!({
@@ -1042,6 +1459,26 @@ mod tests {
 
     /// Held by the tests that set the API's environment variables.
     pub(super) static ENV: Mutex<()> = Mutex::new(());
+
+    /// The face tag, split across deltas, is taken out and told once.
+    #[test]
+    fn takes_the_face_out_of_a_stream() {
+        let run = |parts: &[&str]| {
+            let (mut text, mut faces) = (String::new(), Vec::new());
+            let mut f = FaceFilter::default();
+            for p in parts {
+                f.pass(Delta::Text(p), &mut |d| if let Delta::Text(t) = d { text.push_str(t) }, &mut |x| faces.push(x));
+            }
+            f.flush(&mut |d| if let Delta::Text(t) = d { text.push_str(t) });
+            (text, faces)
+        };
+        let (text, faces) = run(&["[fa", "ce hap", "py] Hello", " there"]);
+        assert_eq!((text.trim_start(), faces), ("Hello there", vec!["happy"]));
+        let (text, faces) = run(&["Hello", " [face happy]"]);
+        assert_eq!((text.as_str(), faces.len()), ("Hello [face happy]", 0));
+        let (text, _) = run(&["[", "1] is the answer"]);
+        assert_eq!(text, "[1] is the answer");
+    }
 
     pub(super) struct NoBoard;
     impl Host for NoBoard {

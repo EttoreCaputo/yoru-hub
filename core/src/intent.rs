@@ -153,9 +153,27 @@ impl IntentModel {
     }
 }
 
+/// EmbeddingGemma's prompts for search: what is looked for, and what is
+/// looked through (the memory's facts).
+const SEARCH_QUERY: &str = "task: search result | query: ";
+const SEARCH_DOCUMENT: &str = "title: none | text: ";
+
+/// The memory's search uses the same model, and the same server.
+impl crate::assistant::memory::Embedder for IntentModel {
+    fn embed(&self, texts: &[String], query: bool) -> Result<Vec<Vec<f32>>, String> {
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+        self.with(|running| embed_as(running.process.addr, if query { SEARCH_QUERY } else { SEARCH_DOCUMENT }, &texts))
+    }
+}
+
 /// Unit vectors for `texts`, in order.
 fn embed(addr: std::net::SocketAddr, texts: &[&str]) -> Result<Vec<Vec<f32>>, String> {
-    let input: Vec<String> = texts.iter().map(|t| format!("{PROMPT}{t}")).collect();
+    embed_as(addr, PROMPT, texts)
+}
+
+/// Unit vectors for `texts` after `prompt`, in order.
+fn embed_as(addr: std::net::SocketAddr, prompt: &str, texts: &[&str]) -> Result<Vec<Vec<f32>>, String> {
+    let input: Vec<String> = texts.iter().map(|t| format!("{prompt}{t}")).collect();
     let body = serde_json::to_vec(&json!({ "input": input })).map_err(|e| e.to_string())?;
     let reply = sidecar::post(addr, "/v1/embeddings", "application/json", &body, REQUEST_TIMEOUT).map_err(|e: io::Error| e.to_string())?;
     let reply: Value = serde_json::from_slice(&reply).map_err(|e| e.to_string())?;

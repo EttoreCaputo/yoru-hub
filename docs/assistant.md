@@ -91,9 +91,7 @@ Firmware 0.11.0 has three apps in its menu that the host drives:
 
 ## Memory
 
-Files in the data folder that the agent reads at the start of a turn and keeps up to date on its own as you talk (`remember`, `revise_memory`, `forget`): who you are, what matters to you (people, projects, topics), what to tell you and what not, and what it has already told you. You read and edit them in the app.
-
-On 2026-11-08 it was decided to replace the file with a graph of people and facts, searched for each answer and consolidated while Yoru sleeps, with feelings for each person and a style that adapts within limits: [memory.md](memory.md).
+Since 2026-11-08 a graph of people and facts (`memory.db`), searched for each answer and consolidated while Yoru sleeps, with feelings for each person, voice prints and a style that adapts within limits: [memory.md](memory.md). Before, it was a file (`memory.md`), imported into the graph once.
 
 ## Proactive: watchers, triage, notifications
 

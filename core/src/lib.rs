@@ -50,6 +50,7 @@ pub mod timers;
 pub mod tts;
 pub mod turn;
 pub mod voice;
+pub mod voiceprint;
 pub mod wifi;
 
 pub use agent::{Agent, Toolbox, Turn};

@@ -11,7 +11,7 @@ mod transcript;
 
 pub use summary::{ActionItem, Complete, Summary, summarize, summary};
 
-pub use transcript::{Format, Line, Settings, Speaker, SummaryBy, Transcript, When, download_model, export, import, model_present, rename_speaker, set_settings, settings, transcribe, transcript};
+pub use transcript::{Format, Line, Settings, Speaker, SummaryBy, Transcript, When, download_model, export, import, model_present, rename_speaker, set_settings, settings, transcribe, transcript, voices};
 
 use std::collections::BTreeMap;
 use std::fs;

@@ -159,6 +159,39 @@ pub fn rename_speaker(id: &str, key: &str, name: &str) -> io::Result<Transcript>
     transcript(id)?.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no transcript yet"))
 }
 
+/// At most this much of a speaker's audio goes into their voice print.
+const VOICE_MS: u64 = 60_000;
+
+/// Where each speaker of meeting `id` is heard, for their voice print: the
+/// speaker, their track's audio file and the times of their lines (a second
+/// or longer, a minute in all at most).
+pub fn voices(id: &str) -> io::Result<Vec<(Speaker, PathBuf, Vec<(u64, u64)>)>> {
+    let meeting = get(id)?;
+    let folder = folder(id)?;
+    let Some(transcript) = transcript(id)? else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    for speaker in transcript.speakers {
+        let Some(line) = transcript.lines.iter().find(|l| l.who() == speaker.key) else { continue };
+        let Some(file) = meeting.tracks.iter().find(|t| t.name == line.track).and_then(|t| t.file.as_deref()) else { continue };
+        let path = folder.join(checked(file)?);
+        let mut total = 0;
+        let ranges: Vec<(u64, u64)> = transcript
+            .lines
+            .iter()
+            .filter(|l| l.who() == speaker.key && l.end_ms >= l.start_ms + 1000)
+            .take_while(|l| {
+                total += l.end_ms - l.start_ms;
+                total <= VOICE_MS
+            })
+            .map(|l| (l.start_ms, l.end_ms))
+            .collect();
+        if !ranges.is_empty() {
+            out.push((speaker, path, ranges));
+        }
+    }
+    Ok(out)
+}
+
 const ENGINE: &str = "parakeet-ultra";
 
 /// Where the model is kept: `models/parakeet-ultra` in the data folder, the

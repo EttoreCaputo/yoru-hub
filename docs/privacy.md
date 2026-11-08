@@ -11,7 +11,7 @@ Yoru is a personal assistant that runs on your computer, with a small round boar
 Everything Yoru knows lives in a folder on your computer (on macOS, `~/Library/Application Support`):
 
 - your settings and the list of services you connected;
-- the memory Yoru keeps about you (`memory.md`), which you can read and edit in the app;
+- the memory Yoru keeps about you (`memory.db`: the people and things in your life, the facts about them, the conversations and meeting summaries they were learnt from, how Yoru feels about each person and the voice print of each voice it knows), which you can read and edit in the app;
 - your conversations, notifications and timers, and the clips Yoru spoke with ElevenLabs;
 - the meetings you record or import: the sound of each track and its transcript, on the Meetings page, until you delete them. Recording and transcribing them never sends anything anywhere (the models are downloaded once, from Hugging Face). Their summaries are written on this computer too, unless you pick the brain for them in the meetings' settings: then the transcript goes to that brain's provider.
 
@@ -24,7 +24,7 @@ We have no account system, no analytics and no telemetry. We never receive your 
 Yoru sends data only to the services you choose, and only to do what you asked:
 
 - **The services you connect** (for example Gmail, Google Calendar, GitHub, Slack, Notion, Linear). Yoru signs in with your account, through the service's own sign-in page, and asks for the permissions listed there. It reads or acts on that service only when you ask, or when a watcher you set up checks it.
-- **The model that answers you.** To think, Yoru sends your request, your memory, and the results of the tools it used (for example the mails or events it was asked about) to the model provider you picked: Groq, OpenAI or Anthropic, with your own API key. Their handling of that data is covered by their own policies. If you pick Ollama, the model runs on your computer and nothing leaves it.
+- **The model that answers you.** To think, Yoru sends your request, your memory (what is always in mind and the facts found for the request; facts marked private only to Ollama), and the results of the tools it used (for example the mails or events it was asked about) to the model provider you picked: Groq, OpenAI or Anthropic, with your own API key. Their handling of that data is covered by their own policies. If you pick Ollama, the model runs on your computer and nothing leaves it.
 - **The voice providers, if you pick them.** With an ElevenLabs or Groq voice, the text Yoru speaks is sent to that provider. Speech recognition runs on your computer, unless you pick a provider's Whisper (Groq or OpenAI): then what you say to the board is sent to it. What ElevenLabs spoke is kept on your computer, on the Spoken page, until you delete it.
 - **The services' icons.** To show a service's icon on the board (Spotify, ClickUp...), Yoru first looks for an app of that name on this computer; if there is none it downloads the public icon from the service's site (`<name>.com/apple-touch-icon.png`, Google's icon page for Gmail, Calendar, Drive and Meet). Only the service's name is in that request, nothing about you or what you asked. The icons are kept on your computer.
 - **The board.** Yoru talks to the board over USB or your local WiFi. Nothing goes to the internet for that. While the computer is away, the board talks to the same speech, brain and voice providers itself, over your WiFi, with the keys the app gave it: what you say to it, your memory (its first part) and today's timers and the names and times of your tasks go to them, as they would from the computer. The keys reach the board only over USB or its encrypted WiFi link, and stay in its flash until the app tells it to forget them (when you remove a provider).
@@ -45,7 +45,7 @@ Yoru's use of information received from Google APIs adheres to the [Google API S
 ## Your choices
 
 - **Disconnect a service** in the Connectors page: Yoru forgets its tokens. You can also remove Yoru's access from your Google account at [myaccount.google.com/permissions](https://myaccount.google.com/permissions), or from the same page in the other services.
-- **Edit or erase memory and conversations** in the app, or delete the data folder.
+- **Edit or erase memory and conversations** in the app (a person's voice print too), or delete the data folder.
 - **Delete everything**: remove the app and its data folder, and remove its entries from the keychain.
 
 ## Children

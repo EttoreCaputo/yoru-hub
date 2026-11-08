@@ -14,6 +14,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+use yoru_core::assistant::memory;
 use yoru_core::assistant::tasks::{self, Task, TaskEntry};
 use yoru_core::assistant::watchers::{self, ScheduleEvent, WatchEntry, Watcher};
 use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, Confirmations, Host, Notification, Reply, Settings, TaskHost};
@@ -102,6 +103,7 @@ pub fn start(app: &AppHandle) {
             let _ = app.emit("tasks", tasks);
         }));
     }
+    a.start_sleep();
     start_connectors(app);
     start_scheduler(app);
 }
@@ -370,13 +372,64 @@ pub fn open_link(url: &str) -> Result<(), String> {
 // The memory.
 
 #[tauri::command]
-pub fn memory(state: State<AppState>) -> String {
-    state.assistant.memory.text()
+pub fn memory_graph(state: State<AppState>) -> memory::Graph {
+    state.assistant.memory.graph()
+}
+
+/// A fact written or corrected on the page (`id` 0: a new one).
+#[tauri::command]
+pub fn memory_put_fact(state: State<AppState>, fact: memory::Fact) -> Result<i64, String> {
+    state.assistant.memory.put_fact(&fact)
+}
+
+/// A fact no longer true: kept as history.
+#[tauri::command]
+pub fn memory_close_fact(state: State<AppState>, id: i64) {
+    state.assistant.memory.close(id);
+}
+
+/// A fact removed for good.
+#[tauri::command]
+pub fn memory_forget_fact(state: State<AppState>, id: i64) -> Result<String, String> {
+    state.assistant.memory.forget(&[id])
+}
+
+/// Someone or something new, by name; its id.
+#[tauri::command]
+pub fn memory_add_entity(state: State<AppState>, name: String, kind: String) -> Result<i64, String> {
+    state.assistant.memory.resolve(&name, Some(&kind)).ok_or_else(|| "a name is needed".into())
 }
 
 #[tauri::command]
-pub fn set_memory(state: State<AppState>, text: String) -> Result<(), String> {
-    state.assistant.memory.set_text(&text).map_err(|e| e.to_string())
+pub fn memory_put_entity(state: State<AppState>, entity: memory::Entity) -> Result<(), String> {
+    state.assistant.memory.put_entity(&entity)
+}
+
+#[tauri::command]
+pub fn memory_remove_entity(state: State<AppState>, id: i64) -> Result<(), String> {
+    state.assistant.memory.remove_entity(id)
+}
+
+/// `drop` is `keep` under another name.
+#[tauri::command]
+pub fn memory_merge(state: State<AppState>, keep: i64, drop: i64) -> Result<(), String> {
+    state.assistant.memory.merge(keep, drop)
+}
+
+/// `a` is `kind` of `b`.
+#[tauri::command]
+pub fn memory_relate(state: State<AppState>, a: i64, kind: String, b: i64) -> Result<String, String> {
+    state.assistant.memory.relate(a, &kind, b, None)
+}
+
+#[tauri::command]
+pub fn memory_unrelate(state: State<AppState>, id: i64) -> Result<(), String> {
+    state.assistant.memory.unrelate(id)
+}
+
+#[tauri::command]
+pub fn memory_forget_voice(state: State<AppState>, id: i64) {
+    state.assistant.memory.forget_voice(id);
 }
 
 // Watchers and routines.

@@ -24,7 +24,7 @@ Argmax's Core ML builds (ParakeetKit Pro, SpeakerKit Pro) are under a commercial
 | Voice activity | Silero VAD | |
 | Speakers, live | [Nemotron 3 Diarization](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml), preset `fast32` (2.9 s latency; OpenMDW-1.1) | |
 | Speakers, after the meeting | Nemotron 3 Diarization, preset `fast128` (best accuracy and speaker counting) | pyannote community-1 (FluidAudio) above 8 speakers |
-| Who is who across meetings | Voice prints from the pyannote embedder (WeSpeaker), matched by cosine similarity | |
+| Who is who across meetings | Voice prints from the pyannote embedder (WeSpeaker), matched by cosine similarity | Since 2026-11-08 the microphone's voice and every speaker you name in a transcript join that person's voice print in Yoru's memory, so Yoru knows them when they talk to him (`Assistant::learn_voices`, [memory.md](memory.md)) |
 | Echo on the microphone | VoiceProcessingIO | |
 | Summary | The local model on `llama-server`, with a context long enough for an hour of talk (about 15,000 tokens; the assistant's is 8,192), or Ollama | The brain picked in Settings (Claude, OpenAI, Groq) when the user turns it on |
 

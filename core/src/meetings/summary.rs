@@ -44,6 +44,20 @@ pub struct Summary {
     pub made_at: i64,
 }
 
+impl Summary {
+    /// What the memory's sleep reads of it: the gist, the decisions and who does what.
+    pub fn for_memory(&self) -> String {
+        let mut out = vec![self.overview.trim().to_string()];
+        out.extend(self.decisions.iter().map(|d| format!("Decided: {d}")));
+        out.extend(self.actions.iter().map(|a| {
+            let who = if a.owner.is_empty() { String::new() } else { format!(" ({})", a.owner) };
+            let due = if a.due.is_empty() { String::new() } else { format!(", by {}", a.due) };
+            format!("To do{who}: {}{due}", a.text)
+        }));
+        out.join("\n")
+    }
+}
+
 /// A JSON answer to a prompt, matching a schema: the model's text.
 pub type Complete<'a> = dyn Fn(&str, &Value) -> Result<String, String> + 'a;
 

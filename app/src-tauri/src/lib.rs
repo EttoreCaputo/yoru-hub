@@ -433,6 +433,10 @@ struct AppState {
     /// The model being downloaded and how far along (percent).
     download: Mutex<Option<(String, f32)>>,
     cancel_download: AtomicBool,
+    /// EmbeddingGemma, when downloaded: the memory searches with it.
+    embedder: Mutex<Option<Arc<IntentModel>>>,
+    /// Voice prints of who speaks (`None` off a Mac).
+    voiceprinter: Option<Arc<yoru_core::voiceprint::Voiceprinter>>,
 }
 
 impl AppState {
@@ -501,16 +505,23 @@ fn apply_voice(state: &AppState) {
     }
     let dump_dir = settings.keep_recordings.then(voice::default_dump_dir).flatten();
     let listens = settings.enabled;
-    let intent = installed_path(&settings.intent_model, Kind::Intent).filter(|_| listens && settings.follow_up).and_then(|path| {
-        current_intent.filter(|i| i.path() == path).or_else(|| {
+    // EmbeddingGemma: the follow-ups' meaning, and the memory's search
+    // whenever it is downloaded.
+    let intent_wanted = listens && settings.follow_up;
+    let embedder = installed_path(&settings.intent_model, Kind::Intent).and_then(|path| {
+        let current = current_intent.or_else(|| state.embedder.lock().unwrap().clone());
+        current.filter(|i| i.path() == path).or_else(|| {
             let model = Arc::new(IntentModel::new(path)?);
-            if settings.keep_warm {
+            if settings.keep_warm && intent_wanted {
                 let m = model.clone();
                 thread::spawn(move || drop(m.warm_up()));
             }
             Some(model)
         })
     });
+    *state.embedder.lock().unwrap() = embedder.clone();
+    state.assistant.memory.set_embedder(embedder.clone().map(|m| m as Arc<dyn yoru_core::assistant::memory::Embedder>));
+    let intent = embedder.filter(|_| intent_wanted);
     let turn = installed_path(&settings.turn_model, Kind::Turn).filter(|_| listens).map(|path| {
         current_turn.filter(|t| t.path() == path).unwrap_or_else(|| {
             let model = Arc::new(SmartTurn::new(path));
@@ -519,7 +530,7 @@ fn apply_voice(state: &AppState) {
             model
         })
     });
-    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up, intent, turn, language: None };
+    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up, intent, turn, voiceprint: state.voiceprinter.clone(), language: None };
     apply_language(state);
 }
 
@@ -1906,6 +1917,8 @@ pub fn run() {
                 installing: Mutex::new(BTreeMap::new()),
                 download: Mutex::new(None),
                 cancel_download: AtomicBool::new(false),
+                embedder: Mutex::default(),
+                voiceprinter: yoru_core::voiceprint::Voiceprinter::new().map(Arc::new),
             });
             apply_voice(&app.state::<AppState>());
             let handle = app.handle();
@@ -1946,7 +1959,9 @@ pub fn run() {
             set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze,
             assistant::assistant_info, assistant::ollama_models, assistant::set_assistant_settings, assistant::set_do_not_disturb, assistant::ask, assistant::chat, assistant::forget_conversation,
             assistant::inbox, assistant::inbox_read, assistant::inbox_read_all, assistant::inbox_dismiss, assistant::inbox_clear, assistant::open_notification, assistant::open_web,
-            assistant::memory, assistant::set_memory,
+            assistant::memory_graph, assistant::memory_put_fact, assistant::memory_close_fact, assistant::memory_forget_fact,
+            assistant::memory_add_entity, assistant::memory_put_entity, assistant::memory_remove_entity, assistant::memory_merge,
+            assistant::memory_relate, assistant::memory_unrelate, assistant::memory_forget_voice,
             assistant::tasks, assistant::put_task, assistant::remove_task, assistant::run_task_now,
             assistant::watchers, assistant::put_watcher, assistant::remove_watcher, assistant::run_watcher, assistant::recap_now,
             assistant::connectors, assistant::connector_presets, assistant::add_connector, assistant::remove_connector, assistant::set_connector_enabled,
