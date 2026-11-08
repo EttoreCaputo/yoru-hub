@@ -519,6 +519,7 @@ impl Assistant {
             notes.push(format!("<memory_found>\n{found}\n</memory_found>"));
         }
         let who = self.who(speaker);
+        let who = if cloud { self.memory.veil(&who, &self.memory.called_in(text)) } else { who };
         match speaker {
             Some(p) if p != user => notes.push(format!("[speaking: [e{p}] {who}, recognised by their voice: not the user]")),
             None if heard => notes.push(

@@ -9,6 +9,7 @@
   import { i18n } from "../i18n/index.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
   import Toggle from "../ui/Toggle.svelte";
+  import MemoryGraph from "../ui/MemoryGraph.svelte";
 
   type Fact = { id: number; about: number | null; section: string; text: string; from: number; to: number | null; importance: number; private: boolean; episode: number | null };
   type Entity = { id: number; name: string; kind: string; aliases: string[]; summary: string; gender: string | null; placeholder: boolean; is_user: boolean; label: string | null };
@@ -106,6 +107,26 @@
     await act("memory_put_entity", { entity: { ...card, aliases: list, placeholder: card.placeholder && card.name === entity?.name } });
   }
 
+  // List or graph, remembered on this computer.
+  const read = (key: string, fallback: string) => {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  let mode = $state<"list" | "graph">(read("memory.view", "graph") === "list" ? "list" : "graph");
+  let showFacts = $state(read("memory.facts", "1") === "1");
+  $effect(() => {
+    try {
+      localStorage.setItem("memory.view", mode);
+      localStorage.setItem("memory.facts", showFacts ? "1" : "0");
+    } catch {
+      // Not kept: fine.
+    }
+  });
+  let drawing = $state<MemoryGraph>();
+
   let mergeInto = $state<number | "">("");
   let relKind = $state("partner");
   let relTo = $state<number | "">("");
@@ -117,7 +138,11 @@
       <h1>{t.title}</h1>
       <p class="lede">{t.lede}</p>
     </div>
-    <div class="row">
+    <div class="row tools">
+      <div class="seg" role="tablist">
+        <button role="tab" aria-selected={mode === "graph"} class:on={mode === "graph"} onclick={() => (mode = "graph")}>{t.graph}</button>
+        <button role="tab" aria-selected={mode === "list"} class:on={mode === "list"} onclick={() => (mode = "list")}>{t.list}</button>
+      </div>
       <Toggle checked={history} label={t.history} onchange={(on) => (history = on)} />
       <span class="dim small">{t.history}</span>
     </div>
@@ -125,25 +150,7 @@
 
   {#if error}<p class="error-text">{error}</p>{/if}
 
-  <div class="split">
-    <aside class="panel people">
-      <div class="section-title">{t.people}</div>
-      <ul>
-        {#each [user(), ...others].filter((e) => !!e) as e (e!.id)}
-          {@const x = e!}
-          <li>
-            <button class="who" class:on={x.id === selected} onclick={() => (selected = x.id)}>
-              <b>{x.is_user ? t.you(x.name) : x.name}</b>
-              <span class="faint small">
-                {x.label ?? (x.kind === "person" ? "" : t.kinds[x.kind] ?? x.kind)}
-                {#if x.placeholder}· {t.noName}{/if}
-                {#if graph.voices.includes(x.id)}· {t.voiceKnown}{/if}
-              </span>
-              <span class="count faint">{openCount(x.id)}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
+  {#snippet addNew()}
       <div class="add-entity">
         <input type="text" placeholder={t.newName} bind:value={newName} onkeydown={(e) => e.key === "Enter" && addEntity()} />
         <select bind:value={newKind}>
@@ -151,8 +158,9 @@
         </select>
         <button class="btn small" disabled={!newName.trim()} onclick={addEntity}>{t.add}</button>
       </div>
-    </aside>
+  {/snippet}
 
+  {#snippet detail()}
     {#if entity && card}
       <section class="detail">
         <div class="panel">
@@ -264,7 +272,53 @@
         </div>
       </section>
     {/if}
-  </div>
+  {/snippet}
+
+  {#if mode === "graph"}
+    <div class="graph-bar row">
+      <Toggle checked={showFacts} label={t.showFacts} onchange={(on) => (showFacts = on)} />
+      <span class="dim small">{t.showFacts}</span>
+      <span class="spacer-flex"></span>
+      <button class="btn quiet small" onclick={() => drawing?.fit()}>{t.fit}</button>
+    </div>
+    <MemoryGraph
+      bind:this={drawing}
+      {graph}
+      {selected}
+      {showFacts}
+      onselect={(id) => (selected = id)}
+      youName={t.you}
+      relationName={(k) => t.relations[k] ?? k}
+      kindName={(k) => t.kinds[k] ?? k}
+      sectionName={(k) => t.sections[k] ?? k}
+    />
+    <div class="panel add-under">{@render addNew()}</div>
+    <div class="under">{@render detail()}</div>
+  {:else}
+    <div class="split">
+    <aside class="panel people">
+      <div class="section-title">{t.people}</div>
+      <ul>
+        {#each [user(), ...others].filter((e) => !!e) as e (e!.id)}
+          {@const x = e!}
+          <li>
+            <button class="who" class:on={x.id === selected} onclick={() => (selected = x.id)}>
+              <b>{x.is_user ? t.you(x.name) : x.name}</b>
+              <span class="faint small">
+                {x.label ?? (x.kind === "person" ? "" : t.kinds[x.kind] ?? x.kind)}
+                {#if x.placeholder}· {t.noName}{/if}
+                {#if graph.voices.includes(x.id)}· {t.voiceKnown}{/if}
+              </span>
+              <span class="count faint">{openCount(x.id)}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+      {@render addNew()}
+    </aside>
+      {@render detail()}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -401,5 +455,46 @@
   }
   .spacer {
     flex: 0;
+  }
+  .tools {
+    gap: 10px;
+  }
+  .seg {
+    display: flex;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--ink-2);
+    border: 1px solid var(--rim);
+    margin-right: 6px;
+  }
+  .seg button {
+    height: 26px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: var(--haze);
+    font: 550 12.5px/1 var(--sans);
+    cursor: pointer;
+  }
+  .seg button.on {
+    background: var(--ink-3);
+    color: var(--pearl);
+  }
+  .graph-bar {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .spacer-flex {
+    flex: 1;
+  }
+  .add-under {
+    margin-top: 12px;
+  }
+  .add-under .add-entity {
+    margin-top: 0;
+  }
+  .under {
+    margin-top: 12px;
   }
 </style>

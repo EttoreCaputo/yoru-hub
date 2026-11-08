@@ -46,7 +46,7 @@ pub(super) fn services(config: &BridgeConfig) -> Value {
     }
     if let (Some(assistant), Some(settings)) = (&config.assistant, &settings) {
         out["name"] = settings.name.clone().into();
-        out["memory"] = assistant.memory.core(MEMORY_CHARS, true).into();
+        out["memory"] = assistant.memory.board(MEMORY_CHARS).into();
     }
     out
 }

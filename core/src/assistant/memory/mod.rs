@@ -47,6 +47,8 @@ pub const SECTIONS: &[(&str, &str)] = &[
 pub(crate) const CORE_SQL: &str = "f.section IN ('about', 'tell', 'quiet') OR f.importance >= 0.8";
 /// The longest fact.
 const MAX_LINE: usize = 300;
+/// The longest line the board gets: its prompt has room for little.
+const BOARD_LINE: usize = 160;
 /// Facts found for a turn, at most.
 const RECALLED: usize = 30;
 /// An episode left this long is over (as the conversation is).
@@ -397,6 +399,12 @@ impl Memory {
             return None;
         }
         if let Some(id) = self.find(name) {
+            return Some(id);
+        }
+        // A role a cloud brain was given in place of a name ("your friend").
+        let low = name.to_lowercase();
+        let roles: Vec<i64> = self.entities().into_iter().filter(|e| e.label.as_deref().is_some_and(|l| l.to_lowercase() == low)).map(|e| e.id).collect();
+        if let [id] = roles[..] {
             return Some(id);
         }
         let db = self.db.lock().unwrap();
@@ -806,6 +814,8 @@ impl Memory {
             return String::new();
         };
         let facts: Vec<Fact> = stmt.query_map([], fact_row).map(|rows| rows.flatten().collect()).unwrap_or_default();
+        drop(stmt);
+        drop(db);
         let mut out = String::new();
         if let Some(u) = user.filter(|u| u.name != "User") {
             out.push_str(&format!("The user is {}{}.\n", u.name, if u.summary.is_empty() { String::new() } else { format!(": {}", u.summary) }));
@@ -831,21 +841,140 @@ impl Memory {
             }
             out.push_str(&block);
         }
+        let out = out.trim_end().to_string();
+        if cloud { self.veil(&out, &[]) } else { out }
+    }
+
+    /// What the board knows when it talks without the computer: the graph in
+    /// short, within `max` characters, whole lines only. Who the user is and
+    /// their core facts, then the people and things around them, most known
+    /// first, each with what matters most of it. A cloud brain reads it: no
+    /// private facts, and people with a role go by it.
+    pub fn board(&self, max: usize) -> String {
+        let graph = self.graph();
+        let user = graph.entities.iter().find(|e| e.is_user);
+        let uid = user.map(|u| u.id);
+        // Open and public; the graph has them by section, most important first.
+        let open: Vec<&Fact> = graph.facts.iter().filter(|f| f.to.is_none() && !f.private).collect();
+        let veils = self.veils(&[]);
+        let veiled: Vec<i64> = veils.iter().map(|(id, _, _)| *id).collect();
+        // Each line by role before it is measured: a role is longer than a name.
+        let line = |text: String| clip(&hide(&text, &veils), BOARD_LINE);
+
+        // The others, by how much Yoru knows of them.
+        let mut others: Vec<(f64, String)> = graph
+            .entities
+            .iter()
+            .filter(|e| !e.is_user && (!e.placeholder || e.label.is_some()))
+            .filter_map(|e| {
+                let mut facts: Vec<&&Fact> = open.iter().filter(|f| f.about == Some(e.id)).collect();
+                facts.sort_by(|a, b| b.importance.total_cmp(&a.importance));
+                if facts.is_empty() && e.label.is_none() && e.summary.is_empty() {
+                    return None;
+                }
+                let score = facts.iter().map(|f| f.importance).sum::<f64>() + if e.label.is_some() { 1.0 } else { 0.0 };
+                let head = match (&e.label, veiled.contains(&e.id) || e.placeholder) {
+                    (Some(label), true) => label.clone(),
+                    (Some(label), false) => format!("{}, {label}", e.name),
+                    (None, _) => format!("{} ({})", e.name, e.kind),
+                };
+                let mut what: Vec<&str> = Vec::new();
+                if !e.summary.is_empty() {
+                    what.push(&e.summary);
+                }
+                what.extend(facts.iter().take(2).map(|f| f.text.as_str()));
+                Some((score, line(if what.is_empty() { format!("- {head}") } else { format!("- {head}: {}", what.join("; ")) })))
+            })
+            .collect();
+        others.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let others: Vec<String> = others.into_iter().map(|(_, l)| l).collect();
+
+        // The user's own core first, leaving the people a third at least.
+        let theirs = others.iter().map(|l| l.len() + 1).sum::<usize>();
+        let room = max.saturating_sub(theirs.min(max / 3));
+        let mut out = String::new();
+        if let Some(u) = user.filter(|u| u.name != "User") {
+            let summary = if u.summary.is_empty() { String::new() } else { format!(": {}", u.summary) };
+            out.push_str(&line(format!("The user is {}{summary}.", u.name)));
+            out.push('\n');
+        }
+        let mine = |f: &&&Fact| f.about.is_none() || f.about == uid;
+        let core = |f: &&&Fact| matches!(f.section.as_str(), "about" | "tell" | "quiet") || f.importance >= 0.8;
+        for (key, title) in SECTIONS {
+            let lines: Vec<String> = open.iter().filter(mine).filter(core).filter(|f| f.section == *key).map(|f| line(format!("- {}", f.text))).collect();
+            let mut part = format!("{title}:\n");
+            let mut any = false;
+            for l in lines {
+                if out.len() + part.len() + l.len() + 1 > room {
+                    break;
+                }
+                part.push_str(&l);
+                part.push('\n');
+                any = true;
+            }
+            if any {
+                out.push_str(&part);
+            }
+        }
+        let title = "People and things in their life:\n";
+        let mut part = String::from(title);
+        for l in others {
+            if out.len() + part.len() + l.len() + 1 > max {
+                break;
+            }
+            part.push_str(&l);
+            part.push('\n');
+        }
+        if part.len() > title.len() {
+            out.push_str(&part);
+        }
         out.trim_end().to_string()
     }
 
-    /// The entities `text` names: by name or alias, or as kin ("my wife").
-    pub fn named_in(&self, text: &str) -> Vec<i64> {
+    /// The people who have a role for the user that no one else has ("your
+    /// wife", "your friend" when there is one), with their names and aliases:
+    /// a cloud brain reads them by role (docs/memory.md, Privacy). `keep`:
+    /// the people the message itself names, who keep their names.
+    fn veils(&self, keep: &[i64]) -> Vec<(i64, Vec<String>, String)> {
+        let all = self.entities();
+        all.iter()
+            .filter(|e| e.kind == "person" && !e.is_user && !e.placeholder && !keep.contains(&e.id))
+            .filter_map(|e| {
+                let label = e.label.clone()?;
+                if all.iter().filter(|o| o.label.as_deref() == Some(label.as_str())).count() > 1 {
+                    return None;
+                }
+                // Aliases that are kin words ("wife") already say the role.
+                let names = std::iter::once(&e.name).chain(e.aliases.iter().filter(|a| kin::parse(a).is_none())).filter(|n| n.chars().count() >= 3).cloned().collect();
+                Some((e.id, names, label))
+            })
+            .collect()
+    }
+
+    /// `text` with the names of the people who have a role for the user
+    /// replaced by it, but those of `keep`: what a cloud brain reads.
+    pub fn veil(&self, text: &str, keep: &[i64]) -> String {
+        hide(text, &self.veils(keep))
+    }
+
+    /// The entities `text` calls by name or alias (not as kin): those a
+    /// cloud brain may read by name.
+    pub fn called_in(&self, text: &str) -> Vec<i64> {
         let low = text.to_lowercase();
         let words: Vec<&str> = low.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '\'')).filter(|w| !w.is_empty()).collect();
         let has = |name: &str| {
             let name = name.to_lowercase();
-            if name.chars().count() < 3 {
-                return false;
-            }
-            if name.contains(' ') { low.contains(&name) } else { words.contains(&name.as_str()) }
+            name.chars().count() >= 3 && if name.contains(' ') { low.contains(&name) } else { words.contains(&name.as_str()) }
         };
-        let mut out: Vec<i64> = self.entities().into_iter().filter(|e| !e.is_user && (has(&e.name) || e.aliases.iter().any(|a| has(a)))).map(|e| e.id).collect();
+        // An alias that is a kin word ("wife") names a role, not the person.
+        self.entities().into_iter().filter(|e| !e.is_user && (has(&e.name) || e.aliases.iter().any(|a| kin::parse(a).is_none() && has(a)))).map(|e| e.id).collect()
+    }
+
+    /// The entities `text` names: by name or alias, or as kin ("my wife").
+    pub fn named_in(&self, text: &str) -> Vec<i64> {
+        let mut out = self.called_in(text);
+        let low = text.to_lowercase();
+        let words: Vec<&str> = low.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '\'')).filter(|w| !w.is_empty()).collect();
         let db = self.db.lock().unwrap();
         let user = db.query_row("SELECT id FROM entities WHERE is_user = 1", [], |r| r.get(0)).unwrap_or(0);
         for w in &words {
@@ -870,7 +999,7 @@ impl Memory {
             let db = self.db.lock().unwrap();
             search::run(&db, &search::Query { text: query, vector, named: &named, closed: false, skip_core: true, now_ms: now_ms() })
         };
-        self.render(&ids.iter().map(|(id, _)| *id).take(RECALLED).collect::<Vec<_>>(), &named, max, cloud)
+        self.render(&ids.iter().map(|(id, _)| *id).take(RECALLED).collect::<Vec<_>>(), &named, &self.called_in(query), max, cloud)
     }
 
     /// The `recall` tool: a search on purpose, closed facts too, with dates.
@@ -881,12 +1010,14 @@ impl Memory {
             let db = self.db.lock().unwrap();
             search::run(&db, &search::Query { text: query, vector, named: &named, closed: true, skip_core: false, now_ms: now_ms() })
         };
-        let out = self.render(&ids.iter().map(|(id, _)| *id).take(40).collect::<Vec<_>>(), &named, 8000, cloud);
+        let out = self.render(&ids.iter().map(|(id, _)| *id).take(40).collect::<Vec<_>>(), &named, &self.called_in(query), 8000, cloud);
         if out.is_empty() { "nothing about that in the memory".into() } else { out }
     }
 
-    /// Facts `ids` (best first) and the people they're about.
-    fn render(&self, ids: &[i64], named: &[i64], max: usize, cloud: bool) -> String {
+    /// Facts `ids` (best first) and the people they're about. `cloud`: the
+    /// private facts stay home and the people with a role are called by it,
+    /// but those `keep` (the message calls them by name).
+    fn render(&self, ids: &[i64], named: &[i64], keep: &[i64], max: usize, cloud: bool) -> String {
         let facts: Vec<Fact> = ids.iter().filter_map(|id| self.fact(*id)).filter(|f| !(cloud && f.private)).collect();
         let entities = self.entities();
         let mut people: Vec<i64> = named.to_vec();
@@ -898,16 +1029,20 @@ impl Memory {
             }
         }
         let mut out = String::new();
+        let veiled: Vec<i64> = if cloud { self.veils(keep).into_iter().map(|(id, _, _)| id).collect() } else { Vec::new() };
         let who: Vec<String> = people
             .iter()
             .filter_map(|id| entities.iter().find(|e| e.id == *id && !e.is_user))
             .map(|e| {
-                let what = [e.label.clone().unwrap_or_default(), e.summary.clone(), if e.placeholder { "name not known yet".into() } else { String::new() }]
+                let hidden = veiled.contains(&e.id);
+                let label = if hidden { String::new() } else { e.label.clone().unwrap_or_default() };
+                let what = [label, e.summary.clone(), if e.placeholder { "name not known yet".into() } else { String::new() }]
                     .into_iter()
                     .filter(|s| !s.is_empty())
                     .collect::<Vec<_>>()
                     .join("; ");
-                format!("- [e{}] {}{}", e.id, e.name, if what.is_empty() { String::new() } else { format!(": {what}") })
+                let name = if hidden { e.label.clone().unwrap_or_default() } else { e.name.clone() };
+                format!("- [e{}] {name}{}", e.id, if what.is_empty() { String::new() } else { format!(": {what}") })
             })
             .collect();
         if !who.is_empty() {
@@ -930,7 +1065,8 @@ impl Memory {
         if !lines.is_empty() {
             out.push_str(&format!("Facts:\n{}\n", lines.join("\n")));
         }
-        out.trim_end().to_string()
+        let out = out.trim_end().to_string();
+        if cloud { self.veil(&out, keep) } else { out }
     }
 
     // ---- episodes ----
@@ -1023,6 +1159,53 @@ pub(crate) fn day(ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(ms).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()).unwrap_or_default()
 }
 
+/// `text` with every whole-word `word` (any case) replaced by `with`.
+fn replace_word(text: &str, word: &str, with: &str) -> String {
+    let lower: Vec<char> = word.chars().flat_map(char::to_lowercase).collect();
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let starts = i == 0 || !chars[i - 1].1.is_alphanumeric();
+        let n = lower.len();
+        let matches = starts
+            && i + n <= chars.len()
+            && chars[i..i + n].iter().map(|(_, c)| *c).flat_map(char::to_lowercase).eq(lower.iter().copied())
+            && chars.get(i + n).is_none_or(|(_, c)| !c.is_alphanumeric());
+        if matches {
+            out.push_str(with);
+            i += n;
+        } else {
+            out.push(chars[i].1);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// `text` with each veiled person's names replaced by their role.
+fn hide(text: &str, veils: &[(i64, Vec<String>, String)]) -> String {
+    let mut out = text.to_string();
+    for (_, names, label) in veils {
+        for name in names {
+            out = replace_word(&out, name, label);
+        }
+    }
+    out
+}
+
+/// `text` cut to `max` bytes at a character, with an ellipsis if cut.
+fn clip(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut at = max.saturating_sub('…'.len_utf8());
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    format!("{}…", text[..at].trim_end())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,6 +1221,51 @@ mod tests {
         drop(memory);
         let again = Memory::open(Some(dir.path()));
         assert_eq!(again.graph().facts.len(), 2);
+    }
+
+    /// A cloud brain reads people with a role by it, unless the message
+    /// calls them by name; a role two people share hides nothing.
+    #[test]
+    fn veils_names_for_a_cloud_brain() {
+        let memory = Memory::open(None);
+        memory.relate_tool("Sofia", "partner", None, Some("f")).unwrap();
+        memory.relate_tool("Luca", "friend", None, None).unwrap();
+        memory.relate_tool("Anna", "friend", None, None).unwrap();
+        memory.remember("Sofia loves tulips", Some("Sofia"), "notes", false, false, None).unwrap();
+        memory.remember("Married to Sofia since 2015", None, "about", false, false, None).unwrap();
+        let core = memory.core(4000, true);
+        assert!(core.contains("Married to your wife since 2015") && !core.contains("Sofia"), "{core}");
+        assert!(memory.core(4000, false).contains("Married to Sofia"));
+        assert_eq!(memory.veil("Luca and Anna", &[]), "Luca and Anna");
+        let found = memory.recalled("what does my wife like?", None, 4000, true);
+        assert!(found.contains("your wife") && !found.contains("Sofia"), "{found}");
+        let found = memory.recalled("what does Sofia like?", None, 4000, true);
+        assert!(found.contains("Sofia loves tulips"), "{found}");
+        assert_eq!(memory.resolve("your wife", None), memory.find("Sofia"));
+        assert_eq!(replace_word("Sofiaa, sofia! Sofia", "Sofia", "X"), "Sofiaa, X! X");
+    }
+
+    /// The board gets the graph in short: the user, then the people by
+    /// role, whole lines within its room, nothing private.
+    #[test]
+    fn the_board_gets_the_graph_in_short() {
+        let memory = Memory::open(None);
+        memory.relate_tool("Sofia", "partner", None, Some("f")).unwrap();
+        memory.relate_tool("Luca", "friend", None, None).unwrap();
+        memory.relate_tool("Anna", "friend", None, None).unwrap();
+        memory.remember("Sofia loves tulips", Some("Sofia"), "notes", false, false, None).unwrap();
+        memory.remember("Luca plays the drums", Some("Luca"), "notes", false, false, None).unwrap();
+        memory.remember("Lives in Milan", None, "about", false, false, None).unwrap();
+        memory.remember("Sees a therapist", None, "about", false, true, None).unwrap();
+        for i in 0..40 {
+            memory.remember(&format!("Likes board game number {i} a lot"), None, "about", false, false, None).unwrap();
+        }
+        let board = memory.board(1200);
+        assert!(board.len() <= 1200, "{}", board.len());
+        assert!(board.contains("Lives in Milan") && !board.contains("therapist"), "{board}");
+        assert!(board.contains("- your wife: your wife loves tulips") && !board.contains("Sofia"), "{board}");
+        assert!(board.contains("Luca plays the drums"), "{board}");
+        assert!(board.lines().all(|l| !l.ends_with('…') || l.len() <= BOARD_LINE + 3), "{board}");
     }
 
     #[test]
