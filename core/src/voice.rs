@@ -526,12 +526,17 @@ impl Times {
 
     fn report(&self, sink: &EventSink) {
         let Some(line) = self.line() else { return };
-        if let Some(path) = crate::paths::data_dir().map(|d| d.join("voice-times.log")) {
-            use std::io::Write as _;
-            let stamped = format!("{} {line}\n", Local::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(stamped.as_bytes()));
-        }
+        time_log(&line);
         sink(BridgeEvent::BoardLog { line });
+    }
+}
+
+/// A line in `voice-times.log` in the data folder: where answers' time goes.
+pub(crate) fn time_log(line: &str) {
+    if let Some(path) = crate::paths::data_dir().map(|d| d.join("voice-times.log")) {
+        use std::io::Write as _;
+        let stamped = format!("{} {line}\n", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        let _ = fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(stamped.as_bytes()));
     }
 }
 

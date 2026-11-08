@@ -307,7 +307,11 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     )});
     let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));
     let mut actions: Vec<Action> = Vec::new();
+    // Each round's model and tool time, for voice-times.log.
+    let mut times: Vec<String> = Vec::new();
+    let log_times = |times: &[String]| crate::voice::time_log(&format!("host: brain {model}: {}", times.join(", ")));
     for _ in 0..MAX_ROUNDS {
+        let asked = Instant::now();
         let tools = tool_list(&board_tools, &loaded, !findable.is_empty(), &budget);
         let mut all = vec![system.clone()];
         all.extend(messages.iter().cloned());
@@ -315,10 +319,13 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
         if messages.last().is_some_and(|m| m["role"] == "tool") {
             all.push(json!({"role": "system", "content": reminder}));
         }
+        let size = all.iter().map(|m| m.to_string().len()).sum::<usize>() + Value::from(tools.clone()).to_string().len();
         let message = chat(&client, &request(brain, settings, json!({"messages": all, "tools": tools, "tool_choice": "auto"}), budget.max_tokens), on.as_deref_mut())?;
+        times.push(format!("model {} ms ({} KB sent)", asked.elapsed().as_millis(), size / 1024));
         let calls = message["tool_calls"].as_array().cloned().unwrap_or_default();
         let text = clean(message["content"].as_str().unwrap_or_default());
         if calls.is_empty() {
+            log_times(&times);
             messages.push(json!({"role": "assistant", "content": text}));
             return Ok(Reply { text, actions, model, elapsed_ms: started.elapsed().as_millis() as u64 });
         }
@@ -328,6 +335,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
             let id = call["id"].as_str().unwrap_or_default();
             let name = call.pointer("/function/name").and_then(Value::as_str).unwrap_or_default();
             let arguments = call.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
+            let ran = Instant::now();
             let input = serde_json::from_str::<Value>(if arguments.trim().is_empty() { "{}" } else { arguments }).map_err(|e| format!("error: the arguments weren't valid JSON ({e})"));
             let text = match name {
                 "find_tools" => found(&findable, &loaded, input.as_ref().ok().and_then(|i| i["query"].as_str()).unwrap_or_default(), budget.found),
@@ -340,9 +348,11 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
                     if ok { text } else { format!("error: {text}") }
                 }
             };
+            times.push(format!("{name} {} ms", ran.elapsed().as_millis()));
             messages.push(json!({"role": "tool", "tool_call_id": id, "content": cut(&text, budget.result_max)}));
         }
     }
+    log_times(&times);
     Err("it took too many steps; ask again more simply".into())
 }
 
