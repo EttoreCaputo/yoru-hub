@@ -742,12 +742,15 @@ impl Assistant {
                 None => return Err("the user didn't answer in time: it wasn't done".into()),
             }
         }
-        // A service that acts sends something off; one that reads is fetched from.
-        let kind = if tool.acts { "send" } else { "fetch" };
+        // A service that acts sends something off; one that reads is fetched
+        // from; the web is searched (the board's own clips for it).
+        let web = name == compat::WEB_SEARCH;
+        let (kind, source) = if web { ("search", "Web") } else if tool.acts { ("send", tool.service.as_str()) } else { ("fetch", tool.service.as_str()) };
+        let lean = web.then(|| lean_search(input));
         let errand = self.next_errand();
-        self.errand(&errand, &tool.service, "start", kind);
-        let outcome = external.call(name, input, EXTERNAL_TIMEOUT);
-        self.errand(&errand, &tool.service, if matches!(outcome, Ok((_, false))) { "done" } else { "failed" }, kind);
+        self.errand(&errand, source, "start", kind);
+        let outcome = external.call(name, lean.as_ref().unwrap_or(input), EXTERNAL_TIMEOUT);
+        self.errand(&errand, source, if matches!(outcome, Ok((_, false))) { "done" } else { "failed" }, kind);
         match outcome? {
             (text, false) => Ok(text),
             (text, true) => Err(text),
@@ -911,6 +914,23 @@ tell (what they want to be told about), quiet (what they don't want to hear abou
 const BOARD_ESSENTIALS: &[&str] = &["react", "get_state"];
 /// The service the board's other tools are found under.
 const BOARD_SERVICE: &str = "Yoru's board";
+
+/// A web search asked the quick way: Tavily's basic depth answers in about
+/// a second where advanced takes three or four, and a few results without
+/// the pages' full text are all a spoken answer needs.
+fn lean_search(input: &Value) -> Value {
+    let mut lean = input.clone();
+    if let Some(o) = lean.as_object_mut() {
+        o.insert("search_depth".into(), json!("basic"));
+        let wanted = o.get("max_results").and_then(Value::as_u64).unwrap_or(SEARCH_RESULTS);
+        o.insert("max_results".into(), json!(wanted.min(SEARCH_RESULTS)));
+        o.insert("include_raw_content".into(), json!(false));
+        o.insert("include_images".into(), json!(false));
+    }
+    lean
+}
+
+const SEARCH_RESULTS: u64 = 4;
 
 /// The board's tools beyond [`BOARD_ESSENTIALS`], shaped as a service's so
 /// tool search, `find_tools` and `load_tools` reach them. They still run on

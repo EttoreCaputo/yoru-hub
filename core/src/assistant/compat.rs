@@ -22,6 +22,7 @@
 //!   the day (or the minute) was reached, try again in…" ([`brain_error`]);
 //!   the model isn't asked again until then ([`cloud::Client::limit`]).
 
+use std::thread;
 use std::time::Instant;
 
 use serde_json::{Value, json};
@@ -121,7 +122,8 @@ then load the ones you'll call with load_tools; the ones already loaded are in y
         )
     };
     let web = if web {
-        "You can search the web, news included, with Tavily's search: find and load it like the other tools."
+        "You can search the web, news included, with tavily__tavily_search: it is always loaded, call it directly. \
+For several topics call it once per topic in the same turn: the searches run at the same time."
     } else {
         "You can't search the web: if a question needs it, say so."
     };
@@ -140,8 +142,15 @@ then load the ones you'll call with load_tools; the ones already loaded are in y
 /// Whether a connected service searches the web: Tavily's search is the one
 /// these brains have, since they get no server tool for it.
 fn searches_web(tools: &[ExternalTool]) -> bool {
-    tools.iter().any(|t| t.name == "tavily__tavily_search")
+    tools.iter().any(|t| t.name == WEB_SEARCH)
 }
+
+/// Tavily's search: always loaded when connected, so a question about the
+/// news costs no find_tools and load_tools rounds first.
+pub(super) const WEB_SEARCH: &str = "tavily__tavily_search";
+/// What the model reads of one search: the gist of a few results is all a
+/// spoken answer needs, and every KB more is time before it starts talking.
+const SEARCH_RESULT_MAX: usize = 8000;
 
 /// The connected services for the prompt, with how many tools each has:
 /// "Gmail (12 tools), Tavily (4 tools)".
@@ -298,6 +307,14 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     // A follow-up ("and reply to it") still has the tools the conversation used.
     let mut loaded: Vec<&ExternalTool> = used.iter().filter_map(|n| findable.iter().find(|t| &t.name == n)).collect();
     loaded.drain(..loaded.len().saturating_sub(budget.loaded));
+    if let Some(search) = findable.iter().find(|t| t.name == WEB_SEARCH)
+        && !loaded.iter().any(|t| t.name == WEB_SEARCH)
+    {
+        if loaded.len() >= budget.loaded {
+            loaded.remove(0);
+        }
+        loaded.push(search);
+    }
     let language = a.reply_language(None).map(|l| format!("\n\nAlways reply in {}.", super::language_name(&l))).unwrap_or_default();
     let tags = if a.audio_tags() { format!("\n\n{}", super::audio_tags_rule()) } else { String::new() };
     let system = json!({"role": "system", "content": format!(
@@ -331,25 +348,58 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
         }
         // Only what the API takes back: no reasoning, no extra fields.
         messages.push(json!({"role": "assistant", "content": if text.is_empty() { Value::Null } else { Value::String(text) }, "tool_calls": calls}));
-        for call in &calls {
-            let id = call["id"].as_str().unwrap_or_default();
-            let name = call.pointer("/function/name").and_then(Value::as_str).unwrap_or_default();
-            let arguments = call.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
-            let ran = Instant::now();
-            let input = serde_json::from_str::<Value>(if arguments.trim().is_empty() { "{}" } else { arguments }).map_err(|e| format!("error: the arguments weren't valid JSON ({e})"));
-            let text = match name {
-                "find_tools" => found(&findable, &loaded, input.as_ref().ok().and_then(|i| i["query"].as_str()).unwrap_or_default(), budget.found),
+        // Parsed first; find_tools and load_tools change what's loaded, so they run here in order.
+        let parsed: Vec<(&str, &str, Result<Value, String>)> = calls
+            .iter()
+            .map(|call| {
+                let id = call["id"].as_str().unwrap_or_default();
+                let name = call.pointer("/function/name").and_then(Value::as_str).unwrap_or_default();
+                let arguments = call.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
+                let input = serde_json::from_str::<Value>(if arguments.trim().is_empty() { "{}" } else { arguments }).map_err(|e| format!("error: the arguments weren't valid JSON ({e})"));
+                (id, name, input)
+            })
+            .collect();
+        let mut texts: Vec<Option<String>> = vec![None; parsed.len()];
+        for (i, (_, name, input)) in parsed.iter().enumerate() {
+            texts[i] = match *name {
+                "find_tools" => Some(found(&findable, &loaded, input.as_ref().ok().and_then(|i| i["query"].as_str()).unwrap_or_default(), budget.found)),
                 "load_tools" => {
                     let names: Vec<&str> = input.as_ref().ok().and_then(|i| i["names"].as_array()).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-                    load(&findable, &mut loaded, &names, budget.loaded)
+                    Some(load(&findable, &mut loaded, &names, budget.loaded))
                 }
-                _ => {
-                    let (text, ok) = a.run_one(name, input.as_ref().map_err(Clone::clone), &board_tools, &external_tools, host, &mut actions);
-                    if ok { text } else { format!("error: {text}") }
-                }
+                _ => None,
             };
-            times.push(format!("{name} {} ms", ran.elapsed().as_millis()));
-            messages.push(json!({"role": "tool", "tool_call_id": id, "content": cut(&text, budget.result_max)}));
+        }
+        // The rest at once: two web searches take as long as the slower, not both.
+        let ran = Instant::now();
+        let run = |name: &str, input: &Result<Value, String>| {
+            let mut acts = Vec::new();
+            let (text, ok) = a.run_one(name, input.as_ref().map_err(Clone::clone), &board_tools, &external_tools, host, &mut acts);
+            (if ok { text } else { format!("error: {text}") }, acts, ran.elapsed().as_millis())
+        };
+        let pending: Vec<usize> = (0..parsed.len()).filter(|&i| texts[i].is_none()).collect();
+        let outcomes: Vec<(String, Vec<Action>, u128)> = if pending.len() > 1 {
+            thread::scope(|scope| {
+                let handles: Vec<_> = pending.iter().map(|&i| {
+                    let (run, parsed) = (&run, &parsed);
+                    scope.spawn(move || run(parsed[i].1, &parsed[i].2))
+                }).collect();
+                handles.into_iter().map(|h| h.join().unwrap_or_else(|_| ("error: the tool crashed".into(), Vec::new(), 0))).collect()
+            })
+        } else {
+            pending.iter().map(|&i| run(parsed[i].1, &parsed[i].2)).collect()
+        };
+        for (&i, (text, acts, ms)) in pending.iter().zip(outcomes) {
+            texts[i] = Some(text);
+            actions.extend(acts);
+            times.push(format!("{} {ms} ms", parsed[i].1));
+        }
+        if pending.len() > 1 {
+            times.push(format!("{} tools at once {} ms", pending.len(), ran.elapsed().as_millis()));
+        }
+        for ((id, name, _), text) in parsed.iter().zip(texts) {
+            let max = if *name == WEB_SEARCH { SEARCH_RESULT_MAX } else { budget.result_max };
+            messages.push(json!({"role": "tool", "tool_call_id": id, "content": cut(&text.unwrap_or_default(), max)}));
         }
     }
     log_times(&times);
