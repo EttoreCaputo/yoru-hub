@@ -105,6 +105,21 @@ pub fn talk(pressed: bool) {
     }
 }
 
+/// The pointer came onto the notch: start the audio engine now, so a click
+/// on the microphone finds it on. Cold, Apple's echo cancelling takes about
+/// a second to start, and the first words were lost. It goes off again
+/// after [`ENGINE_IDLE`] unused. Only with the permission already given,
+/// so hovering never brings up macOS's question.
+pub fn warm() {
+    let Some(board) = board() else { return };
+    let _ = thread::Builder::new().name("yoru-notch-warm".into()).spawn(move || {
+        if microphone(false).is_ok_and(|status| status == "granted") && board.audio_on() {
+            board.state.lock().unwrap().used = Some(Instant::now());
+            crate::hostlog::line(TARGET, "pointer on the notch: the microphone's engine is on");
+        }
+    });
+}
+
 /// Stop talking: what Yoru is saying, or what he's hearing.
 pub fn hush() {
     if let Some(board) = board() {

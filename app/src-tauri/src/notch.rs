@@ -210,6 +210,9 @@ fn follow_pointer(app: AppHandle) {
                 over = on;
                 let _ = window.set_ignore_cursor_events(!on);
                 let _ = window.emit("notch-pointer", on);
+                if on {
+                    yoru_core::notch::warm();
+                }
             }
         }
     });
