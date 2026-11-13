@@ -1,4 +1,5 @@
-//! The user's coding agents on this computer, Claude Code and Codex, as one
+//! The user's coding agents on this computer, Claude Code, Codex and
+//! OpenCode, as one
 //! of Yoru's tools (`code`): the conversations the user had with them, and a
 //! prompt said to Yoru sent to one of them in the background. It can
 //! continue a conversation, start a new one in a project the user already
@@ -6,10 +7,12 @@
 //! back in the inbox when the agent is done.
 //!
 //! Nothing here talks to the agents' apps: their command lines are run as
-//! the user would run them (`claude -p`, `codex exec`), and the
-//! conversations are read from the files they keep (`~/.claude/projects`,
-//! `~/.codex/sessions`). Claude Code works in its `auto` permission mode,
-//! where risky actions are checked; Codex in its `workspace-write` sandbox.
+//! the user would run them (`claude -p`, `codex exec`, `opencode run`), and
+//! the conversations are read from the files they keep (`~/.claude/projects`,
+//! `~/.codex/sessions`, OpenCode's database). Claude Code works in its `auto`
+//! permission mode, where risky actions are checked; Codex in its
+//! `workspace-write` sandbox; OpenCode with `--auto`, which approves what its
+//! configuration doesn't deny.
 
 use std::collections::HashMap;
 use std::fs;
@@ -41,6 +44,8 @@ const ANSWER_CHARS: usize = 900;
 pub enum Agent {
     Claude,
     Codex,
+    #[serde(rename = "opencode")]
+    OpenCode,
 }
 
 impl Agent {
@@ -48,6 +53,7 @@ impl Agent {
         match s.trim().to_lowercase().as_str() {
             "claude" | "claude code" | "claude-code" => Some(Agent::Claude),
             "codex" | "chatgpt" | "openai" | "gpt" => Some(Agent::Codex),
+            "opencode" | "open code" | "open-code" => Some(Agent::OpenCode),
             _ => None,
         }
     }
@@ -56,6 +62,7 @@ impl Agent {
         match self {
             Agent::Claude => "Claude Code",
             Agent::Codex => "Codex",
+            Agent::OpenCode => "OpenCode",
         }
     }
 }
@@ -113,7 +120,7 @@ impl Coding {
     pub fn tool() -> Value {
         json!({
             "name": "code",
-            "description": "The user's coding agents on this computer, Claude Code (claude) and Codex (codex). \
+            "description": "The user's coding agents on this computer, Claude Code (claude), Codex (codex) and OpenCode (opencode). \
 sessions: their conversations, newest first, each with its id, title and project folder; query keeps those whose title, folder or first \
 message has its words. send: give an agent a prompt, run in the background: to continue a conversation pass its session id (find it with \
 sessions first); for a new conversation in one of the user's projects pass project (its name or folder); with neither, a new conversation \
@@ -124,7 +131,7 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["sessions", "send", "runs", "stop"]},
-                    "agent": {"type": "string", "enum": ["claude", "codex"], "description": "Default claude; for sessions, both when left out"},
+                    "agent": {"type": "string", "enum": ["claude", "codex", "opencode"], "description": "Default claude; for sessions, all of them when left out"},
                     "query": {"type": "string", "description": "sessions: words of the title, project or first message"},
                     "session": {"type": "string", "description": "send: the id of the conversation to continue"},
                     "project": {"type": "string", "description": "send: a project's name or folder, for a new conversation in it"},
@@ -188,10 +195,15 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
         let program = program(agent).ok_or(match agent {
             Agent::Claude => "Claude Code isn't installed as a command (claude)",
             Agent::Codex => "Codex isn't installed (its command, or the ChatGPT app)",
+            Agent::OpenCode => "OpenCode isn't installed as a command (opencode)",
         })?;
+        let home = crate::paths::home_dir().unwrap_or_default();
+        let model = (agent == Agent::OpenCode).then(|| opencode_model(&home, session, project)).flatten();
         let out = std::env::temp_dir().join(format!("yoru-codex-{}-{}.txt", std::process::id(), crate::assistant::inbox::now_ms()));
         let mut command = Command::new(&program);
-        command.args(arguments(agent, session, prompt, &out)).current_dir(project).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.args(arguments(agent, session, model.as_deref(), prompt, &out)).current_dir(project).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        // OpenCode works where PWD says, not in the process's folder.
+        command.env("PWD", project);
         if let Some(path) = login_path() {
             // The app started from the Finder has a bare PATH; the agent's
             // commands (cargo, npm, git) need the user's.
@@ -277,6 +289,7 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
         let outcome = match agent {
             Agent::Claude => claude_outcome(&lines),
             Agent::Codex => codex_outcome(&lines, last.as_deref()),
+            Agent::OpenCode => opencode_outcome(&lines),
         };
         let (state, result, session) = match outcome {
             Some(o) if o.ok => ("done", o.answer, o.session),
@@ -352,6 +365,22 @@ fn codex_outcome(printed: &str, last: Option<&str>) -> Option<Outcome> {
     }
 }
 
+/// `opencode run --format json`: events a line; the answer is the text of
+/// the last message.
+fn opencode_outcome(printed: &str) -> Option<Outcome> {
+    let events: Vec<Value> = printed.lines().filter_map(|l| serde_json::from_str(l.trim()).ok()).collect();
+    let session = events.iter().find_map(|e| e["sessionID"].as_str()).map(str::to_string);
+    let texts: Vec<&Value> = events.iter().filter(|e| e["type"] == "text").collect();
+    let last = texts.last().and_then(|e| e["part"]["messageID"].as_str());
+    let answer: Vec<&str> = texts.iter().filter(|e| e["part"]["messageID"].as_str() == last).filter_map(|e| e["part"]["text"].as_str()).collect();
+    let answer = answer.join("\n").trim().to_string();
+    if let Some(f) = events.iter().rev().find(|e| e["type"] == "error") {
+        let why = f["error"]["message"].as_str().or(f["error"]["data"]["message"].as_str()).unwrap_or("the run failed");
+        return Some(Outcome { ok: false, answer: why.to_string(), session });
+    }
+    (!answer.is_empty()).then_some(Outcome { ok: true, answer, session })
+}
+
 /// What went wrong, with how to fix a login that ran out.
 fn login_hint(agent: Agent, why: &str) -> String {
     let lower = why.to_lowercase();
@@ -359,6 +388,7 @@ fn login_hint(agent: Agent, why: &str) -> String {
         let how = match agent {
             Agent::Claude => "run claude in the Terminal and log in (/login)",
             Agent::Codex => "run codex login in the Terminal",
+            Agent::OpenCode => "run opencode auth login in the Terminal",
         };
         format!("{why}\n\n{} needs a login: {how}.", agent.name())
     } else {
@@ -367,7 +397,7 @@ fn login_hint(agent: Agent, why: &str) -> String {
 }
 
 /// The command line for `agent`.
-fn arguments(agent: Agent, session: Option<&str>, prompt: &str, out: &Path) -> Vec<String> {
+fn arguments(agent: Agent, session: Option<&str>, model: Option<&str>, prompt: &str, out: &Path) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     match agent {
         Agent::Claude => {
@@ -389,6 +419,16 @@ fn arguments(agent: Agent, session: Option<&str>, prompt: &str, out: &Path) -> V
             }
             args.extend(["--".into(), prompt.into()]);
         }
+        Agent::OpenCode => {
+            args.extend(["run", "--format", "json", "--auto"].map(String::from));
+            if let Some(s) = session {
+                args.extend(["--session".into(), s.into()]);
+            }
+            if let Some(m) = model {
+                args.extend(["--model".into(), m.into()]);
+            }
+            args.extend(["--".into(), prompt.into()]);
+        }
     }
     args
 }
@@ -400,6 +440,7 @@ fn program(agent: Agent) -> Option<PathBuf> {
     let name = match agent {
         Agent::Claude => "claude",
         Agent::Codex => "codex",
+        Agent::OpenCode => "opencode",
     };
     let mut places: Vec<PathBuf> = login_path().unwrap_or_default().split(':').map(|d| Path::new(d).join(name)).collect();
     places.extend([home.join(".local/bin").join(name), PathBuf::from("/opt/homebrew/bin").join(name), PathBuf::from("/usr/local/bin").join(name)]);
@@ -409,6 +450,7 @@ fn program(agent: Agent) -> Option<PathBuf> {
             PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"),
             PathBuf::from("/Applications/Codex.app/Contents/Resources/codex-cli/bin/codex"),
         ]),
+        Agent::OpenCode => places.push(home.join(".opencode/bin/opencode")),
     }
     places.into_iter().find(|p| p.is_file())
 }
@@ -434,6 +476,9 @@ pub fn sessions(home: &Path, agent: Option<Agent>) -> Vec<Session> {
     }
     if agent.is_none_or(|a| a == Agent::Codex) {
         all.extend(codex_sessions(home));
+    }
+    if agent.is_none_or(|a| a == Agent::OpenCode) {
+        all.extend(opencode_sessions(home).into_iter().map(|(s, _)| s));
     }
     // A conversation in a scratch or temporary folder isn't the user's work.
     all.retain(|s| !scratch(&s.project));
@@ -565,6 +610,72 @@ fn codex_sessions(home: &Path) -> Vec<Session> {
             Some(Session { agent: Agent::Codex, id, title, project: cwd?, updated })
         })
         .collect()
+}
+
+/// OpenCode's database, where it keeps its conversations.
+fn opencode_db(home: &Path) -> PathBuf {
+    home.join(".local/share/opencode/opencode.db")
+}
+
+/// OpenCode's conversations (not the subagents' or archived ones), newest
+/// first, each with the model it used (`provider/model#variant`). Its
+/// database has two tables, `session_v2` and the older `session`.
+fn opencode_sessions(home: &Path) -> Vec<(Session, Option<String>)> {
+    let path = opencode_db(home);
+    if !path.is_file() {
+        return Vec::new();
+    }
+    let Ok(db) = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return Vec::new() };
+    let mut found: Vec<(Session, Option<String>)> = Vec::new();
+    for table in ["session_v2", "session"] {
+        let sql = format!(
+            "SELECT id, title, directory, time_updated, model FROM {table} WHERE parent_id IS NULL AND time_archived IS NULL ORDER BY time_updated DESC LIMIT {NEWEST}"
+        );
+        let Ok(mut query) = db.prepare(&sql) else { continue };
+        let rows = query.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<String>>(4)?,
+            ))
+        });
+        for (id, title, project, updated, model) in rows.into_iter().flatten().flatten() {
+            if found.iter().any(|(s, _)| s.id == id) {
+                continue;
+            }
+            let title = title.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "(untitled)".into());
+            let session = Session { agent: Agent::OpenCode, id, title, project, updated: updated.max(0) as u64 };
+            found.push((session, model.as_deref().and_then(opencode_model_name)));
+        }
+    }
+    found.sort_by(|a, b| b.0.updated.cmp(&a.0.updated));
+    found
+}
+
+/// `{"id","providerID","variant"}` as OpenCode's `--model` wants it.
+fn opencode_model_name(json: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let mut name = format!("{}/{}", v["providerID"].as_str()?, v["id"].as_str()?);
+    if let Some(variant) = v["variant"].as_str().filter(|s| !s.is_empty()) {
+        name.push('#');
+        name.push_str(variant);
+    }
+    Some(name)
+}
+
+/// The model for an OpenCode run: the conversation's own, else the one the
+/// user last used in that folder, else anywhere. OpenCode's default may be
+/// one its provider can't run, and the user's last choice is what works.
+fn opencode_model(home: &Path, session: Option<&str>, project: &Path) -> Option<String> {
+    let all = opencode_sessions(home);
+    let here = project.display().to_string();
+    let pick = |f: &dyn Fn(&Session) -> bool| all.iter().find(|(s, m)| m.is_some() && f(s)).and_then(|(_, m)| m.clone());
+    session
+        .and_then(|id| pick(&|s| s.id == id))
+        .or_else(|| pick(&|s| s.project == here))
+        .or_else(|| pick(&|_| true))
 }
 
 /// The folder of project `name`: a folder itself, or the one of the user's
@@ -705,11 +816,15 @@ mod tests {
     #[test]
     fn command_lines() {
         let out = Path::new("/tmp/o.txt");
-        assert_eq!(arguments(Agent::Claude, Some("s1"), "go on", out), ["-p", "--output-format", "json", "--permission-mode", "auto", "--resume", "s1", "--", "go on"]);
-        let codex = arguments(Agent::Codex, Some("t1"), "go on", out);
+        assert_eq!(arguments(Agent::Claude, Some("s1"), None, "go on", out), ["-p", "--output-format", "json", "--permission-mode", "auto", "--resume", "s1", "--", "go on"]);
+        let codex = arguments(Agent::Codex, Some("t1"), None, "go on", out);
         assert_eq!(&codex[..2], ["exec", "resume"]);
         assert_eq!(&codex[codex.len() - 3..], ["t1", "--", "go on"]);
-        assert_eq!(arguments(Agent::Codex, None, "hi", out)[1], "--skip-git-repo-check");
+        assert_eq!(arguments(Agent::Codex, None, None, "hi", out)[1], "--skip-git-repo-check");
+        assert_eq!(
+            arguments(Agent::OpenCode, Some("ses_1"), Some("bedrock/gpt#medium"), "go on", out),
+            ["run", "--format", "json", "--auto", "--session", "ses_1", "--model", "bedrock/gpt#medium", "--", "go on"]
+        );
     }
 
     #[test]
@@ -726,10 +841,50 @@ mod tests {
         assert_eq!(codex_outcome(printed, Some("Done, all tests pass.\n")).unwrap().answer, "Done, all tests pass.");
         let failed = codex_outcome("{\"type\":\"turn.failed\",\"error\":{\"message\":\"quota\"}}", None).unwrap();
         assert!(!failed.ok && failed.answer == "quota");
+
+        let printed = concat!(
+            r#"{"type":"step_start","sessionID":"ses_4","part":{"messageID":"m1"}}"#, "\n",
+            r#"{"type":"text","sessionID":"ses_4","part":{"messageID":"m1","text":"Let me look."}}"#, "\n",
+            r#"{"type":"text","sessionID":"ses_4","part":{"messageID":"m2","text":"Done."}}"#, "\n",
+        );
+        let o = opencode_outcome(printed).unwrap();
+        assert!(o.ok && o.answer == "Done." && o.session.as_deref() == Some("ses_4"));
+        let failed = opencode_outcome(r#"{"type":"error","sessionID":"ses_5","error":{"type":"provider","message":"bad model"}}"#).unwrap();
+        assert!(!failed.ok && failed.answer == "bad model");
     }
 
-    /// This Mac's conversations, and a real prompt to Codex in a fresh folder
-    /// (`CODE_SEND=1`): `cargo test -- --ignored this_macs --nocapture`.
+    #[test]
+    fn reads_opencodes_conversations() {
+        let h = home("opencode");
+        let path = opencode_db(&h);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let db = rusqlite::Connection::open(&path).unwrap();
+        for table in ["session_v2", "session"] {
+            db.execute_batch(&format!(
+                "CREATE TABLE {table} (id TEXT, parent_id TEXT, title TEXT, directory TEXT, time_updated INTEGER, time_archived INTEGER, model TEXT)"
+            ))
+            .unwrap();
+        }
+        db.execute_batch(
+            r#"INSERT INTO session_v2 VALUES ('ses_a', NULL, 'Home screen times', '/Users/x/RomeMaps', 300, NULL, '{"id":"gpt-6","providerID":"bedrock","variant":"medium"}');
+               INSERT INTO session_v2 VALUES ('ses_b', 'ses_a', 'a subagent', '/Users/x/RomeMaps', 400, NULL, NULL);
+               INSERT INTO session_v2 VALUES ('ses_c', NULL, 'Disk space', '/Users/x', 200, NULL, '{"id":"sol","providerID":"bedrock"}');
+               INSERT INTO session VALUES ('ses_d', NULL, 'Old one', '/Users/x/Marea', 100, NULL, NULL);
+               INSERT INTO session VALUES ('ses_a', NULL, 'Home screen times', '/Users/x/RomeMaps', 300, NULL, NULL);"#,
+        )
+        .unwrap();
+        drop(db);
+        let all = sessions(&h, Some(Agent::OpenCode));
+        let ids: Vec<&str> = all.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["ses_a", "ses_c", "ses_d"]);
+        assert_eq!(opencode_model(&h, Some("ses_c"), Path::new("/Users/x/RomeMaps")).as_deref(), Some("bedrock/sol"));
+        assert_eq!(opencode_model(&h, None, Path::new("/Users/x/RomeMaps")).as_deref(), Some("bedrock/gpt-6#medium"));
+        assert_eq!(opencode_model(&h, None, Path::new("/Users/x/New")).as_deref(), Some("bedrock/gpt-6#medium"));
+        fs::remove_dir_all(&h).unwrap();
+    }
+
+    /// This Mac's conversations, and a real prompt to an agent in a fresh folder
+    /// (`CODE_SEND=codex` or `opencode`): `cargo test -- --ignored this_macs --nocapture`.
     #[test]
     #[ignore]
     fn this_macs_conversations() {
@@ -742,7 +897,7 @@ mod tests {
         if std::env::var("CODE_SEND").is_ok() {
             let inbox = Arc::new(Inbox::open(None));
             let coding = Coding::new(inbox.clone());
-            println!("{}", coding.call_tool(&json!({"action": "send", "agent": "codex", "prompt": "Create hello.txt containing the word ciao, then reply: done"})).unwrap());
+            println!("{}", coding.call_tool(&json!({"action": "send", "prompt": "Create hello.txt containing the word ciao, then reply: done", "agent": std::env::var("CODE_SEND").unwrap_or_default()})).unwrap());
             for _ in 0..90 {
                 thread::sleep(Duration::from_secs(2));
                 if coding.runs.lock().unwrap()[0].state != "running" {
