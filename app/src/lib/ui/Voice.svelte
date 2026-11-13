@@ -1,16 +1,16 @@
 <!--
-  Yoru's voice, laid out as the brain is: tiles pick the service it listens
-  with and the one it speaks with (or neither), then each service has a panel
-  with its models, its voices for each language and, for the services that
-  serve only the voice, its key. The board's volume and chime close it.
-  Local models need a download, which shows its progress while it runs.
+  Yoru's voice, laid out as the brain is: tiles pick the service he listens
+  with and the one he speaks with (or neither), then his voice in each
+  language, how a conversation goes (follow-ups, the board's volume and
+  chime) and Gemini Live. The models that transcribe and judge a turn are
+  advanced; the services' keys are in Settings' keys page. Local models need
+  a download, which shows its progress while it runs.
 -->
 <script lang="ts">
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
   import type { AccountVoice, BoardVoice, ModelInfo, SidecarState, VoiceInfo, VoiceSettings, YoruSettings } from "../types";
-  import KeyField from "./KeyField.svelte";
   import Toggle from "./Toggle.svelte";
 
   const t = $derived(i18n.t.board);
@@ -69,8 +69,6 @@
   // A service is "local" or a provider's id; a model's comes from its id.
   const LOCAL = "local";
   const LANGS = ["it", "en"];
-  // The brains' keys are in the brain's page; the others belong here.
-  const BRAINS = ["anthropic", "openai", "google", "groq", "ollama"];
   const serviceOf = (id: string | undefined) => (!id ? null : id.includes(":") ? id.slice(0, id.indexOf(":")) : LOCAL);
   const keyed = (svc: string) => svc === LOCAL || !!info?.providers.find((p) => p.id === svc)?.key;
   const nameOf = (svc: string) => (svc === LOCAL ? t.local : (info?.providers.find((p) => p.id === svc)?.name ?? svc));
@@ -83,8 +81,9 @@
   const uniq = (ids: (string | null)[]) => [...new Set(ids.filter((s): s is string => !!s))].sort((a, b) => (a === LOCAL ? -1 : b === LOCAL ? 1 : 0));
   const hearing = $derived(uniq(whispers.map((m) => serviceOf(m.id))));
   const speaking = $derived(uniq([...voices.map((m) => serviceOf(m.id)), ...(info?.providers.some((p) => p.id === "elevenlabs") ? ["elevenlabs"] : [])]));
-  // Every service gets a panel, and so does any voice-only provider with a key to set.
-  const services = $derived(uniq([...hearing, ...speaking, ...(info?.providers.filter((p) => !BRAINS.includes(p.id) && p.id !== "tavily").map((p) => p.id) ?? [])]));
+  /** A service's models of `list` for a picker, grouped by service: those with a key, and the one in use. */
+  const groups = (services: string[], list: (svc: string) => { id: string; label: string }[], current: string | undefined) =>
+    services.filter((svc) => keyed(svc) || serviceOf(current) === svc).map((svc) => ({ svc, options: list(svc) })).filter((g) => g.options.length);
 
   /** A service's voices for a language: the catalog's, and for ElevenLabs the account's. */
   function voicesIn(svc: string, lang: string): { id: string; label: string }[] {
@@ -127,12 +126,21 @@
 
 {#if info}
   {@const s = info.settings}
+  {@const sttModel = model(s.model)}
   <h2 class="section-title first">{t.listenWith}</h2>
   <section class="tiles" aria-label={t.listenWith}>
     {@render tile(null, heard === null, t.offListen, info.stt, hearWith)}
     {#each hearing as svc (svc)}{@render tile(svc, heard === svc, noteOf(svc), info.stt, hearWith)}{/each}
   </section>
   {#if s.enabled}<p class="dim note">{wakeWord ? t.wakeWord(wakeWord) : t.listenHint}</p>{/if}
+  {#if s.enabled && sttModel && missing(sttModel)}
+    <section class="panel">
+      <div class="setting">
+        <div class="what"><b>{t.sttToDownload}</b><span class="mono">{sttModel.id}</span></div>
+        <div class="how">{@render fetch(sttModel)}</div>
+      </div>
+    </section>
+  {/if}
   {#if info.stt_error}<p class="error-text note">{info.stt_error}</p>{/if}
 
   <h2 class="section-title">{t.speakWith}</h2>
@@ -140,7 +148,62 @@
     {@render tile(null, spoken === null, t.offSpeak, info.tts, speakWith)}
     {#each speaking as svc (svc)}{@render tile(svc, spoken === svc, noteOf(svc), info.tts, speakWith, !canSpeak(svc))}{/each}
   </section>
+  {#if [...hearing, ...speaking].some((svc) => !keyed(svc))}<p class="dim note">{t.addKeys}</p>{/if}
   {#if info.tts_error}<p class="error-text note">{info.tts_error}</p>{/if}
+  {#if s.speak}
+    <section class="panel" class:active={!!spoken}>
+      {#each LANGS as lang (lang)}
+        {@const m = model(s.voices[lang])}
+        {@const options = groups(speaking, (svc) => voicesIn(svc, lang), s.voices[lang])}
+        <div class="setting">
+          <div class="what"><b>{t.voiceFor(lang)}</b></div>
+          <div class="how">
+            {#if m && missing(m)}{@render fetch(m)}{/if}
+            <select value={s.voices[lang] ?? ""} onchange={(e) => set({ speak: true, voices: { ...s.voices, [lang]: e.currentTarget.value } })} aria-label={t.voiceFor(lang)}>
+              {#if !s.voices[lang]}<option value="" disabled>—</option>{/if}
+              {#each options as g (g.svc)}
+                <optgroup label={nameOf(g.svc)}>{#each g.options as v (v.id)}<option value={v.id}>{v.label}</option>{/each}</optgroup>
+              {/each}
+              {#if s.voices[lang]?.startsWith(ACCOUNT) && !account.length}<option value={s.voices[lang]}>{s.voices[lang].slice(ACCOUNT.length)}</option>{/if}
+            </select>
+          </div>
+        </div>
+      {/each}
+      {#if spoken === LOCAL && !info.piper}
+        <div class="setting">
+          <div class="what"><b>Piper</b>{#if info.piper_install}<span>{info.piper_install}</span>{/if}</div>
+          <div class="how"><button class="btn small" disabled={!!info.piper_install} onclick={() => act("install_engine", { engine: "piper" })}>{t.installPiper}</button></div>
+        </div>
+      {/if}
+    </section>
+  {/if}
+
+  {#if s.speak || board?.volume != null || board?.wake_sound != null}
+    <h2 class="section-title">{t.conversation}</h2>
+    <section class="panel">
+      {#if s.speak}
+        <div class="setting">
+          <div class="what"><b>{t.followUp}</b></div>
+          <div class="how"><Toggle checked={s.follow_up} label={t.followUp} onchange={(on) => set({ follow_up: on })} /></div>
+        </div>
+      {/if}
+      {#if board && board.volume !== null}
+        <div class="setting">
+          <div class="what"><b>{t.volume}</b></div>
+          <div class="how">
+            <input type="range" min="0" max="100" value={board.volume} onchange={(e) => call("set_board_volume", { board: null, percent: Number(e.currentTarget.value) })} aria-label={t.volume} />
+            <button class="btn quiet small" disabled={info.tts !== "ready"} onclick={() => act("test_voice", { board: null, language: i18n.lang })}>{t.test}</button>
+          </div>
+        </div>
+      {/if}
+      {#if board && board.wake_sound !== null}
+        <div class="setting">
+          <div class="what"><b>{t.wakeSound}</b></div>
+          <div class="how"><Toggle checked={board.wake_sound} label={t.wakeSound} onchange={(on) => ((board!.wake_sound = on), call("set_board_wake_sound", { board: null, on }))} /></div>
+        </div>
+      {/if}
+    </section>
+  {/if}
 
   <h2 class="section-title">{t.live}</h2>
   <section class="panel" class:active={!!s.live}>
@@ -163,88 +226,28 @@
     </div>
   </section>
 
-  {#each services as svc (svc)}
-    {@const hears = of(whispers, svc)}
-    {@const langs = LANGS.filter((l) => voicesIn(svc, l).length)}
-    {@const key = !BRAINS.includes(svc) && svc !== LOCAL ? info.providers.find((p) => p.id === svc) : undefined}
-    <h2 class="section-title">{nameOf(svc)}</h2>
-    <section class="panel" class:active={heard === svc || spoken === svc}>
-      {#if key}
-        <div class="block">
-          <div class="what"><b>{t.keyOf(key.name)}</b><span class="dim">{noteOf(svc)}</span></div>
-          <KeyField provider={key.id} source={key.key} onchange={read} />
-        </div>
-      {:else if !keyed(svc)}
-        <p class="dim nokey">{t.needsKey(nameOf(svc))}</p>
-      {/if}
-      {#if hears.length}
-        {@const m = heard === svc ? model(s.model) : undefined}
+  {#if s.enabled}
+    <details class="more">
+      <summary class="section-title">{i18n.t.settings.advanced}</summary>
+      <p class="dim hint">{t.advancedHint}</p>
+      <section class="panel">
         <div class="setting">
           <div class="what"><b>{t.sttModel}</b></div>
           <div class="how">
-            {#if m && missing(m)}{@render fetch(m)}{/if}
-            <select value={heard === svc ? s.model : ""} disabled={!keyed(svc)} onchange={(e) => set({ enabled: true, model: e.currentTarget.value })} aria-label={t.sttModel}>
-              {#if heard !== svc}<option value="" disabled>—</option>{/if}
-              {#each hears as h (h.id)}<option value={h.id}>{label(h)}</option>{/each}
+            {#if sttModel && missing(sttModel)}{@render fetch(sttModel)}{/if}
+            <select value={s.model} onchange={(e) => set({ enabled: true, model: e.currentTarget.value })} aria-label={t.sttModel}>
+              {#each groups(hearing, (svc) => of(whispers, svc).map((h) => ({ id: h.id, label: label(h) })), s.model) as g (g.svc)}
+                <optgroup label={nameOf(g.svc)}>{#each g.options as h (h.id)}<option value={h.id}>{h.label}</option>{/each}</optgroup>
+              {/each}
             </select>
           </div>
         </div>
-      {/if}
-      {#if svc === LOCAL && spoken === LOCAL && !info.piper}
-        <div class="setting">
-          <div class="what"><b>Piper</b>{#if info.piper_install}<span>{info.piper_install}</span>{/if}</div>
-          <div class="how"><button class="btn small" disabled={!!info.piper_install} onclick={() => act("install_engine", { engine: "piper" })}>{t.installPiper}</button></div>
-        </div>
-      {/if}
-      {#each langs as lang (lang)}
-        {@const mine = serviceOf(s.voices[lang]) === svc}
-        {@const m = mine ? model(s.voices[lang]) : undefined}
-        <div class="setting">
-          <div class="what"><b>{t.voiceFor(lang)}</b></div>
-          <div class="how">
-            {#if m && missing(m)}{@render fetch(m)}{/if}
-            <select value={mine ? s.voices[lang] : ""} disabled={!keyed(svc)} onchange={(e) => set({ speak: true, voices: { ...s.voices, [lang]: e.currentTarget.value } })} aria-label={t.voiceFor(lang)}>
-              {#if !mine}<option value="" disabled>—</option>{/if}
-              {#each voicesIn(svc, lang) as v (v.id)}<option value={v.id}>{v.label}</option>{/each}
-              {#if mine && s.voices[lang]?.startsWith(ACCOUNT) && !account.length}<option value={s.voices[lang]}>{s.voices[lang].slice(ACCOUNT.length)}</option>{/if}
-            </select>
-          </div>
-        </div>
-      {/each}
-    </section>
-  {/each}
-
-  {#if s.speak || board?.volume != null || board?.wake_sound != null}
-    <h2 class="section-title">{t.sound}</h2>
-    <section class="panel">
-      {#if s.speak}
-        <div class="setting">
-          <div class="what"><b>{t.followUp}</b></div>
-          <div class="how"><Toggle checked={s.follow_up} label={t.followUp} onchange={(on) => set({ follow_up: on })} /></div>
-        </div>
-        {#if s.follow_up}
+        {@render picker(t.turnModel, t.turnHint, s.turn_model, t.turnPause, turns, (id) => set({ turn_model: id }))}
+        {#if s.speak && s.follow_up}
           {@render picker(t.intentModel, t.intentHint, s.intent_model, t.intentPhrases, intents, (id) => set({ intent_model: id }), !info.llm_server ? t.needsLlamaServer : "")}
         {/if}
-      {/if}
-      {#if s.enabled}
-        {@render picker(t.turnModel, t.turnHint, s.turn_model, t.turnPause, turns, (id) => set({ turn_model: id }))}
-      {/if}
-      {#if board && board.volume !== null}
-        <div class="setting">
-          <div class="what"><b>{t.volume}</b></div>
-          <div class="how">
-            <input type="range" min="0" max="100" value={board.volume} onchange={(e) => call("set_board_volume", { board: null, percent: Number(e.currentTarget.value) })} aria-label={t.volume} />
-            <button class="btn quiet small" disabled={info.tts !== "ready"} onclick={() => act("test_voice", { board: null, language: i18n.lang })}>{t.test}</button>
-          </div>
-        </div>
-      {/if}
-      {#if board && board.wake_sound !== null}
-        <div class="setting">
-          <div class="what"><b>{t.wakeSound}</b></div>
-          <div class="how"><Toggle checked={board.wake_sound} label={t.wakeSound} onchange={(on) => ((board!.wake_sound = on), call("set_board_wake_sound", { board: null, on }))} /></div>
-        </div>
-      {/if}
-    </section>
+      </section>
+    </details>
   {/if}
   {#if error}<p class="error-text note">{error}</p>{/if}
 {/if}
@@ -290,30 +293,13 @@
   .note {
     margin-top: 12px;
   }
-  .nokey {
-    padding-bottom: 8px;
+  .hint {
+    margin: -4px 0 10px;
+    font-size: 12.5px;
   }
   .panel.active {
     border-color: color-mix(in srgb, var(--c) 40%, transparent);
     box-shadow: 0 0 36px -16px var(--c);
-  }
-  .block {
-    display: grid;
-    gap: 12px;
-    padding: 6px 0 16px;
-  }
-  .block + .setting {
-    border-top: 1px solid var(--rim);
-  }
-  .block .what {
-    display: grid;
-    gap: 2px;
-  }
-  .block .what b {
-    font-weight: 550;
-  }
-  .block .what span {
-    font-size: 12.5px;
   }
   select {
     width: auto;

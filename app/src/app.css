@@ -243,6 +243,38 @@ label.stack {
   margin: 30px 0 12px;
 }
 
+/* "Advanced": the technical settings of a page, folded away until asked for. */
+details.more {
+  margin-top: 30px;
+}
+details.more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  cursor: pointer;
+  list-style: none;
+  transition: color 160ms;
+}
+details.more > summary::-webkit-details-marker {
+  display: none;
+}
+details.more > summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 160ms;
+}
+details.more[open] > summary::before {
+  transform: rotate(45deg);
+}
+details.more > summary:hover {
+  color: var(--pearl);
+}
+
 /* One setting: what it is on the left, its control on the right. */
 .setting {
   display: flex;

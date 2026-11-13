@@ -1,17 +1,17 @@
 <!--
   Settings as Yoru's wiring: the mirror in the middle, and each part of the
-  settings a card wired to it by a trace, with what it says right now. A card
-  opens its own page: Yoru's brain (Groq, OpenAI, Gemini, Claude or Ollama, their keys
-  and models, how hard Claude thinks), Yoru's MCP server, Yoru's voice
-  with the cloud voices' keys, the app's language, the board (connection,
-  firmware, WiFi, its own settings) and the data folder.
+  settings a card wired to him by a trace, with what it says right now. On
+  the left what Yoru is (his brain, his character, his voice, the language
+  he answers in); on the right what he's connected to (the services' keys,
+  the Mac, the board, the data folder). A card opens its own page, with the
+  everyday choices first and the technical ones under "Advanced".
 -->
 <script lang="ts">
   import { fly } from "svelte/transition";
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { Brain, Effort, Gaze, McpInfo, VoiceInfo } from "../types";
+  import type { AssistantInfo, AssistantSettings, Brain, Effort, Gaze, KeySource, McpInfo, VoiceInfo, VoiceSettings } from "../types";
   import YoruBoard from "../YoruBoard.svelte";
   import Board from "../ui/Board.svelte";
   import KeyField from "../ui/KeyField.svelte";
@@ -24,28 +24,48 @@
   const CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
   const brain = $derived(store.info?.brain ?? null);
   const BRAIN_NAMES: Record<Brain, string> = { anthropic: "Claude", openai: "OpenAI", google: "Gemini", groq: "Groq", ollama: "Ollama" };
+  const BRAINS: Brain[] = ["anthropic", "openai", "google", "groq", "ollama"];
   /** The brain picker's tiles; null lets the app choose. */
-  const BRAIN_CHOICES: (Brain | null)[] = [null, "anthropic", "openai", "google", "groq", "ollama"];
+  const BRAIN_CHOICES: (Brain | null)[] = [null, ...BRAINS];
   const LANG_CHOICES: (Lang | null)[] = [null, ...LANGUAGES.map((l) => l.id)];
   const langName = (id: Lang) => LANGUAGES.find((l) => l.id === id)?.name ?? id;
 
+  // Each brain's model, where it's kept, and the models it offers.
+  const MODEL_FIELD = { anthropic: "model", openai: "openai_model", google: "google_model", groq: "groq_model", ollama: "ollama_model" } as const;
+  const modelOf = (b: Brain) => (s ? s[MODEL_FIELD[b]] : "");
+  const setModel = (b: Brain, v: string) => store.saveSettings((x: AssistantSettings) => (x[MODEL_FIELD[b]] = v));
+  const catalog = (b: Brain) => (b === "openai" ? store.info?.openai_models : b === "google" ? store.info?.google_models : b === "groq" ? store.info?.groq_models : undefined) ?? [];
+
   let voice = $state<VoiceInfo | null>(null);
   let mcp = $state<McpInfo | null>(null);
+  let notch = $state(false);
   let error = $state("");
 
   async function readAll() {
-    [voice, mcp] = await Promise.all([
-      call<VoiceInfo>("voice_info").catch(() => null),
-      call<McpInfo>("mcp_info").catch(() => null),
-    ]);
+    [voice, mcp] = await Promise.all([call<VoiceInfo>("voice_info").catch(() => null), call<McpInfo>("mcp_info").catch(() => null)]);
+    notch = (await call<{ notch?: boolean }>("status").catch(() => null))?.notch ?? false;
   }
   $effect(() => {
     void readAll();
   });
 
-  // The brains' keys (Groq's and OpenAI's serve speech to text too) are in the brain's page.
-  const BRAINS = ["anthropic", "openai", "google", "groq", "ollama"];
-  const others = $derived(voice?.providers.filter((p) => !BRAINS.includes(p.id)) ?? []);
+  // Every key in one place: the brains' (OpenAI's and Groq's serve speech to
+  // text too, Google's Gemini Live), the web's, and the voice-only services'.
+  type Key = { id: string; name: string; hint: string; source: KeySource | null; placeholder?: string; group: "brains" | "voices" | "web" };
+  const keys = $derived.by<Key[]>(() => {
+    const i: AssistantInfo | null = store.info;
+    const brainKeys: Key[] = [
+      { id: "anthropic", name: t.anthropic, hint: t.anthropicHint, source: i?.key ?? null, placeholder: "sk-ant-…", group: "brains" },
+      { id: "openai", name: t.openai, hint: t.openaiHint, source: i?.openai_key ?? null, placeholder: "sk-proj-…", group: "brains" },
+      { id: "google", name: t.google, hint: t.googleHint, source: i?.google_key ?? null, placeholder: "AIza…", group: "brains" },
+      { id: "groq", name: t.groq, hint: t.groqHint, source: i?.groq_key ?? null, placeholder: "gsk_…", group: "brains" },
+    ];
+    const voices: Key[] = (voice?.providers ?? [])
+      .filter((p) => !(BRAINS as string[]).includes(p.id) && p.id !== "tavily")
+      .map((p) => ({ id: p.id, name: p.name, hint: i18n.t.board.serviceNotes[p.id] ?? p.note, source: p.key, group: "voices" }));
+    return [...brainKeys, ...voices, { id: "tavily", name: t.tavily, hint: t.tavilyHint, source: i?.tavily_key ?? null, placeholder: "tvly-…", group: "web" }];
+  });
+  const keyOf = (b: Brain) => keys.find((k) => k.id === b);
 
   // Ollama's models are the ones pulled on this computer: asked when it is the brain.
   let ollamaModels = $state<string[] | null>(null);
@@ -60,7 +80,7 @@
     }
   }
   $effect(() => {
-    if (s?.provider === "ollama") void readOllama();
+    if (brain === "ollama") void readOllama();
   });
 
   async function run<T>(job: () => Promise<T>, then: (v: T) => void) {
@@ -72,24 +92,32 @@
     }
   }
   const registerMcp = (connect: boolean) => run(() => call<McpInfo>("claude_mcp", { connect }), (v) => (mcp = v));
+  const setVoice = (change: Partial<VoiceSettings>) =>
+    voice && run(() => call<VoiceInfo>("set_voice", { settings: { ...$state.snapshot(voice!.settings), ...change } }), (v) => (voice = v));
+
+  // The characters of agent::personality_prompt; any other id is Yoru himself.
+  const CHARACTERS = ["yoru", "playful", "calm", "sassy", "butler", "minimal", "custom"];
+  const character = $derived(CHARACTERS.includes(voice?.settings.personality ?? "") ? voice!.settings.personality : "yoru");
 
   async function setupAgain() {
     await call("set_onboarding", { done: false, tourVersion: null });
     store.onboarding = { done: false, tour_version: store.onboarding?.tour_version ?? 0 };
   }
 
-  // The parts, wired to Yoru: three on each side, top to bottom.
-  type Part = "brain" | "mcp" | "voice" | "language" | "board" | "about";
-  type Wire = { id: Part; side: -1 | 1; row: 0 | 1 | 2; color: string; icon: string };
+  // The parts, wired to Yoru: four on each side, top to bottom.
+  type Part = "brain" | "character" | "voice" | "language" | "keys" | "mac" | "board" | "about";
+  type Wire = { id: Part; side: -1 | 1; row: 0 | 1 | 2 | 3; color: string; icon: string };
   const WIRES: Wire[] = [
     { id: "brain", side: -1, row: 0, color: "var(--think)", icon: "M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-1.5 5.5A3 3 0 0 0 9 18.5M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 1.5 5.5 3 3 0 0 1-4.5 5.5M12 4v16M9 10h3M12 14h3" },
-    { id: "voice", side: -1, row: 1, color: "#c58cff", icon: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" },
-    { id: "language", side: -1, row: 2, color: "#5fd4c8", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5M12 3.5C9.6 5.9 8.5 8.7 8.5 12s1.1 6.1 3.5 8.5" },
-    { id: "mcp", side: 1, row: 0, color: "var(--wait)", icon: "M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5.5l-3 13" },
-    { id: "board", side: 1, row: 1, color: "var(--done)", icon: "M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM9.5 9.5h5v5h-5zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" },
-    { id: "about", side: 1, row: 2, color: "var(--pearl-mid)", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5M12 7.6v.1" },
+    { id: "character", side: -1, row: 1, color: "#ff8fb8", icon: "M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2Z" },
+    { id: "voice", side: -1, row: 2, color: "#c58cff", icon: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" },
+    { id: "language", side: -1, row: 3, color: "#5fd4c8", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5M12 3.5C9.6 5.9 8.5 8.7 8.5 12s1.1 6.1 3.5 8.5" },
+    { id: "keys", side: 1, row: 0, color: "var(--wait)", icon: "M14.5 9.5a4 4 0 1 0-3.6 3.98L5 19.5V21h3v-2h2v-2h1.5l1.7-1.7M15.5 7.5h.01" },
+    { id: "mac", side: 1, row: 1, color: "#7fb2ff", icon: "M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1ZM9.5 5.5v1.2a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V5.5M8 20.5h8M12 17v3.5" },
+    { id: "board", side: 1, row: 2, color: "var(--done)", icon: "M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM9.5 9.5h5v5h-5zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" },
+    { id: "about", side: 1, row: 3, color: "var(--pearl-mid)", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5M12 7.6v.1" },
   ];
-  const PAGES: Part[] = ["brain", "mcp", "voice", "language", "board", "about"];
+  const PAGES: Part[] = WIRES.map((w) => w.id);
 
   let open = $state<Part | null>(null);
   let hover = $state<Part | null>(null);
@@ -102,20 +130,23 @@
   }
 
   // What each card says now, and its dot.
-  const brainModel = $derived(!s || !brain ? "" : brain === "anthropic" ? s.model : brain === "openai" ? s.openai_model : brain === "google" ? s.google_model : brain === "groq" ? s.groq_model : s.ollama_model);
-  const keyed = $derived(others.filter((p) => p.key).length);
+  const brainModel = $derived(brain ? modelOf(brain) : "");
+  const keyed = $derived(keys.filter((k) => k.source).length);
   const firmware = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   const via = $derived(store.port?.startsWith("wifi:") ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
+  const vs = $derived(voice?.settings);
   const summary = $derived<Record<Part, { text: string; dot: string; warn?: boolean }>>({
     brain: !store.info?.ready
       ? { text: brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain, dot: "wrong", warn: true }
       : { text: `${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
-    mcp: { text: !mcp ? "—" : mcp.registered ? t.inClaudeCode : t.notInClaudeCode, dot: mcp?.registered ? "done" : "" },
+    character: { text: voice ? t.characters[character][0] : "—", dot: "" },
     voice: {
-      text: [voice ? (voice.settings.enabled ? t.listening : t.notListening) : "", others.length ? (keyed ? t.keysOf(keyed, others.length) : t.noKeys) : ""].filter(Boolean).join(" · ") || "—",
-      dot: voice?.settings.enabled ? "done" : "",
+      text: !vs ? "—" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "),
+      dot: vs?.enabled ? "done" : "",
     },
     language: { text: i18n.choice ? langName(i18n.choice) : `${t.system} · ${langName(i18n.lang)}`, dot: "" },
+    keys: { text: keyed ? t.keysOf(keyed, keys.length) : t.noKeys, dot: "" },
+    mac: { text: [notch ? t.notchOn : t.notchOff, mcp?.registered ? t.claudeCode : ""].filter(Boolean).join(" · "), dot: notch || mcp?.registered ? "done" : "" },
     board:
       store.boardState === "off"
         ? { text: t.boardOff, dot: "" }
@@ -123,24 +154,27 @@
     about: { text: t.aboutSummary, dot: "" },
   });
 
-  // The wiring is drawn on a 1000 × 500 stage; the cards take the outer 31%.
+  // The wiring is drawn on a 1000 × 560 stage; the cards take the outer 31%.
+  const H = 560;
+  const ROW_Y = [70, 210, 350, 490];
+  /** Where each row's trace meets the case, from straight up (−90°) to straight down. */
+  const ROW_ANGLE = [-48, -16, 16, 48].map((d) => (d * Math.PI) / 180);
   let stageW = $state(840);
   const yoruSize = $derived(Math.max(110, Math.min(180, stageW * 0.2)));
   /** The case's radius, in stage units. */
   const rim = $derived(((yoruSize * 1.15) / 2) * (1000 / stageW) * 0.96);
-  const ROW_Y = [75, 250, 425];
   function trace(w: Wire) {
     const ax = 500 + w.side * 190;
     const ay = ROW_Y[w.row];
-    const a = w.row === 1 ? 0 : Math.PI / 4;
+    const a = ROW_ANGLE[w.row];
     const ex = 500 + w.side * rim * Math.cos(a);
-    const ey = 250 + (w.row - 1) * rim * Math.sin(a);
+    const ey = H / 2 + rim * Math.sin(a);
     // Out of the card flat, then in at 45°, as copper runs on a board.
     const bx = w.side < 0 ? Math.max(ax, ex - Math.abs(ey - ay)) : Math.min(ax, ex + Math.abs(ey - ay));
     return { d: `M ${ax} ${ay} H ${bx} L ${ex} ${ey}`, ax, ay, ex, ey };
   }
   // Yoru looks at the card under the pointer.
-  const gaze = $derived<Gaze | null>(hover ? { x: wire(hover).side * 0.9, y: (wire(hover).row - 1) * 0.75, movedAt: store.now } : store.gaze);
+  const gaze = $derived<Gaze | null>(hover ? { x: wire(hover).side * 0.9, y: (wire(hover).row - 1.5) * 0.5, movedAt: store.now } : store.gaze);
 </script>
 
 <div class="page">
@@ -163,11 +197,14 @@
         {/each}
       </nav>
       {#if open === "brain"}{@render brainPage()}
-      {:else if open === "mcp"}{@render mcpPage()}
-      {:else if open === "voice"}{@render voicePage()}
+      {:else if open === "character"}{@render characterPage()}
+      {:else if open === "voice"}<Voice />
       {:else if open === "language"}{@render languagePage()}
+      {:else if open === "keys"}{@render keysPage()}
+      {:else if open === "mac"}{@render macPage()}
       {:else if open === "board"}<Board />
       {:else}{@render aboutPage()}{/if}
+      {#if error}<p class="error-text note">{error}</p>{/if}
     </div>
   {:else}
     <div class="page-head">
@@ -177,8 +214,8 @@
       </div>
     </div>
 
-    <div class="stage" bind:clientWidth={stageW} style:height="{stageW / 2}px">
-      <svg class="wires" viewBox="0 0 1000 500" aria-hidden="true">
+    <div class="stage" bind:clientWidth={stageW} style:height="{(stageW * H) / 1000}px">
+      <svg class="wires" viewBox="0 0 1000 {H}" aria-hidden="true">
         {#each WIRES as w, i (w.id)}
           {@const p = trace(w)}
           <g class="wire" class:lit={hover === w.id} class:warn={summary[w.id].warn} style:--c={w.color} style:--i={i}>
@@ -202,7 +239,7 @@
           class:warn={sum.warn}
           style:--c={w.color}
           style:--i={i}
-          style:top="{ROW_Y[w.row] / 5}%"
+          style:top="{(ROW_Y[w.row] / H) * 100}%"
           onmouseenter={() => (hover = w.id)}
           onmouseleave={() => (hover = null)}
           onfocus={() => (hover = w.id)}
@@ -221,6 +258,7 @@
   {/if}
 </div>
 
+<!-- Pick a brain; its key and model follow. How hard it thinks, and the other brains' models, are advanced. -->
 {#snippet brainPage()}
   {#if s}
     <section class="tiles" aria-label={t.provider}>
@@ -237,98 +275,68 @@
     {:else if store.info?.limited}
       <p class="error-text note">{store.info.limited}</p>
     {/if}
+
+    {#if brain}
+      <h2 class="section-title">{BRAIN_NAMES[brain]}</h2>
+      <section class="panel active">
+        {#if brain !== "ollama"}
+          {@const k = keyOf(brain)}
+          {#if k}
+            <div class="block">
+              <div class="what"><b>{t.keyOf(k.name)}</b><span class="dim">{k.hint}</span></div>
+              <KeyField provider={k.id} source={k.source} placeholder={k.placeholder} onchange={() => (store.refreshInfo(), readAll())} />
+            </div>
+          {/if}
+        {/if}
+        {@render modelRow(brain)}
+        {#if brain !== "anthropic"}<p class="dim small">{t.groqNote}</p>{/if}
+      </section>
+    {/if}
+
+    <details class="more">
+      <summary class="section-title">{t.advanced}</summary>
+      <section class="panel">
+        <div class="setting">
+          <div class="what"><b>{t.effort}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
+          <div class="how">
+            <select value={s.effort} onchange={(e) => store.saveSettings((x) => (x.effort = e.currentTarget.value as Effort))} aria-label={t.effort}>
+              {#each EFFORTS as e (e)}<option value={e}>{t.efforts[e]}</option>{/each}
+            </select>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="what"><b>{t.taskEffort}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
+          <div class="how">
+            <select value={s.task_effort} onchange={(e) => store.saveSettings((x) => (x.task_effort = e.currentTarget.value as Effort))} aria-label={t.taskEffort}>
+              {#each EFFORTS as e (e)}<option value={e}>{t.efforts[e]}</option>{/each}
+            </select>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="what"><b>{t.webSearch}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
+          <div class="how"><Toggle checked={s.web_search} label={t.webSearch} onchange={(on) => store.saveSettings((x) => (x.web_search = on))} /></div>
+        </div>
+      </section>
+      <h3 class="section-title">{t.otherModels}</h3>
+      <p class="dim small">{t.otherModelsHint}</p>
+      <section class="panel">
+        {#each BRAINS.filter((b) => b !== brain) as b (b)}{@render modelRow(b, BRAIN_NAMES[b])}{/each}
+      </section>
+    </details>
   {/if}
+{/snippet}
 
-  <h2 class="section-title">Claude</h2>
-  <section class="panel" class:active={brain === "anthropic"}>
-    <div class="block">
-      <div class="what"><b>{t.anthropic}</b><span class="dim">{t.anthropicHint}</span></div>
-      <KeyField provider="anthropic" source={store.info?.key ?? null} placeholder={t.keyPlaceholder} onchange={() => store.refreshInfo()} />
-    </div>
-    {#if s}
-      <div class="setting">
-        <div class="what"><b>{t.claudeModel}</b></div>
-        <div class="how">
-          <input class="model mono" type="text" list="claude-models" value={s.model} spellcheck="false" onchange={(e) => store.saveSettings((x) => (x.model = e.currentTarget.value.trim() || x.model))} aria-label={t.claudeModel} />
-          <datalist id="claude-models">{#each CLAUDE_MODELS as m (m)}<option value={m}></option>{/each}</datalist>
-        </div>
-      </div>
-    {/if}
-  </section>
-
-  <h2 class="section-title">OpenAI</h2>
-  <section class="panel" class:active={brain === "openai"}>
-    <div class="block">
-      <div class="what"><b>{t.openai}</b><span class="dim">{t.openaiHint}</span></div>
-      <KeyField provider="openai" source={store.info?.openai_key ?? null} placeholder="sk-proj-…" onchange={() => (store.refreshInfo(), readAll())} />
-    </div>
-    {#if s}
-      <div class="setting">
-        <div class="what"><b>{t.openaiModel}</b>{#if brain === "openai"}<span>{t.groqNote}</span>{/if}</div>
-        <div class="how">
-          <select value={s.openai_model} onchange={(e) => store.saveSettings((x) => (x.openai_model = e.currentTarget.value))} aria-label={t.openaiModel}>
-            {#each store.info?.openai_models ?? [] as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
-          </select>
-        </div>
-      </div>
-    {/if}
-  </section>
-
-  <h2 class="section-title">Google AI Studio</h2>
-  <section class="panel" class:active={brain === "google"}>
-    <div class="block">
-      <div class="what"><b>{t.google}</b><span class="dim">{t.googleHint}</span></div>
-      <KeyField provider="google" source={store.info?.google_key ?? null} placeholder="AIza…" onchange={() => (store.refreshInfo(), readAll())} />
-    </div>
-    {#if s}
-      <div class="setting">
-        <div class="what"><b>{t.googleModel}</b>{#if brain === "google"}<span>{t.groqNote}</span>{/if}</div>
-        <div class="how">
-          <select value={s.google_model} onchange={(e) => store.saveSettings((x) => (x.google_model = e.currentTarget.value))} aria-label={t.googleModel}>
-            {#each store.info?.google_models ?? [] as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
-          </select>
-        </div>
-      </div>
-    {/if}
-  </section>
-
-  <h2 class="section-title">Groq</h2>
-  <section class="panel" class:active={brain === "groq"}>
-    <div class="block">
-      <div class="what"><b>{t.groq}</b><span class="dim">{t.groqHint}</span></div>
-      <KeyField provider="groq" source={store.info?.groq_key ?? null} placeholder="gsk_…" onchange={() => (store.refreshInfo(), readAll())} />
-    </div>
-    {#if s}
-      <div class="setting">
-        <div class="what"><b>{t.groqModel}</b>{#if brain === "groq"}<span>{t.groqNote}</span>{/if}</div>
-        <div class="how">
-          <select value={s.groq_model} onchange={(e) => store.saveSettings((x) => (x.groq_model = e.currentTarget.value))} aria-label={t.groqModel}>
-            {#each store.info?.groq_models ?? [] as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
-          </select>
-        </div>
-      </div>
-    {/if}
-  </section>
-
-  <h2 class="section-title">Tavily</h2>
-  <section class="panel">
-    <div class="block">
-      <div class="what"><b>{t.tavily}</b><span class="dim">{t.tavilyHint}</span></div>
-      <KeyField provider="tavily" source={store.info?.tavily_key ?? null} placeholder="tvly-…" onchange={() => store.refreshInfo()} />
-    </div>
-  </section>
-
+<!-- A brain's model: Claude's typed or picked, Ollama's from what's pulled here, the others' from their catalog. -->
+{#snippet modelRow(b: Brain, name = t.model)}
   {#if s}
-    <h2 class="section-title">{t.ollama}</h2>
-    <section class="panel" class:active={brain === "ollama"}>
+    {#if b === "ollama"}
       <div class="setting">
         <div class="what">
-          <b>{t.ollamaModel}</b><span class="dim">{t.ollamaHint}</span>
-          {#if brain === "ollama"}<span>{t.groqNote}</span>{/if}
+          <b>{name}</b><span class="dim">{t.ollamaHint}</span>
           {#if ollamaError}<span class="error-text">{ollamaError}</span>{:else if ollamaModels && !ollamaModels.length}<span class="error-text">{t.ollamaNone}</span>{/if}
         </div>
         <div class="how">
-          <input class="model mono" type="text" list="ollama-models" value={s.ollama_model} placeholder={t.ollamaPick} spellcheck="false" onchange={(e) => store.saveSettings((x) => (x.ollama_model = e.currentTarget.value.trim()))} aria-label={t.ollamaModel} />
+          <input class="model mono" type="text" list="ollama-models" value={s.ollama_model} placeholder={t.ollamaPick} spellcheck="false" onchange={(e) => setModel("ollama", e.currentTarget.value.trim())} aria-label={name} />
           <datalist id="ollama-models">{#each ollamaModels ?? [] as m (m)}<option value={m}></option>{/each}</datalist>
           <button class="btn small" onclick={readOllama}>{t.ollamaRefresh}</button>
           <button class="btn small" onclick={() => call("open_key_page", { provider: "ollama" })}>{t.ollamaGet}</button>
@@ -338,56 +346,49 @@
         <div class="what"><b>{t.ollamaThink}</b><span class="dim">{t.ollamaThinkHint}</span></div>
         <div class="how"><Toggle checked={s.think} label={t.ollamaThink} onchange={(on) => store.saveSettings((x) => (x.think = on))} /></div>
       </div>
-    </section>
-
-    <h2 class="section-title">{t.howItThinks}</h2>
-    <section class="panel">
+    {:else}
       <div class="setting">
-        <div class="what"><b>{t.effort}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
+        <div class="what"><b>{name}</b></div>
         <div class="how">
-          <select value={s.effort} onchange={(e) => store.saveSettings((x) => (x.effort = e.currentTarget.value as Effort))} aria-label={t.effort}>
-            {#each EFFORTS as e (e)}<option value={e}>{t.efforts[e]}</option>{/each}
-          </select>
+          {#if b === "anthropic"}
+            <input class="model mono" type="text" list="claude-models" value={s.model} spellcheck="false" onchange={(e) => setModel("anthropic", e.currentTarget.value.trim() || s.model)} aria-label={name} />
+            <datalist id="claude-models">{#each CLAUDE_MODELS as m (m)}<option value={m}></option>{/each}</datalist>
+          {:else}
+            <select value={modelOf(b)} onchange={(e) => setModel(b, e.currentTarget.value)} aria-label={name}>
+              {#each catalog(b) as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
+            </select>
+          {/if}
         </div>
       </div>
-      <div class="setting">
-        <div class="what"><b>{t.taskEffort}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
-        <div class="how">
-          <select value={s.task_effort} onchange={(e) => store.saveSettings((x) => (x.task_effort = e.currentTarget.value as Effort))} aria-label={t.taskEffort}>
-            {#each EFFORTS as e (e)}<option value={e}>{t.efforts[e]}</option>{/each}
-          </select>
-        </div>
-      </div>
-      <div class="setting">
-        <div class="what"><b>{t.webSearch}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
-        <div class="how"><Toggle checked={s.web_search} label={t.webSearch} onchange={(on) => store.saveSettings((x) => (x.web_search = on))} /></div>
-      </div>
-    </section>
+    {/if}
   {/if}
 {/snippet}
 
-{#snippet mcpPage()}
-  {#if mcp}
-    <section class="panel">
-      <div class="setting">
-        <div class="what"><b>{t.mcp}</b><span>{t.mcpHint}</span></div>
-        <div class="how">
-          <span class="state"><span class="dot {mcp.registered ? 'done' : ''}"></span>{mcp.registered ? t.connected : t.notConnected}</span>
-          <button class="btn small" onclick={() => registerMcp(!mcp!.registered)}>{mcp.registered ? t.disconnect : t.connect}</button>
-        </div>
-      </div>
-      {#if mcp.command}
-        <div class="setting">
-          <div class="what"><b>{t.mcpCommand}</b><span class="mono">{mcp.command} {mcp.args.join(" ")}</span></div>
-        </div>
-      {/if}
+<!-- Who Yoru is: one of the characters, or one the user describes. -->
+{#snippet characterPage()}
+  {#if voice}
+    <section class="tiles" aria-label={t.parts.character}>
+      {#each CHARACTERS as c (c)}
+        <button class="tile" class:on={character === c} onclick={() => setVoice({ personality: c })}>
+          <b>{t.characters[c][0]}</b>
+          <span>{t.characters[c][1]}</span>
+        </button>
+      {/each}
     </section>
+    {#if character === "custom"}
+      <h2 class="section-title">{t.customCharacter}</h2>
+      <textarea
+        class="custom"
+        rows="3"
+        maxlength="300"
+        value={voice.settings.personality_custom}
+        placeholder={t.customPlaceholder}
+        onchange={(e) => setVoice({ personality: "custom", personality_custom: e.currentTarget.value.trim() })}
+        aria-label={t.customCharacter}
+      ></textarea>
+    {/if}
+    <p class="dim note">{t.characterHint}</p>
   {/if}
-  {#if error}<p class="error-text note">{error}</p>{/if}
-{/snippet}
-
-{#snippet voicePage()}
-  <Voice />
 {/snippet}
 
 {#snippet languagePage()}
@@ -399,6 +400,55 @@
       </button>
     {/each}
   </section>
+{/snippet}
+
+<!-- Every service's key, grouped by what it's for. -->
+{#snippet keysPage()}
+  <p class="dim small">{t.keysPrivacy}</p>
+  {#each ["brains", "voices", "web"] as g (g)}
+    {@const list = keys.filter((k) => k.group === g)}
+    {#if list.length}
+      <h2 class="section-title">{t.keyGroups[g]}</h2>
+      <section class="panel">
+        {#each list as k (k.id)}
+          <div class="block">
+            <div class="what"><b>{k.name}</b><span class="dim">{k.hint}</span></div>
+            <KeyField provider={k.id} source={k.source} placeholder={k.placeholder} onchange={() => (store.refreshInfo(), readAll())} />
+          </div>
+        {/each}
+      </section>
+    {/if}
+  {/each}
+{/snippet}
+
+<!-- Yoru on this Mac: in the notch, and in Claude Code through his MCP server. -->
+{#snippet macPage()}
+  {@const tb = i18n.t.board}
+  <section class="panel">
+    <div class="setting">
+      <div class="what"><b>{tb.notch}</b><span>{tb.notchHint}</span></div>
+      <div class="how"><Toggle checked={notch} label={tb.notch} onchange={(on) => ((notch = on), call("set_notch", { on }))} /></div>
+    </div>
+    {#if mcp}
+      <div class="setting">
+        <div class="what"><b>{t.mcp}</b><span>{t.mcpHint}</span></div>
+        <div class="how">
+          <span class="state"><span class="dot {mcp.registered ? 'done' : ''}"></span>{mcp.registered ? t.connected : t.notConnected}</span>
+          <button class="btn small" onclick={() => registerMcp(!mcp!.registered)}>{mcp.registered ? t.disconnect : t.connect}</button>
+        </div>
+      </div>
+    {/if}
+  </section>
+  {#if mcp?.command}
+    <details class="more">
+      <summary class="section-title">{t.advanced}</summary>
+      <section class="panel">
+        <div class="setting">
+          <div class="what"><b>{t.mcpCommand}</b><span class="mono">{mcp.command} {mcp.args.join(" ")}</span></div>
+        </div>
+      </section>
+    </details>
+  {/if}
 {/snippet}
 
 {#snippet aboutPage()}
@@ -654,6 +704,19 @@
     box-shadow: 0 0 36px -16px var(--c);
   }
 
+  textarea.custom {
+    width: 100%;
+    max-width: 620px;
+    resize: vertical;
+    font: inherit;
+  }
+  .small {
+    font-size: 12.5px;
+    margin: -4px 0 10px;
+  }
+  .panel .small {
+    margin: 4px 0 8px;
+  }
   .langs {
     grid-template-columns: repeat(auto-fill, minmax(160px, 220px));
   }
@@ -666,8 +729,12 @@
     gap: 12px;
     padding: 6px 0 16px;
   }
-  .block + .setting {
+  .block + .setting,
+  .block + .block {
     border-top: 1px solid var(--rim);
+  }
+  .block + .block {
+    padding-top: 16px;
   }
   .block .what {
     display: grid;

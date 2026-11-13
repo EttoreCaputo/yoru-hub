@@ -1,9 +1,10 @@
 <!--
-  The board on the desk, as a page of Settings: how it's reached, its firmware
-  (and updating it), its WiFi, and the settings it keeps itself. Its voice is
-  in Settings' voice page, with the cloud voices' keys. With several boards,
-  first the list of them (name, how it's reached, firmware, the main one):
-  the rest of the page is about the one picked there.
+  The board on the desk, as a page of Settings: its firmware (and updating
+  it), its WiFi, and the settings it keeps itself; how it's reached, and its
+  log, are advanced. Only the hardware is here: Yoru's voice, character and
+  notch have their own pages. With several boards, first the list of them
+  (name, how it's reached, firmware, the main one): the rest of the page is
+  about the one picked there.
 -->
 <script lang="ts">
   import { call, why } from "../api";
@@ -107,9 +108,8 @@
   }
 
   let followPointer = $state(true);
-  let notch = $state(false);
   $effect(() => {
-    void call<{ follow_pointer: boolean; notch?: boolean }>("status").then((s) => ((followPointer = s?.follow_pointer ?? true), (notch = s?.notch ?? false)), () => {});
+    void call<{ follow_pointer: boolean }>("status").then((s) => (followPointer = s?.follow_pointer ?? true), () => {});
   });
   const running = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   // Updated over its link instead of esptool (core's ota.rs).
@@ -155,39 +155,12 @@
     {#if !store.boards.some((b) => b.primary)}<p class="faint hint">{tb.noMain}</p>{/if}
     <h2 class="of">{tb.settingsOf(store.boardName(store.shown))}</h2>
   {/if}
-  <h2 class="section-title">{t.mac}</h2>
-  <section class="panel">
-    <div class="setting">
-      <div class="what"><b>{t.notch}</b><span>{t.notchHint}</span></div>
-      <div class="how"><Toggle checked={notch} label={t.notch} onchange={(on) => ((notch = on), call("set_notch", { on }))} /></div>
-    </div>
-  </section>
-  <h2 class="section-title" class:sub={several}>{t.connection}</h2>
-  <section class="panel">
-    {#if !live}
-      <p class="dim nob">{store.permissionDenied ? t.permission : t.noBoard}</p>
-      {#if store.message}<p class="mono faint">{store.message}</p>{/if}
-    {/if}
-    <div class="setting">
-      <div class="what"><b>{t.transport}</b>{#if live}<span class="mono">{store.port}</span>{/if}</div>
-      <div class="how">
-        <select value={transport} onchange={(e) => setTransport(e.currentTarget.value as Transport)} aria-label={t.transport}>
-          {#each ["auto", "usb", "wifi"] as const as v (v)}<option value={v}>{t.transports[v]}</option>{/each}
-        </select>
-      </div>
-    </div>
-    <div class="setting">
-      <div class="what"><b>{t.port}</b></div>
-      <div class="how">
-        <select value={portSetting ?? ""} onchange={(e) => setPort(e.currentTarget.value)} aria-label={t.port}>
-          <option value="">{t.autoPort}</option>
-          {#each ports as p (p.name)}<option value={p.name}>{p.name}{p.product ? ` · ${p.product}` : ""}</option>{/each}
-        </select>
-      </div>
-    </div>
-  </section>
+  {#if !live}
+    <p class="dim nob">{store.permissionDenied ? t.permission : t.noBoard}</p>
+    {#if store.message}<p class="mono faint">{store.message}</p>{/if}
+  {/if}
 
-  <h2 class="section-title">{t.firmware}</h2>
+  <h2 class="section-title" class:sub={several}>{t.firmware}</h2>
   <section class="panel">
     <div class="setting">
       <div class="what">
@@ -256,7 +229,7 @@
   {/if}
 
   {#if live}
-    <h2 class="section-title">{t.settings}</h2>
+    <h2 class="section-title">{t.behaviour}</h2>
     <section class="panel">
       <p class="sub">{t.settingsHint}</p>
       {#if !table && !tableError}<p class="dim">{t.reading}</p>{/if}
@@ -282,9 +255,29 @@
     </section>
   {/if}
 
-  <details class="logs">
-    <summary class="section-title">{t.logs}</summary>
-    <pre class="mono">{store.logs.length ? store.logs.slice(-120).join("\n") : t.noLogs}</pre>
+  <details class="more">
+    <summary class="section-title">{i18n.t.settings.advanced}</summary>
+    <section class="panel">
+      <div class="setting">
+        <div class="what"><b>{t.transport}</b>{#if live}<span class="mono">{store.port}</span>{/if}</div>
+        <div class="how">
+          <select value={transport} onchange={(e) => setTransport(e.currentTarget.value as Transport)} aria-label={t.transport}>
+            {#each ["auto", "usb", "wifi"] as const as v (v)}<option value={v}>{t.transports[v]}</option>{/each}
+          </select>
+        </div>
+      </div>
+      <div class="setting">
+        <div class="what"><b>{t.port}</b></div>
+        <div class="how">
+          <select value={portSetting ?? ""} onchange={(e) => setPort(e.currentTarget.value)} aria-label={t.port}>
+            <option value="">{t.autoPort}</option>
+            {#each ports as p (p.name)}<option value={p.name}>{p.name}{p.product ? ` · ${p.product}` : ""}</option>{/each}
+          </select>
+        </div>
+      </div>
+    </section>
+    <h3 class="section-title">{t.logs}</h3>
+    <pre class="mono log">{store.logs.length ? store.logs.slice(-120).join("\n") : t.noLogs}</pre>
   </details>
 </div>
 
@@ -419,17 +412,7 @@
     padding-top: 10px;
     border-top: 1px solid var(--rim);
   }
-  .logs summary {
-    cursor: pointer;
-    list-style: none;
-  }
-  .logs summary::before {
-    content: "▸ ";
-  }
-  .logs[open] summary::before {
-    content: "▾ ";
-  }
-  .logs pre {
+  pre.log {
     margin: 0;
     padding: 14px 16px;
     max-height: 280px;
