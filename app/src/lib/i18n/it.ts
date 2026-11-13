@@ -569,7 +569,8 @@ const it: Messages = {
     liveHint: "Il modello vocale di Google sente le richieste a Yoru e risponde lui a voce, con la memoria e gli strumenti: più rapido e naturale, gratis nel piano free di AI Studio. Il cervello e la voce qui sopra subentrano quando non può rispondere.",
     liveNeedsKey: "Serve una chiave di Google AI Studio: aggiungila in Cervello.",
     liveNeedsListening: "Attiva l'ascolto qui sopra: Gemini Live risponde a quello che sente la scheda.",
-    liveStyles: { upbeat: "allegra", excitable: "vivace", informative: "informativa", firm: "decisa", friendly: "amichevole", lively: "brillante", "easy-going": "rilassata", clear: "chiara", smooth: "morbida", breathy: "sussurrata" } as Record<string, string>,
+    liveKinds: { male: "Voci maschili", female: "Voci femminili" } as Record<string, string>,
+    liveStyles: { upbeat: "allegra", excitable: "vivace", informative: "informativa", firm: "decisa", friendly: "amichevole", lively: "brillante", "easy-going": "rilassata", clear: "chiara", smooth: "morbida", breathy: "sussurrata", gravelly: "roca", even: "pacata", knowledgeable: "competente", casual: "informale", bright: "luminosa", youthful: "giovanile", breezy: "leggera", soft: "delicata", mature: "matura", forward: "diretta", gentle: "gentile", warm: "calda" } as Record<string, string>,
     local: "Su questo Mac",
     serviceNotes: {
       local: "Gratis e privato",

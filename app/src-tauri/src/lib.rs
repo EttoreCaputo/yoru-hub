@@ -701,7 +701,7 @@ struct VoiceInfo {
     hardware: Hardware,
     recommendation: Recommendation,
     /// Gemini Live's voices: the name and how Google describes it.
-    live_voices: Vec<(&'static str, &'static str)>,
+    live_voices: Vec<(&'static str, &'static str, &'static str)>,
 }
 
 fn voice_info_of(state: &AppState) -> VoiceInfo {

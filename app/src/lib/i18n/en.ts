@@ -571,7 +571,8 @@ const en = {
     liveHint: "Google's voice model hears Yoru's requests and answers aloud itself, with the memory and the tools: faster and more natural, free on AI Studio's free tier. The brain and the voice above step in when it can't answer.",
     liveNeedsKey: "Needs a Google AI Studio key: add it in Brain.",
     liveNeedsListening: "Turn listening on above: Gemini Live answers what the board hears.",
-    liveStyles: { upbeat: "upbeat", excitable: "excitable", informative: "informative", firm: "firm", friendly: "friendly", lively: "lively", "easy-going": "easy-going", clear: "clear", smooth: "smooth", breathy: "breathy" } as Record<string, string>,
+    liveKinds: { male: "Male voices", female: "Female voices" } as Record<string, string>,
+    liveStyles: { upbeat: "upbeat", excitable: "excitable", informative: "informative", firm: "firm", friendly: "friendly", lively: "lively", "easy-going": "easy-going", clear: "clear", smooth: "smooth", breathy: "breathy", gravelly: "gravelly", even: "even", knowledgeable: "knowledgeable", casual: "casual", bright: "bright", youthful: "youthful", breezy: "breezy", soft: "soft", mature: "mature", forward: "forward", gentle: "gentle", warm: "warm" } as Record<string, string>,
     local: "On this Mac",
     serviceNotes: {
       local: "Free and private",

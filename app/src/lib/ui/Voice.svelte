@@ -153,7 +153,11 @@
       <div class="how">
         <select value={s.live} disabled={!keyed("google") && !s.live} onchange={(e) => set({ live: e.currentTarget.value })} aria-label={t.liveVoice}>
           <option value="">{t.off}</option>
-          {#each info.live_voices as [name, style] (name)}<option value={name}>{name} — {t.liveStyles[style] ?? style}</option>{/each}
+          {#each ["male", "female"] as kind (kind)}
+            <optgroup label={t.liveKinds[kind]}>
+              {#each info.live_voices.filter((v) => v[2] === kind) as [name, style] (name)}<option value={name}>{name} · {t.liveStyles[style] ?? style}</option>{/each}
+            </optgroup>
+          {/each}
         </select>
       </div>
     </div>

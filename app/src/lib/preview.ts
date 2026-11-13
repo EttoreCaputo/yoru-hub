@@ -415,7 +415,7 @@ const voice: VoiceInfo = {
   llm: "off",
   llm_error: null,
   llm_server: "/opt/homebrew/bin/llama-server",
-  live_voices: [["Puck", "upbeat"], ["Fenrir", "excitable"], ["Charon", "informative"], ["Orus", "firm"]],
+  live_voices: [["Charon", "informative", "male"], ["Fenrir", "excitable", "male"], ["Puck", "upbeat", "male"], ["Kore", "firm", "female"], ["Zephyr", "bright", "female"]],
   download: null,
   providers: [
     { id: "anthropic", name: "Anthropic", note: "Claude, Yoru's brain; paid by use.", keys_url: "https://platform.claude.com/settings/keys", key_env: "ANTHROPIC_API_KEY", key: info.key },

@@ -29,19 +29,41 @@ static REFUSED: Mutex<Vec<(&str, Instant)>> = Mutex::new(Vec::new());
 pub const URL: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 /// What Google sends: 16-bit PCM, little-endian.
 pub const OUTPUT_RATE: u32 = 24_000;
-/// Google's prebuilt voices that sound like a man, and how Google describes
-/// them. Yoru is male (docs/CONCEPT.md in the firmware's repository).
-pub const VOICES: &[(&str, &str)] = &[
-    ("Puck", "upbeat"),
-    ("Fenrir", "excitable"),
-    ("Charon", "informative"),
-    ("Orus", "firm"),
-    ("Achird", "friendly"),
-    ("Sadachbia", "lively"),
-    ("Umbriel", "easy-going"),
-    ("Iapetus", "clear"),
-    ("Algieba", "smooth"),
-    ("Enceladus", "breathy"),
+/// All of Google's prebuilt voices: name, how Google describes it, and
+/// whether it sounds like a man or a woman, so the app can group them. The
+/// user picks any; Yoru is male by default (docs/CONCEPT.md in the
+/// firmware's repository).
+pub const VOICES: &[(&str, &str, &str)] = &[
+    ("Achird", "friendly", "male"),
+    ("Algenib", "gravelly", "male"),
+    ("Algieba", "smooth", "male"),
+    ("Alnilam", "firm", "male"),
+    ("Charon", "informative", "male"),
+    ("Enceladus", "breathy", "male"),
+    ("Fenrir", "excitable", "male"),
+    ("Iapetus", "clear", "male"),
+    ("Orus", "firm", "male"),
+    ("Puck", "upbeat", "male"),
+    ("Rasalgethi", "informative", "male"),
+    ("Sadachbia", "lively", "male"),
+    ("Sadaltager", "knowledgeable", "male"),
+    ("Schedar", "even", "male"),
+    ("Umbriel", "easy-going", "male"),
+    ("Zubenelgenubi", "casual", "male"),
+    ("Achernar", "soft", "female"),
+    ("Aoede", "breezy", "female"),
+    ("Autonoe", "bright", "female"),
+    ("Callirrhoe", "easy-going", "female"),
+    ("Despina", "smooth", "female"),
+    ("Erinome", "clear", "female"),
+    ("Gacrux", "mature", "female"),
+    ("Kore", "firm", "female"),
+    ("Laomedeia", "upbeat", "female"),
+    ("Leda", "youthful", "female"),
+    ("Pulcherrima", "forward", "female"),
+    ("Sulafat", "warm", "female"),
+    ("Vindemiatrix", "gentle", "female"),
+    ("Zephyr", "bright", "female"),
 ];
 pub const DEFAULT_VOICE: &str = "Puck";
 

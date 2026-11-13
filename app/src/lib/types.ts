@@ -286,7 +286,8 @@ export type VoiceInfo = {
   download: [string, number] | null;
   providers: ProviderInfo[];
   /** Gemini Live's voices: the name, and how Google describes it. */
-  live_voices: [string, string][];
+  /** Name, Google's description, "male" or "female". */
+  live_voices: [string, string, string][];
 };
 export type AccountVoice = { voice_id: string; name: string; category: string; description: string | null };
 export type KeyCheck = { state: "valid" | "invalid" | "unknown"; error: string | null };
