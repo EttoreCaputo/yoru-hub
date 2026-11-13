@@ -179,6 +179,7 @@ impl Session {
             match Self::open(key, &Setup { model: model.into(), ..setup.clone() }) {
                 Ok(session) => return Ok((session, model)),
                 Err(e) if is_limit(&e) => {
+                    crate::hostlog::line("live", &format!("Gemini Live: {model} refused, trying the next model: {e}"));
                     REFUSED.lock().unwrap().retain(|(m, _)| *m != model);
                     REFUSED.lock().unwrap().push((model, Instant::now()));
                     last = Some(e);

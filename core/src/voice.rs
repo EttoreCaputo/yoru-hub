@@ -405,7 +405,10 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 if let (Some(voice), Some(assistant), Some(link)) = (&config.live, &session.assistant, session.link.upgrade()) {
                     live.start(assistant, &VoiceHost { link: &link, session }, voice, trigger == "follow_up", sink);
                 }
-                if let (Some(agent), Some(link)) = (&config.agent, session.link.upgrade())
+                // Priming the local model takes seconds on the pipeline's
+                // thread, holding back the words Live is hearing: not with Live.
+                if !live.streaming
+                    && let (Some(agent), Some(link)) = (&config.agent, session.link.upgrade())
                     && let Err(e) = agent.prime(&BoardToolbox { link: &link, session, language: "en" })
                 {
                     sink(BridgeEvent::VoiceError { message: e.to_string() });
