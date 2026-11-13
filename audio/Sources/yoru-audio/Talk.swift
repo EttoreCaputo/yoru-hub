@@ -28,6 +28,7 @@ final class Talk {
     private let speech = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
     private let wire = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: rate, channels: 1, interleaved: true)!
     private var converter: AVAudioConverter?
+    private var mono: AVAudioFormat?
     private let lock = NSLock()
     private var listening = false
     private var pending: [Int16] = []
@@ -68,6 +69,11 @@ final class Talk {
             return
         }
         askMicrophone()
+        // The output side has to exist before voice processing goes on, or
+        // the output unit fails to initialize when the engine starts
+        // (AVAudioEngine error -10875).
+        _ = engine.outputNode
+        _ = engine.mainMixerNode
         let input = engine.inputNode
         do {
             try input.setVoiceProcessingEnabled(true)
@@ -81,8 +87,12 @@ final class Talk {
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: speech)
         }
+        // With voice processing the input has several channels (9 on a
+        // MacBook Pro): the first is the cleaned-up voice, the rest are the
+        // raw microphones. Only the first is converted.
         let format = input.outputFormat(forBus: 0)
-        converter = AVAudioConverter(from: format, to: wire)
+        mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false)
+        converter = mono.flatMap { AVAudioConverter(from: $0, to: wire) }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in self?.heard(buffer) }
         do {
             engine.prepare()
@@ -112,7 +122,10 @@ final class Talk {
         lock.lock()
         let on = listening
         lock.unlock()
-        guard on, let converter else { return }
+        guard on, let converter, let mono, let source = buffer.floatChannelData,
+              let first = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: buffer.frameLength), let into = first.floatChannelData else { return }
+        into[0].update(from: source[0], count: Int(buffer.frameLength))
+        first.frameLength = buffer.frameLength
         let ratio = Talk.rate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
         guard let out = AVAudioPCMBuffer(pcmFormat: wire, frameCapacity: capacity) else { return }
@@ -125,7 +138,7 @@ final class Talk {
             }
             given = true
             status.pointee = .haveData
-            return buffer
+            return first
         }
         guard error == nil, let samples = out.int16ChannelData, out.frameLength > 0 else { return }
         lock.lock()
