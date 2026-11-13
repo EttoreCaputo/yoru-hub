@@ -95,9 +95,10 @@
   const setVoice = (change: Partial<VoiceSettings>) =>
     voice && run(() => call<VoiceInfo>("set_voice", { settings: { ...$state.snapshot(voice!.settings), ...change } }), (v) => (voice = v));
 
-  // The characters of agent::personality_prompt; any other id is Yoru himself.
-  const CHARACTERS = ["yoru", "playful", "calm", "sassy", "butler", "minimal", "custom"];
-  const character = $derived(CHARACTERS.includes(voice?.settings.personality ?? "") ? voice!.settings.personality : "yoru");
+  // The levels of core/src/character.rs, friendly to assistant; any other id is the default.
+  const CHARACTERS = ["friend", "confidant", "analyst", "advisor", "assistant"];
+  const character = $derived(CHARACTERS.includes(store.info?.settings.character ?? "") ? store.info!.settings.character : "confidant");
+  const setCharacter = (c: string) => store.saveSettings((x: AssistantSettings) => (x.character = c));
 
   async function setupAgain() {
     await call("set_onboarding", { done: false, tourVersion: null });
@@ -139,7 +140,7 @@
     brain: !store.info?.ready
       ? { text: brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain, dot: "wrong", warn: true }
       : { text: `${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
-    character: { text: voice ? t.characters[character][0] : "—", dot: "" },
+    character: { text: store.info ? t.characters[character][0] : "—", dot: "" },
     voice: {
       text: !vs ? "—" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "),
       dot: vs?.enabled ? "done" : "",
@@ -364,29 +365,20 @@
   {/if}
 {/snippet}
 
-<!-- Who Yoru is: one of the characters, or one the user describes. -->
+<!-- Who Yoru is: a level on one scale, friendly to assistant, for every brain. -->
 {#snippet characterPage()}
-  {#if voice}
-    <section class="tiles" aria-label={t.parts.character}>
-      {#each CHARACTERS as c (c)}
-        <button class="tile" class:on={character === c} onclick={() => setVoice({ personality: c })}>
-          <b>{t.characters[c][0]}</b>
+  {#if store.info}
+    <div class="scale faint" aria-hidden="true">
+      <span>{t.scale[0]}</span><span>{t.scale[1]}</span><span>{t.scale[2]}</span>
+    </div>
+    <section class="tiles levels" aria-label={t.parts.character}>
+      {#each CHARACTERS as c, i (c)}
+        <button class="tile" class:on={character === c} onclick={() => setCharacter(c)}>
+          <b>{i + 1} · {t.characters[c][0]}</b>
           <span>{t.characters[c][1]}</span>
         </button>
       {/each}
     </section>
-    {#if character === "custom"}
-      <h2 class="section-title">{t.customCharacter}</h2>
-      <textarea
-        class="custom"
-        rows="3"
-        maxlength="300"
-        value={voice.settings.personality_custom}
-        placeholder={t.customPlaceholder}
-        onchange={(e) => setVoice({ personality: "custom", personality_custom: e.currentTarget.value.trim() })}
-        aria-label={t.customCharacter}
-      ></textarea>
-    {/if}
     <p class="dim note">{t.characterHint}</p>
   {/if}
 {/snippet}
@@ -704,11 +696,16 @@
     box-shadow: 0 0 36px -16px var(--c);
   }
 
-  textarea.custom {
-    width: 100%;
-    max-width: 620px;
-    resize: vertical;
-    font: inherit;
+  /* The five levels side by side, under the scale they sit on. */
+  .levels {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 8px;
+    padding: 0 4px;
   }
   .small {
     font-size: 12.5px;

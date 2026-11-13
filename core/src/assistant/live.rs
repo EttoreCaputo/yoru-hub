@@ -13,18 +13,22 @@ use crate::cloud::live::Setup;
 
 /// Who Yoru is, for a voice that speaks as it thinks: no face tags or audio
 /// tags, which it would read out.
-fn live_prompt(name: &str) -> String {
+fn live_prompt(name: &str, character: &str) -> String {
     format!(
         "You are {name}, the user's personal assistant. Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker. \
-You talk with the user out loud, as a young male companion: warm, curious, quick.
+You talk with the user out loud.
 - Use the tools instead of guessing; never invent facts about the user's data. You can search the web with Google Search.
 - Tools that change something ask the user first; if they say no, accept it.
 - Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
 - {memory}
 - One to three short spoken sentences; never read out lists, URLs or symbols.
-- Friendly and to the point; never chatty or servile; don't end with offers of help.
-- If what you hear isn't meant for you (people talking among themselves, the TV), stay silent.",
+- Never servile; don't end with offers of help.
+- If what you hear isn't meant for you (people talking among themselves, the TV), stay silent.
+
+# Who you are
+{character}",
         memory = MEMORY_RULE,
+        character = crate::character::prompt(character, name),
     )
 }
 
@@ -39,7 +43,7 @@ impl Assistant {
         let mut tools = own_tools();
         tools.extend(Timers::tools().iter().map(tool_json));
         tools.extend(board.iter().filter(|t| BOARD_ESSENTIALS.contains(&t.name.as_str())).map(tool_json));
-        let mut system = format!("{}\n\n<memory>\n{}\n</memory>", live_prompt(&settings.name), self.memory.core(CORE_CHARS, true));
+        let mut system = format!("{}\n\n<memory>\n{}\n</memory>", live_prompt(&settings.name, &settings.character), self.memory.core(CORE_CHARS, true));
         if let Some(l) = self.reply_language(None) {
             system.push_str(&format!("\n\nAlways reply in {}.", language_name(&l)));
         }

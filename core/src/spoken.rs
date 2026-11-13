@@ -1,8 +1,10 @@
-//! What Yoru said with ElevenLabs: the text sent and the sound that came
-//! back, one clip per sentence, kept in `spoken/` in the data folder so the
-//! app can list them, play them again and export them. Tests replay them on
-//! the board (`host/say` with `recorded`) so as not to spend credit. Each clip is
-//! `<id>.wav` with `<id>.json` beside it; they stay until the user deletes them.
+//! What Yoru said with a cloud voice: the text and the sound, one clip per
+//! sentence (ElevenLabs) or per answer (Gemini Live), kept in `spoken/` in
+//! the data folder so the app can list them, play them again and export
+//! them. Each clip names its source ([`Clip::source`]): the app shows each
+//! apart, and tests replay only ElevenLabs' on the board (`host/say` with
+//! `recorded`) so as not to spend credit. Each clip is `<id>.wav` with
+//! `<id>.json` beside it; they stay until the user deletes them.
 
 use std::fs;
 use std::io::{self, Write};
@@ -12,7 +14,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::voice::SAMPLE_RATE;
 
-/// A sentence ElevenLabs spoke.
+/// ElevenLabs' sentences: `elevenlabs:voice/<voice_id>`.
+pub const ELEVENLABS: &str = "elevenlabs";
+/// Gemini Live's answers: `gemini-live:<voice>`.
+pub const GEMINI_LIVE: &str = "gemini-live";
+
+/// What a cloud voice spoke.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Clip {
     /// When it was spoken (`20261022-153012-123`): its files' name, and its order.
@@ -22,9 +29,16 @@ pub struct Clip {
     /// The text as sent, audio tags (`[laughs]`) and all.
     pub text: String,
     pub language: String,
-    /// `elevenlabs:voice/<voice_id>`.
+    /// `<source>:<voice>`: `elevenlabs:voice/<voice_id>`, `gemini-live:Puck`.
     pub voice: String,
     pub duration_ms: u64,
+}
+
+impl Clip {
+    /// Who spoke it: [`ELEVENLABS`], [`GEMINI_LIVE`].
+    pub fn source(&self) -> &str {
+        self.voice.split(':').next().unwrap_or_default()
+    }
 }
 
 fn dir() -> io::Result<PathBuf> {
@@ -78,14 +92,14 @@ fn list_in(dir: &Path) -> Vec<Clip> {
     clips
 }
 
-/// The sound of the newest clip that said `text` in `language`, for tests
-/// that make the board speak without asking ElevenLabs.
+/// The sound of the newest ElevenLabs clip that said `text` in `language`,
+/// for tests that make the board speak without asking ElevenLabs.
 pub fn find(text: &str, language: &str) -> Option<Vec<i16>> {
     find_in(&dir().ok()?, text, language)
 }
 
 fn find_in(dir: &Path, text: &str, language: &str) -> Option<Vec<i16>> {
-    let clip = list_in(dir).into_iter().find(|c| c.text == text && c.language == language)?;
+    let clip = list_in(dir).into_iter().find(|c| c.source() == ELEVENLABS && c.text == text && c.language == language)?;
     samples(&fs::read(dir.join(format!("{}.wav", clip.id))).ok()?)
 }
 
@@ -114,10 +128,10 @@ pub fn delete(id: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// Forget every clip.
-pub fn clear() -> io::Result<()> {
+/// Forget every clip of `source`.
+pub fn clear(source: &str) -> io::Result<()> {
     let dir = dir()?;
-    for clip in list_in(&dir) {
+    for clip in list_in(&dir).into_iter().filter(|c| c.source() == source) {
         remove(&dir, &clip.id);
     }
     Ok(())
@@ -128,16 +142,18 @@ fn remove(dir: &Path, id: &str) {
     let _ = fs::remove_file(dir.join(format!("{id}.wav")));
 }
 
-/// Put clips `ids` (every clip when empty) in a zip in Downloads: each WAV
-/// with its JSON, and `metadata.csv` (`file|text|language`, the LJSpeech
-/// layout TTS tools read). Returns the zip's path.
-pub fn export(ids: &[String]) -> io::Result<PathBuf> {
+/// Put clips `ids` of `source` (every one of it when empty) in a zip in
+/// Downloads: each WAV with its JSON, and `metadata.csv`
+/// (`file|text|language`, the LJSpeech layout TTS tools read). Never two
+/// sources in one zip: they are two different voices. Returns the zip's path.
+pub fn export(source: &str, ids: &[String]) -> io::Result<PathBuf> {
     let dest = crate::paths::home_dir().map(|h| h.join("Downloads")).ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home folder"))?;
-    export_in(&dir()?, ids, &dest, chrono::Local::now())
+    export_in(&dir()?, source, ids, &dest, chrono::Local::now())
 }
 
-fn export_in(dir: &Path, ids: &[String], dest: &Path, now: chrono::DateTime<chrono::Local>) -> io::Result<PathBuf> {
+fn export_in(dir: &Path, source: &str, ids: &[String], dest: &Path, now: chrono::DateTime<chrono::Local>) -> io::Result<PathBuf> {
     let mut clips = list_in(dir);
+    clips.retain(|c| c.source() == source);
     if !ids.is_empty() {
         clips.retain(|c| ids.contains(&c.id));
     }
@@ -146,7 +162,7 @@ fn export_in(dir: &Path, ids: &[String], dest: &Path, now: chrono::DateTime<chro
     }
     clips.reverse(); // oldest first, as they were said
     fs::create_dir_all(dest)?;
-    let base = format!("yoru-spoken-{}", now.format("%Y%m%d-%H%M%S"));
+    let base = format!("yoru-spoken-{source}-{}", now.format("%Y%m%d-%H%M%S"));
     let mut path = dest.join(format!("{base}.zip"));
     for n in 1.. {
         if !path.exists() {
@@ -275,12 +291,15 @@ mod tests {
         let t = chrono::Local.with_ymd_and_hms(2026, 10, 22, 15, 30, 12).unwrap();
         let a = save_in(&dir, "Ciao | tu", "it", "elevenlabs:voice/x", &[1; 1_600], t).unwrap();
         save_in(&dir, "Left out", "en", "elevenlabs:voice/x", &[2; 1_600], t).unwrap();
+        let live = save_in(&dir, "Not mine", "it", "gemini-live:Puck", &[3; 1_600], t).unwrap();
         let out = dir.join("out");
-        let zip = export_in(&dir, std::slice::from_ref(&a.id), &out, t).unwrap();
-        assert_eq!(zip.file_name().unwrap(), "yoru-spoken-20261022-153012.zip");
-        assert!(export_in(&dir, &["nope".into()], &out, t).is_err());
+        let zip = export_in(&dir, ELEVENLABS, std::slice::from_ref(&a.id), &out, t).unwrap();
+        assert_eq!(zip.file_name().unwrap(), "yoru-spoken-elevenlabs-20261022-153012.zip");
+        assert!(export_in(&dir, ELEVENLABS, &["nope".into()], &out, t).is_err());
+        // Another source's clip is never in this source's zip.
+        assert!(export_in(&dir, ELEVENLABS, std::slice::from_ref(&live.id), &out, t).is_err());
         // The system's unzip as the judge, where there is one.
-        if let Ok(o) = std::process::Command::new("unzip").arg("-p").arg(&zip).arg("yoru-spoken-20261022-153012/metadata.csv").output() {
+        if let Ok(o) = std::process::Command::new("unzip").arg("-p").arg(&zip).arg("yoru-spoken-elevenlabs-20261022-153012/metadata.csv").output() {
             assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
             assert_eq!(String::from_utf8(o.stdout).unwrap(), format!("file|text|language\n{}|Ciao   tu|it\n", a.id));
             let t = std::process::Command::new("unzip").arg("-tq").arg(&zip).output().unwrap();
@@ -295,6 +314,8 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let t = chrono::Local.with_ymd_and_hms(2026, 10, 22, 15, 30, 12).unwrap();
         save_in(&dir, "Ciao!", "it", "elevenlabs:voice/x", &[7, -7, 300], t).unwrap();
+        // Gemini Live said it later: not ElevenLabs' voice, never replayed as it.
+        save_in(&dir, "Ciao!", "it", "gemini-live:Puck", &[1, 1, 1], t).unwrap();
         assert_eq!(find_in(&dir, "Ciao!", "it"), Some(vec![7, -7, 300]));
         assert_eq!(find_in(&dir, "Ciao!", "en"), None);
         assert_eq!(find_in(&dir, "Ciao", "it"), None);

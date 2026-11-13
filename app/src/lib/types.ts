@@ -52,6 +52,8 @@ export type AssistantSettings = {
   /** Ollama: let a model that can think do it, as long as it likes. */
   think: boolean;
   routines: Routines;
+  /** Who Yoru is, for every brain: a level of core/src/character.rs. */
+  character: string;
 };
 
 export type KeySource = "env" | "saved";
@@ -253,8 +255,6 @@ export type VoiceSettings = {
   voices: Record<string, string>;
   llm: boolean;
   llm_model: string;
-  personality: string;
-  personality_custom: string;
   /** Gemini Live's voice, which then hears and speaks itself; "" for off. */
   live: string;
 };

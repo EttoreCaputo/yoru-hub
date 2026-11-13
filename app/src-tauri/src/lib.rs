@@ -154,10 +154,6 @@ struct VoiceSettings {
     llm: bool,
     /// A `models::MODELS` id of kind `llm`, or a cloud model's.
     llm_model: String,
-    /// How the language model talks: a preset of `agent::personality_prompt`, or `custom`.
-    personality: String,
-    /// The person's own description, for `custom`.
-    personality_custom: String,
     /// Answer with Gemini Live in this Google voice (`cloud::live::VOICES`):
     /// it hears and speaks itself. `""`: off, the models above answer.
     live: String,
@@ -198,8 +194,6 @@ impl Default for VoiceSettings {
             voices,
             llm: rec.llm.is_some(),
             llm_model: rec.llm.unwrap_or(models::DEFAULT_LLM).into(),
-            personality: "cute".into(),
-            personality_custom: String::new(),
             live: String::new(),
         }
     }
@@ -513,7 +507,8 @@ fn apply_voice(state: &AppState) {
         |agent: &Arc<Agent>| agent.llm().warm_up().map_err(|e| e.to_string()),
     );
     if let Some(agent) = &agent {
-        agent.set_personality(&agent::personality_prompt(&settings.personality, &settings.personality_custom));
+        // The character lives with the assistant's settings: every brain gets the same.
+        agent.set_personality(&agent::personality_prompt(&state.assistant.settings().character));
     }
     let dump_dir = settings.keep_recordings.then(voice::default_dump_dir).flatten();
     let listens = settings.enabled;
@@ -827,7 +822,7 @@ async fn elevenlabs_voices() -> Result<Vec<AccountVoice>, String> {
     tauri::async_runtime::spawn_blocking(|| elevenlabs::voices().map_err(|e| e.to_string())).await.map_err(|e| e.to_string())?
 }
 
-/// What Yoru said with ElevenLabs, newest first ([`spoken`]).
+/// What Yoru said with a cloud voice, every source, newest first ([`spoken`]).
 #[tauri::command]
 fn spoken_clips() -> Vec<spoken::Clip> {
     spoken::list()
@@ -845,16 +840,17 @@ fn delete_spoken(id: String) -> Result<Vec<spoken::Clip>, String> {
     Ok(spoken::list())
 }
 
+/// Forget every clip of `source` (`elevenlabs`, `gemini-live`).
 #[tauri::command]
-fn clear_spoken() -> Result<(), String> {
-    spoken::clear().map_err(|e| e.to_string())
+fn clear_spoken(source: String) -> Result<(), String> {
+    spoken::clear(&source).map_err(|e| e.to_string())
 }
 
-/// Zip clips `ids` (all of them when empty) into Downloads and show the zip
-/// in the file manager; returns its path.
+/// Zip clips `ids` of `source` (all of its when empty) into Downloads and
+/// show the zip in the file manager; returns its path.
 #[tauri::command]
-async fn export_spoken(ids: Vec<String>) -> Result<String, String> {
-    let path = tauri::async_runtime::spawn_blocking(move || spoken::export(&ids)).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+async fn export_spoken(source: String, ids: Vec<String>) -> Result<String, String> {
+    let path = tauri::async_runtime::spawn_blocking(move || spoken::export(&source, &ids)).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
     reveal(&path);
     Ok(path.display().to_string())
 }

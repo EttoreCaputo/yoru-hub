@@ -124,9 +124,9 @@ struct LlmArgs {
     /// (default: as many as fit)
     #[arg(long, value_name = "N")]
     llm_gpu_layers: Option<u32>,
-    /// How the local language model talks: cute (default), playful, calm,
-    /// sassy, butler, minimal, or a description of your own
-    #[arg(long, value_name = "NAME|TEXT")]
+    /// Yoru's character for the local language model, from friendly to
+    /// assistant: friend, confidant (default), analyst, advisor, assistant
+    #[arg(long, value_name = "LEVEL")]
     personality: Option<String>,
 }
 
@@ -584,8 +584,7 @@ fn agent(args: &LlmArgs, fallback: bool, keep_warm: bool) -> Result<Arc<Agent>, 
     let llm = Llm::new(llm_config(args)?).with_fallback(fallback.then(llm::local_fallback).flatten()).kept_warm(keep_warm);
     let agent = Agent::new(warm(llm, Llm::rewarm));
     if let Some(p) = &args.personality {
-        let preset = ["cute", "playful", "calm", "sassy", "butler", "minimal"].contains(&p.as_str());
-        agent.set_personality(&agent::personality_prompt(if preset { p } else { "custom" }, p));
+        agent.set_personality(&agent::personality_prompt(p));
     }
     Ok(Arc::new(agent))
 }

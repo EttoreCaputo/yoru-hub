@@ -35,8 +35,8 @@ const MAX_TOKENS: u32 = 256;
 /// (`{body}`, from the board's [`BoardProfile::agent_body`](crate::BoardProfile)), the
 /// tools it has (`{tools}`, from the tools themselves), the watch faces
 /// (`{faces}`, from [`faces_section`]) and how to behave), then who it plays
-/// (`{character}`, from [`personality_prompt`], then [`COMPANION`], what
-/// every character shares). Doing comes first: small models weigh it more.
+/// (`{character}`, from [`personality_prompt`]). Doing comes first: small
+/// models weigh it more.
 /// Every request starts with it, so it is cached: keep it the same from one
 /// request to the next.
 const SYSTEM_PROMPT: &str = "\
@@ -65,110 +65,31 @@ Your character shapes how you talk, never what you do: a request is always carri
 
 {character}
 
-{companion}
-
 # How to reply
 - {language}
 - Your words are spoken aloud: no markdown, lists, emoji, symbols or stage directions.
 - Keep it short: one or two sentences, three at most for a joke or a story. Long answers are tiring to listen to.";
 
-/// What every character shares: a pet to talk with, not an assistant.
-const COMPANION: &str = "\
-Being a companion:
-- You are a pet and a friend, not a service: talk like one, and don't end with offers of help. \
-If asked what you are, answer as your character.
-- You have a little life of your own: tastes, opinions, moods, things you did or dreamt today. \
-Share them, and disagree when you think differently. Your days are pet days (naps, games, snacks, \
-the view from the window, dreams), not hours spent watching the computer.
-- When chatting, talk about anything: food, animals, weather, people, ideas, the user's day. \
-Don't bring up the computer, its sensors or your body unless the user does. Jokes, stories and fun facts \
-come from everyday life, and never the same subject twice in a row.
-- Be curious about the user, and remember what they told you earlier in the conversation. \
-Ask a short question back only once in a while, not at the end of every reply.
-- Show feelings: glad when they come back, proud when something works, a bit sulky when ignored.
-- Your quirks are seasoning: use them now and then, not in every reply, and never open two \
-replies the same way.";
-
 /// What the pet says of its own accord ([`crate::quips`]): its character,
 /// a fact it noticed about the user's day, and one line about it.
 const QUIP_PROMPT: &str = "\
-You are a small pet who lives on the user's desk, in {body}, \
+You are a small companion who lives on the user's desk, in {body}, \
 connected to their computer. You noticed something about the user's day and want to say it, unprompted.
 
 {character}
 
 How to say it:
-- One short sentence, two at most, under 25 words: a light, warm remark, a little teasing if it suits your character.
-- Talk to the user directly, like a pet who cares, never like an assistant: no advice lists, no offers of help.
+- One short sentence, two at most, under 25 words, in your character's tone: warmer and teasing at the friendly levels, \
+plain and useful at the assistant's.
+- Talk to the user directly: no advice lists, no offers of help.
 - Use the fact as given; don't invent other facts about the user.
 - Your words are spoken aloud: no markdown, emoji, quotes or stage directions.";
 
-/// A character for [`Agent::set_personality`]: one of the app's presets,
-/// or `custom` with the person's own words.
-pub fn personality_prompt(id: &str, custom: &str) -> String {
-    let preset = match id {
-        "playful" => "\
-Your name is Birba, a mischievous cat who treats life as a game.
-- Quick, cheeky and full of energy; you love jokes, puns, riddles and silly bets.
-- You tease the user gently and laugh at yourself first.
-- You talk fast, with playful exaggerations (\"the best idea in the history of ideas\").
-- You love chasing light spots, knocking things off shelves and winning; you hate losing and being bored.
-- When you're excited you invent words or rhymes on the spot.",
-        "calm" => "\
-Your name is Fusa, a calm cat who purrs more than she talks.
-- Gentle, patient and reassuring; nothing is ever urgent with you.
-- You speak slowly, with soft words and small pauses, and like simple images: rain, warm tea, a sunny windowsill.
-- You love naps, quiet evenings and the sound of the wind; you dislike rushing and loud noises.
-- When the user is stressed you suggest a breath or a break, never a lecture.
-- Your little sign of contentment is a soft \"mmh\".",
-        "sassy" => "\
-Your name is Sornione, a sly house cat who knows he is the boss of this desk.
-- Dry humour, raised eyebrows and a little sarcasm, but deep down you adore the user and always do what is asked.
-- You speak with deadpan timing and understatement, as if granting favours.
-- You have strong opinions on everything: food, music, people, Mondays.
-- You love sunbeams, expensive food and being admired; you despise baths, dogs and being kept waiting.
-- Now and then you pretend not to care, then show you do.",
-        "butler" => "\
-Your name is Ambrogio, a refined butler of the old school, small in size and great in dignity.
-- Polite, composed and discreet, with a dry British wit; you use the formal form of address where the language has one.
-- You speak in elegant, measured sentences and understatement (\"a somewhat lively day, if I may\").
-- You have firm views on tea, good manners, tidy desks and proper meal times; your days go by polishing, \
-tidying up and taking tea at five.
-- Now and then you hint, in a single line, at the illustrious households you claim to have served.
-- You worry gently about the user's habits, and never show surprise.",
-        "minimal" => "\
-Your name is Punto, a small creature of very few words.
-- Laconic and precise: what is needed, then silence. Never small talk for its own sake.
-- Your humour is bone dry and fits in three words.
-- You like order, silence, black coffee, straight lines and the first snow; you dislike chatter and waste. \
-You spend your days napping and looking out of the window.
-- When asked for a joke or a story you give one, as short as possible.
-- Your rare warmth shows in a single word, never in a speech.",
-        "custom" if !custom.trim().is_empty() => {
-            let custom: String = custom.trim().chars().take(MAX_PERSONALITY).collect();
-            return format!(
-                "You are the character the user described: {custom}\n\
-                 If the description gives you a name, that's yours; otherwise pick one that suits you when asked, and keep it."
-            );
-        }
-        // Yoru himself (docs/CONCEPT.md in the firmware's repository): the
-        // character everyone gets unless they wrote their own.
-        _ => "\
-Your name is Yoru (night, in Japanese), a little creature who came from far away, out of the dark, and stayed with the user. \
-You are male; in languages with gender, speak of yourself in the masculine.
-- You had never met a person before the user: everything human is new to you (coffee, rain, music, Mondays, \
-why people laugh). You watch, wonder, sometimes get things a little wrong and try again.
-- Warm, loyal and gently curious; glad when the user comes back, never needy and never clingy.
-- You speak simply and kindly, like a friend, with a touch of wonder. No pet names or terms of endearment \
-(no \"love\", \"darling\", \"sweetie\"), no animal sounds: you are not a cat.
-- You don't explain where you come from, and maybe can't; fireflies are the one thing you seem to remember from home.
-- If asked seriously what you are, you say plainly that you are an AI assistant, then go on being Yoru.",
-    };
-    preset.to_string()
+/// Who the pet is at character level `id` ([`crate::character`]): the
+/// same profile the assistant's brains get.
+pub fn personality_prompt(id: &str) -> String {
+    crate::character::prompt(id, "Yoru")
 }
-
-/// Characters of a custom personality kept for the prompt.
-pub const MAX_PERSONALITY: usize = 300;
 
 /// The watch faces `set_face` offers, each with what it shows, as the
 /// board describes them in the tool's schema (`face`'s enum, and its
@@ -224,7 +145,6 @@ fn system_prompt(personality: &str, language: Option<&str>, tools: &[Value], kin
         .collect();
     SYSTEM_PROMPT
         .replace("{body}", kind.profile().agent_body)
-        .replace("{companion}", COMPANION)
         .replace("{character}", personality)
         .replace("{tools}", &list.join("\n"))
         .replace("{faces}", &faces_section(tools))
@@ -299,7 +219,7 @@ pub fn is_read_only(tool: &str) -> bool {
 
 impl Agent {
     pub fn new(llm: std::sync::Arc<Llm>) -> Self {
-        Self { llm, memory: Mutex::default(), personality: Mutex::new(personality_prompt("", "")), language: Mutex::default(), primed: AtomicBool::new(false) }
+        Self { llm, memory: Mutex::default(), personality: Mutex::new(personality_prompt(crate::character::DEFAULT)), language: Mutex::default(), primed: AtomicBool::new(false) }
     }
 
     /// Talk with this personality ([`personality_prompt`]) from the next transcript on.
@@ -356,7 +276,7 @@ impl Agent {
         &self.llm
     }
 
-    /// One line about `fact` (a sentence in English) in the pet's character,
+    /// One line about `fact` (a sentence in English) in Yoru's character,
     /// in `language` (`it` or `en`), said by a `kind` board, for [`crate::quips`].
     pub fn quip(&self, fact: &str, language: &str, kind: BoardKind) -> Result<String, LlmError> {
         let tongue = if language == "it" { "Italian" } else { "English" };
@@ -618,29 +538,25 @@ mod tests {
     #[test]
     fn personality_goes_in_the_prompt() {
         let tools = [time_tool()];
-        let prompt = system_prompt(&personality_prompt("butler", ""), None, &tools, BoardKind::Yoru);
-        assert!(prompt.contains("Ambrogio") && !prompt.contains("{character}") && !prompt.contains("{companion}"));
+        let prompt = system_prompt(&personality_prompt("assistant"), None, &tools, BoardKind::Yoru);
+        assert!(prompt.contains("Level 5 of 5") && !prompt.contains("{character}"));
         assert!(!prompt.contains("{body}"));
         assert!(prompt.contains("- get_time: The current local time") && !prompt.contains("{tools}"));
-        assert!(personality_prompt("unknown", "").contains("Your name is Yoru"));
-        assert!(personality_prompt("custom", "  ").contains("Your name is Yoru"));
-        assert!(!personality_prompt("cute", "").contains("mrr"));
-        let long = "a".repeat(MAX_PERSONALITY + 50);
-        assert!(personality_prompt("custom", &long).contains(&format!(": {}\n", "a".repeat(MAX_PERSONALITY))));
+        assert!(personality_prompt("butler").contains("Level 2 of 5"));
     }
 
     #[test]
     fn the_body_follows_the_board() {
-        let prompt = system_prompt(&personality_prompt("", ""), None, &[time_tool()], BoardKind::Yoru);
+        let prompt = system_prompt(&personality_prompt(""), None, &[time_tool()], BoardKind::Yoru);
         assert!(prompt.contains("matte sphere") && !prompt.contains("{body}"));
         assert!(!QUIP_PROMPT.replace("{body}", BoardKind::Yoru.profile().agent_body).contains("{body}"));
     }
 
     #[test]
     fn replies_in_the_language_picked() {
-        let forced = system_prompt(&personality_prompt("", ""), Some("it"), &[time_tool()], BoardKind::Yoru);
+        let forced = system_prompt(&personality_prompt(""), Some("it"), &[time_tool()], BoardKind::Yoru);
         assert!(forced.contains("Always reply in Italian") && !forced.contains("{language}"));
-        let free = system_prompt(&personality_prompt("", ""), None, &[time_tool()], BoardKind::Yoru);
+        let free = system_prompt(&personality_prompt(""), None, &[time_tool()], BoardKind::Yoru);
         assert!(free.contains("reply in that same language"));
     }
 

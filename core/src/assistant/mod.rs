@@ -170,6 +170,8 @@ pub struct Settings {
     /// How Yoru talks, as the user set it: the middle of the corridor its
     /// own tuning stays in (docs/memory.md, Style).
     pub style: memory::style::Style,
+    /// Who Yoru is: a level of [`crate::character::LEVELS`], for every brain.
+    pub character: String,
 }
 
 impl Settings {
@@ -206,6 +208,7 @@ impl Default for Settings {
             think: true,
             routines: routines::Routines::default(),
             style: memory::style::Style::default(),
+            character: crate::character::DEFAULT.into(),
         }
     }
 }
@@ -804,7 +807,7 @@ impl Assistant {
         let board_tools = host.board_tools();
         let tools = self.tool_list(settings, &board_tools, &external_tools);
         let mut system = json!([
-            {"type": "text", "text": system_prompt(&settings.name), "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": system_prompt(&settings.name, &settings.character), "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": format!("<memory>\n{}\n</memory>", self.memory.core(CORE_CHARS, true))},
         ]);
         // After the cached part: a change of language keeps the cache.
@@ -1133,7 +1136,8 @@ fn spoken_wait(d: Duration, language: &str) -> String {
 }
 
 /// Who Yoru is and how it works. The same for every request, so it is cached.
-fn system_prompt(name: &str) -> String {
+fn system_prompt(name: &str, character: &str) -> String {
+    let character = crate::character::prompt(character, name);
     let feelings = feelings_rule();
     format!(
         "You are {name}, the user's personal assistant. You live on their computer, and your body is a small round screen on their desk \
@@ -1170,7 +1174,10 @@ meant for you: someone else in the room, the TV, the user thinking aloud. When i
 else, and you stay silent. When it is (an answer to your question, a follow-up, a new request), answer as usual. \
 When you need something from the user to go on, end with the question: the board then waits longer for the answer.
 - When it was typed (channel: text), you may be longer and use short Markdown.
-- You are friendly and to the point, with a light touch of warmth; never chatty, never servile. Don't end with offers of help.
+- Never servile, and don't end with offers of help.
+
+# Who you are
+{character}
 
 {feelings}"
     )

@@ -184,6 +184,7 @@ const boardClips: BoardClip[] = [
 let spoken: SpokenClip[] = [
   { id: "3", at: now() - 4 * MIN, text: "[happy] Fatto! Il timer da venticinque minuti è partito.", language: "it", voice: "elevenlabs:voice/x", duration_ms: 3400 },
   { id: "2", at: now() - 50 * MIN, text: "Hai una riunione alle 14:30 con Marco.", language: "it", voice: "elevenlabs:voice/x", duration_ms: 2600 },
+  { id: "4", at: now() - 2 * MIN, text: "Domani alle nove hai la call con Giulia, poi il pomeriggio è libero.", language: "it", voice: "gemini-live:Puck", duration_ms: 4100 },
   { id: "1", at: now() - 26 * 60 * MIN, text: "[whispers] Good night. I'll keep watch.", language: "en", voice: "elevenlabs:voice/x", duration_ms: 2100 },
 ];
 
@@ -332,6 +333,7 @@ const info: AssistantInfo = {
     task_effort: "low",
     web_search: true,
     think: true,
+    character: "confidant",
     routines: { recap: true, recap_at: "08:30", recap_weekdays_only: true, recap_task: "", quiet: true, quiet_from: "22:30", quiet_to: "07:30" },
   },
   ready: !noKey,
@@ -392,8 +394,6 @@ const voice: VoiceInfo = {
     voices: { it: "it_IT-paola-medium", en: "en_US-amy-medium" },
     llm: false,
     llm_model: "qwen3-4b",
-    personality: "cute",
-    personality_custom: "",
     live: "",
   },
   models: [
@@ -580,8 +580,8 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   // Half a second of a quiet tone, as a 16 kHz WAV.
   spoken_audio: () => tone(),
   delete_spoken: (a) => (spoken = spoken.filter((c) => c.id !== a.id)),
-  clear_spoken: () => void (spoken = []),
-  export_spoken: () => "/Users/you/Downloads/yoru-spoken-20261022-153012.zip",
+  clear_spoken: (a) => void (spoken = spoken.filter((c) => c.voice.split(":")[0] !== a.source)),
+  export_spoken: (a) => `/Users/you/Downloads/yoru-spoken-${a.source}-20261022-153012.zip`,
   // ?mic=denied (or unknown, restricted) for the notch's permission row.
   notch_microphone: (a) => (a.ask && params.get("mic") === "unknown" ? "granted" : (params.get("mic") ?? "granted")),
   open_microphone_privacy: () => undefined,

@@ -843,11 +843,14 @@ struct LiveTurner<'a, 's, 'e> {
     player: Option<thread::ScopedJoinHandle<'s, Result<Spoken, String>>>,
     first_sound: Option<Instant>,
     actions: Vec<crate::assistant::Action>,
+    /// Every sample Google sent, at 16 kHz, for the Spoken page.
+    kept: Vec<i16>,
 }
 
 impl live::Turner for LiveTurner<'_, '_, '_> {
     fn audio(&mut self, samples: Vec<i16>) {
         let samples = self.down.push(&samples);
+        self.kept.extend_from_slice(&samples);
         if self.tx.is_none() {
             // The board stopped playing it (barge-in): the rest goes nowhere.
             if self.player.is_some() {
@@ -922,19 +925,20 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
                 player: None,
                 first_sound: None,
                 actions: Vec::new(),
+                kept: Vec::new(),
             };
             let turn = if streamed { live_session.finish(&mut turner) } else { live_session.turn(&utterance.samples, &mut turner) };
             turner.tx = None;
             let played = turner.player.take().map(|p| p.join().unwrap_or_else(|_| Err("the voice stopped".into())));
-            (turn, turner.actions, turner.first_sound, played)
+            (turn, turner.actions, turner.first_sound, (played, turner.kept))
         });
         match turn {
             // Google closed a session kept from before: once more, whole, with a new one.
-            Err(_) if tries == 1 && played.is_none() => {
+            Err(_) if tries == 1 && played.0.is_none() => {
                 chat.session = None;
                 streamed = false;
             }
-            Err(e) if played.is_none() => {
+            Err(e) if played.0.is_none() => {
                 chat.session = None;
                 sink(BridgeEvent::VoiceError { message: format!("{e}; answering without Gemini Live") });
                 return None;
@@ -943,6 +947,7 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
         }
     };
     chat.last_turn = Some(Instant::now());
+    let (played, kept) = played;
     times.first_words = first_sound;
     times.first_sentence = first_sound;
     times.answered = Some(Instant::now());
@@ -970,8 +975,14 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
         });
     }
     let lines = actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect();
-    sink(BridgeEvent::Reply { id: utterance.id, text: turn.said.clone(), language, actions: lines, understood: true, by: "gemini-live".into(), elapsed_ms: started.elapsed().as_millis() as u64 });
+    sink(BridgeEvent::Reply { id: utterance.id, text: turn.said.clone(), language: language.clone(), actions: lines, understood: true, by: "gemini-live".into(), elapsed_ms: started.elapsed().as_millis() as u64 });
     assistant.live_turn(&turn.heard, &turn.said, actions, follow_up);
+    if !kept.is_empty() && turn.said.chars().any(char::is_alphanumeric) {
+        // Kept apart from ElevenLabs' (crate::spoken::GEMINI_LIVE), off this
+        // thread: the next turn shouldn't wait for the disk.
+        let (text, voice) = (turn.said.clone(), format!("{}:{voice}", crate::spoken::GEMINI_LIVE));
+        thread::spawn(move || drop(crate::spoken::save(&text, &language, &voice, &kept)));
+    }
     let Some(played) = played else {
         // Google chose to stay silent: not meant for Yoru.
         sink(BridgeEvent::BoardLog { line: format!("host: Gemini Live stayed silent (heard: {:?})", turn.heard) });

@@ -1,6 +1,7 @@
 <!--
-  What Yoru said with ElevenLabs, a sentence at a time: the text it sent,
-  audio tags and all, and the sound that came back, to play again. Read
+  What Yoru said with a cloud voice, each source on its own tab, never
+  mixed: ElevenLabs a sentence at a time (the text it sent, audio tags and
+  all), Gemini Live an answer at a time. The sound to play again. Read
   again each time you come back.
 -->
 <script lang="ts">
@@ -16,6 +17,13 @@
   let error = $state("");
   let playing = $state<string | null>(null);
   let filter = $state("");
+  // A clip's source is its voice's prefix (core/src/spoken.rs).
+  const SOURCES = ["elevenlabs", "gemini-live"] as const;
+  type Source = (typeof SOURCES)[number];
+  let tab = $state<Source>("elevenlabs");
+  const sourceOf = (c: SpokenClip) => c.voice.split(":")[0];
+  const mine = $derived(clips.filter((c) => sourceOf(c) === tab));
+  const count = (s: Source) => clips.filter((c) => sourceOf(c) === s).length;
   // One sound at a time: playing another stops this one. Web Audio rather
   // than an <audio> on a blob URL: the context is resumed in the click
   // itself, so WebKit lets it play once the clip arrives.
@@ -24,7 +32,7 @@
 
   const list = $derived.by(() => {
     const q = filter.trim().toLowerCase();
-    return q ? clips.filter((c) => c.text.toLowerCase().includes(q)) : clips;
+    return q ? mine.filter((c) => c.text.toLowerCase().includes(q)) : mine;
   });
 
   $effect(() => {
@@ -129,7 +137,7 @@
     exported = "";
     try {
       const ids = filter.trim() ? list.map((c) => c.id) : [];
-      exported = await call<string>("export_spoken", { ids });
+      exported = await call<string>("export_spoken", { source: tab, ids });
     } catch (e) {
       error = why(e);
     } finally {
@@ -140,8 +148,8 @@
   async function clear() {
     stop();
     try {
-      await call("clear_spoken");
-      clips = [];
+      await call("clear_spoken", { source: tab });
+      clips = clips.filter((c) => sourceOf(c) !== tab);
     } catch (e) {
       error = why(e);
     }
@@ -160,12 +168,21 @@
     </div>
   </div>
 
+  <div class="seg sources" role="tablist">
+    {#each SOURCES as s (s)}
+      <button role="tab" aria-selected={tab === s} class:on={tab === s} onclick={() => ((tab = s), (exported = ""))}>
+        {t.sources[s]}<span class="n">{count(s)}</span>
+      </button>
+    {/each}
+  </div>
+  <p class="faint small about">{t.about[tab]}</p>
+
   <div class="bar">
     <input type="text" placeholder={t.search} bind:value={filter} aria-label={t.search} />
-    <span class="faint small">{t.count(clips.length)}</span>
+    <span class="faint small">{t.count(mine.length)}</span>
     <span class="end">
       <button class="btn small" disabled={!list.length || exporting} onclick={exportZip}>{exporting ? t.exporting : filter.trim() ? t.exportFound(list.length) : t.export}</button>
-      <ConfirmButton small label={t.clear} question={t.clearConfirm} sure={t.clearSure} disabled={!clips.length} onconfirm={clear} />
+      <ConfirmButton small label={t.clear} question={t.clearConfirm(t.sources[tab])} sure={t.clearSure} disabled={!mine.length} onconfirm={clear} />
     </span>
   </div>
 
@@ -196,8 +213,8 @@
     </div>
   {:else if loaded}
     <div class="empty">
-      <b>{clips.length ? t.noMatch : t.empty}</b>
-      {#if !clips.length}<p>{t.emptyHint}</p>{/if}
+      <b>{mine.length ? t.noMatch : t.empty}</b>
+      {#if !mine.length}<p>{t.emptyHint[tab]}</p>{/if}
     </div>
   {/if}
 </div>
@@ -208,6 +225,16 @@
   }
   .small {
     font-size: 12.5px;
+  }
+  .sources {
+    margin-bottom: 8px;
+  }
+  .sources .n {
+    margin-left: 6px;
+    opacity: 0.6;
+  }
+  .about {
+    margin-bottom: 12px;
   }
   .bar {
     display: flex;

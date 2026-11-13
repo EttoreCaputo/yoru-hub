@@ -121,7 +121,7 @@ pub fn brain_error(e: &CloudError) -> String {
 
 /// Who Yoru is, in fewer words than Claude's prompt: on Groq every token
 /// counts against the free plan's minute.
-fn system_prompt(name: &str, services: &str, web: bool) -> String {
+fn system_prompt(name: &str, character: &str, services: &str, web: bool) -> String {
     let services = if services.is_empty() {
         "No services are connected yet.".to_string()
     } else {
@@ -144,9 +144,13 @@ For several topics call it once per topic in the same turn: the searches run at 
 - Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
 - {memory}
 - Always reply in the language the context line names (reply in: ...), even when the user speaks another one; without one, in the user's. Channel voice: one to three plain sentences a text-to-speech voice reads well: no markdown, lists, emoji, URLs, symbols or special characters; units and abbreviations written as they are said. Channel text: short Markdown is fine.
-- Friendly and to the point; never chatty or servile; don't end with offers of help.
+- Never servile; don't end with offers of help.
+
+# Who you are
+{character}
 
 {feelings}",
+        character = crate::character::prompt(character, name),
         memory = super::MEMORY_RULE,
         feelings = super::feelings_rule(),
     )
@@ -332,7 +336,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     let tags = if a.audio_tags() { format!("\n\n{}", super::audio_tags_rule()) } else { String::new() };
     let system = json!({"role": "system", "content": format!(
         "{}\n\n<memory>\n{}\n</memory>{language}{tags}",
-        system_prompt(&settings.name, &services_line(&findable), searches_web(&external_tools)),
+        system_prompt(&settings.name, &settings.character, &services_line(&findable), searches_web(&external_tools)),
         a.memory.core(budget.memory_max, brain != Brain::Ollama)
     )});
     let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));
