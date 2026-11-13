@@ -877,12 +877,24 @@ impl live::Turner for LiveTurner<'_, '_, '_> {
 fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, sink: &EventSink, utterance: &Utterance, voice: &str, language: Option<&str>, stt: Option<&Arc<Stt>>, follow_up: bool, chat: &mut LiveChat, thinking: &mut StillThinking, times: &mut Times) -> Option<Next> {
     let host = VoiceHost { link, session };
     // Live's own transcript of the user is poor (other languages, made-up
-    // words) while it understands fine: Yoru's speech-to-text writes what
-    // was said, alongside the turn, for the conversation and the memory.
-    let written = stt.map(|stt| {
-        let (stt, samples) = (Arc::clone(stt), utterance.samples.clone());
-        thread::spawn(move || stt.transcribe(&samples))
-    });
+    // words) while it understands fine: Gemini Transcribe, on the same key,
+    // writes what was said beside the turn, for the conversation and the
+    // memory; Yoru's speech-to-text if there's no key.
+    let written = {
+        let (key, stt, samples) = (crate::cloud::GOOGLE.api_key(), stt.cloned(), utterance.samples.clone());
+        let languages: &'static [&'static str] = match language {
+            Some("it") => &["it-IT"],
+            Some("en") => &["en-US"],
+            _ => &["it-IT", "en-US"],
+        };
+        (key.is_some() || stt.is_some()).then(|| {
+            thread::spawn(move || match (key, stt) {
+                (Some(key), _) => live::transcribe(&key, &samples, languages, &["Yoru"]),
+                (None, Some(stt)) => stt.transcribe(&samples).map(|t| t.text).map_err(|e| e.to_string()),
+                (None, None) => Err("nothing transcribes".into()),
+            })
+        })
+    };
     // Sent as it came (the quick way), or whole now: the session didn't open in time.
     let mut streamed = std::mem::take(&mut chat.streaming);
     if !streamed && !follow_up {
@@ -945,22 +957,16 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
         }
     };
     let mut turn = turn;
-    let written = written.and_then(|w| w.join().ok()).and_then(|t| match t {
-        Ok(t) if !t.text.trim().is_empty() => Some(t),
-        Ok(_) => None,
-        Err(e) => {
-            sink(BridgeEvent::BoardLog { line: format!("host: speech-to-text failed beside Gemini Live, keeping its transcript: {e}") });
-            None
-        }
-    });
-    if let Some(t) = &written {
-        turn.heard = t.text.trim().to_string();
+    match written.map(|w| w.join().unwrap_or_else(|_| Err("the transcription stopped".into()))) {
+        Some(Ok(text)) if !text.trim().is_empty() => turn.heard = text.trim().to_string(),
+        Some(Ok(_)) | None => {}
+        Some(Err(e)) => sink(BridgeEvent::BoardLog { line: format!("host: the transcription beside Gemini Live failed, keeping Live's own: {e}") }),
     }
-    let language = language.map(str::to_string).or(turn.language.clone()).or(written.as_ref().map(|t| t.language.clone())).unwrap_or_else(|| "en".into());
+    let language = language.map(str::to_string).or(turn.language.clone()).unwrap_or_else(|| "en".into());
     if !turn.heard.is_empty() {
         sink(BridgeEvent::Transcript {
             id: utterance.id,
-            transcript: Some(crate::stt::Transcript { text: turn.heard.clone(), language: language.clone(), logprob: written.as_ref().map_or(0.0, |t| t.logprob), elapsed_ms: started.elapsed().as_millis() as u64 }),
+            transcript: Some(crate::stt::Transcript { text: turn.heard.clone(), language: language.clone(), logprob: 0.0, elapsed_ms: started.elapsed().as_millis() as u64 }),
         });
     }
     let lines = actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect();

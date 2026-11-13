@@ -197,6 +197,11 @@ impl Session {
 
     /// Open a session at `url` (a test's server).
     pub fn open_at(url: &str, setup: &Setup) -> Result<Self, String> {
+        Self::connect(url, &setup_message(setup))
+    }
+
+    /// Connect and send `setup`, until Google says it's ready.
+    fn connect(url: &str, setup: &Value) -> Result<Self, String> {
         tls_provider();
         let (socket, _) = tungstenite::connect(url).map_err(|e| match e {
             tungstenite::Error::Http(response) => {
@@ -207,7 +212,7 @@ impl Session {
         })?;
         let mut session = Self { socket, going: false };
         session.set_timeout(READ_TIMEOUT);
-        session.send(&setup_message(setup))?;
+        session.send(setup)?;
         loop {
             let message = session.receive()?;
             if message.get("setupComplete").is_some() {
@@ -392,6 +397,48 @@ impl Downsampler {
     }
 }
 
+/// Google's speech-to-text on the Live API: free with no daily limit (20,000
+/// tokens a minute), much better at a short Italian sentence than a Live
+/// session's own transcript of the user.
+pub const TRANSCRIBE_MODEL: &str = "gemini-3.5-transcribe-live";
+
+/// Write down `samples` (16 kHz) with [`TRANSCRIBE_MODEL`]: `languages` are
+/// BCP-47 codes to expect (none: any), `words` names to spell as given.
+pub fn transcribe(key: &str, samples: &[i16], languages: &[&str], words: &[&str]) -> Result<String, String> {
+    transcribe_at(&format!("{URL}?key={key}"), samples, languages, words)
+}
+
+/// [`transcribe`] at `url` (a test's server).
+pub fn transcribe_at(url: &str, samples: &[i16], languages: &[&str], words: &[&str]) -> Result<String, String> {
+    let setup = json!({"setup": {
+        "model": format!("models/{TRANSCRIBE_MODEL}"),
+        "generationConfig": {"responseModalities": ["TEXT"]},
+        "inputAudioTranscription": {"languageCodes": languages, "customVocabulary": words},
+        "realtimeInputConfig": {"automaticActivityDetection": {"disabled": true}},
+    }});
+    let mut session = Session::connect(url, &setup)?;
+    session.set_timeout(TRANSCRIBE_TIMEOUT);
+    session.begin()?;
+    for chunk in samples.chunks(SEND_CHUNK) {
+        session.audio(chunk)?;
+    }
+    session.send(&json!({"realtimeInput": {"activityEnd": {}}}))?;
+    let mut text = String::new();
+    loop {
+        let message = session.receive()?;
+        let Some(content) = message.get("serverContent") else { continue };
+        if let Some(t) = content.pointer("/inputTranscription/text").and_then(Value::as_str) {
+            text.push_str(t);
+        }
+        if content["turnComplete"].as_bool().unwrap_or(false) || content["generationComplete"].as_bool().unwrap_or(false) {
+            return Ok(tidy(&text));
+        }
+    }
+}
+
+/// How long a transcription may take: it runs beside the answer.
+const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Install rustls' process-wide crypto provider once. The app links both ring
 /// and aws-lc-rs (the connectors' reqwest), and then rustls can't choose and
 /// panics on the first TLS handshake, killing the voice thread.
@@ -506,6 +553,41 @@ mod tests {
     }
 
     #[test]
+    fn a_transcription_asks_for_the_languages_and_joins_the_pieces() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut ws = tungstenite::accept(stream).unwrap();
+            let mut read = || loop {
+                if let Message::Text(t) = ws.read().unwrap() {
+                    return serde_json::from_str::<Value>(&t).unwrap();
+                }
+            };
+            let setup = read();
+            assert_eq!(setup["setup"]["model"], "models/gemini-3.5-transcribe-live");
+            assert_eq!(setup["setup"]["inputAudioTranscription"]["languageCodes"], json!(["it-IT"]));
+            assert_eq!(setup["setup"]["inputAudioTranscription"]["customVocabulary"], json!(["Yoru"]));
+            drop(read);
+            ws.send(Message::text(json!({"setupComplete": {}}).to_string())).unwrap();
+            loop {
+                let Message::Text(t) = ws.read().unwrap() else { continue };
+                if serde_json::from_str::<Value>(&t).unwrap().pointer("/realtimeInput/activityEnd").is_some() {
+                    break;
+                }
+            }
+            ws.send(Message::text(json!({"serverContent": {"interimInputTranscription": {"text": "ciao yo"}}}).to_string())).unwrap();
+            ws.send(Message::text(json!({"serverContent": {"inputTranscription": {"text": "Ciao "}}}).to_string())).unwrap();
+            ws.send(Message::text(json!({"serverContent": {"inputTranscription": {"text": " Yoru."}}}).to_string())).unwrap();
+            ws.send(Message::text(json!({"serverContent": {"turnComplete": true}}).to_string())).unwrap();
+            let _ = ws.read();
+        });
+        let accepted = thread::spawn(move || transcribe_at(&url, &[0; 4000], &["it-IT"], &["Yoru"]));
+        server.join().unwrap();
+        assert_eq!(accepted.join().unwrap().unwrap(), "Ciao Yoru.");
+    }
+
+    #[test]
     fn a_turn_hears_calls_a_tool_and_answers() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("ws://{}", listener.local_addr().unwrap());
@@ -585,6 +667,21 @@ mod tests {
         }
         assert!(turn.samples > 0, "no speech");
         assert!(!turn.said.is_empty());
+    }
+
+    /// `LIVE_WAV=q.wav cargo test -p yoru-core google_transcribes_for_real -- --ignored --nocapture`
+    #[test]
+    #[ignore = "talks to Google"]
+    fn google_transcribes_for_real() {
+        let key = crate::cloud::GOOGLE.api_key().expect("a Google key");
+        for path in std::env::var("LIVE_WAV").expect("LIVE_WAV").split(',') {
+            let wav = std::fs::read(path).unwrap();
+            let start = wav.windows(4).position(|w| w == b"data").unwrap() + 8;
+            let samples: Vec<i16> = wav[start..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+            let asked = std::time::Instant::now();
+            let text = transcribe(&key, &samples, &["it-IT", "en-US"], &["Yoru"]);
+            eprintln!("{path}: {} ms: {text:?}", asked.elapsed().as_millis());
+        }
     }
 
     #[test]
