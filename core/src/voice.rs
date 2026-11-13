@@ -376,6 +376,9 @@ pub enum Hearing {
     /// The board started streaming while another board had the voice
     /// floor: it's told to stop and go back to idle.
     Refused,
+    /// The user is about to talk (the pointer came onto the notch): Gemini
+    /// Live opens its session now, so the press doesn't wait for it.
+    AboutToTalk,
 }
 
 /// The pipeline: handles each finished utterance, on its own thread so the
@@ -399,6 +402,12 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                     set_state(&link, "idle");
                 }
                 sink(BridgeEvent::BoardLog { line: "host: another board is answering, this one stopped listening".into() });
+                continue;
+            }
+            Hearing::AboutToTalk => {
+                if let (Some(voice), Some(assistant), Some(link)) = (&config.live, &session.assistant, session.link.upgrade()) {
+                    live.prepare(assistant, &VoiceHost { link: &link, session }, voice, sink);
+                }
                 continue;
             }
             Hearing::Started { trigger } => {
@@ -712,7 +721,13 @@ struct LiveChat {
     /// Google refused a session then (no quota left, a bad key): the usual
     /// pipeline answers for [`LIVE_PAUSE`] before it's asked again.
     refused: Option<Instant>,
+    /// The session was opened ahead, for a conversation not started yet.
+    prepared: Option<Instant>,
 }
+
+/// How long a session opened ahead waits for the user to talk; then the
+/// next conversation opens its own.
+const PREPARED_FOR: Duration = Duration::from_secs(180);
 
 /// How long the usual pipeline answers after Gemini Live couldn't.
 const LIVE_PAUSE: Duration = Duration::from_secs(600);
@@ -747,13 +762,32 @@ impl LiveChat {
         }
     }
 
+    /// Open a session for the next conversation, ahead of it. One still
+    /// waiting is kept; one a conversation used is replaced.
+    fn prepare(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, sink: &EventSink) {
+        if self.streaming || self.ready_for(voice) {
+            return;
+        }
+        self.session = None;
+        if self.open(assistant, host, voice, sink) {
+            self.prepared = Some(Instant::now());
+        }
+    }
+
+    /// A session opened ahead in `voice`, fresh and still open.
+    fn ready_for(&self, voice: &str) -> bool {
+        self.prepared.is_some_and(|t| t.elapsed() < PREPARED_FOR) && self.voice == voice && self.session.as_ref().is_some_and(|s| s.is_open())
+    }
+
     /// The board started streaming: Google listens from now. A new
-    /// conversation (not a follow-up) gets a new session.
+    /// conversation (not a follow-up) gets a new session, or the one
+    /// opened ahead for it.
     fn start(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, follow_up: bool, sink: &EventSink) {
         self.streaming = false;
-        if !follow_up {
+        if !follow_up && !self.ready_for(voice) {
             self.session = None;
         }
+        self.prepared = None;
         if !self.open(assistant, host, voice, sink) {
             return;
         }
@@ -1606,6 +1640,11 @@ impl Receiving {
         if !added.is_empty() {
             let _ = self.pipeline.send(Hearing::Audio(added.to_vec()));
         }
+    }
+
+    /// The user is about to talk: Gemini Live may open its session.
+    pub fn about_to_talk(&self) {
+        let _ = self.pipeline.send(Hearing::AboutToTalk);
     }
 
     pub fn end(&mut self, params: &Value) {

@@ -117,6 +117,10 @@ pub fn warm() {
             board.state.lock().unwrap().used = Some(Instant::now());
             crate::hostlog::line(TARGET, "pointer on the notch: the microphone's engine is on");
         }
+        // Gemini Live, if on, opens its session meanwhile.
+        if board.state.lock().unwrap().utterance.is_none() {
+            board.notify("about_to_talk", json!({}));
+        }
     });
 }
 

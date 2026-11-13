@@ -133,6 +133,7 @@ pub(super) fn run(
                     let _ = turn_jobs.send(TurnJob::Pause(id, samples));
                 }
             }
+            LinkEvent::Notification { method, .. } if method == "about_to_talk" => receiving.lock().unwrap().about_to_talk(),
             LinkEvent::Notification { method, params } if method == "utterance_end" => receiving.lock().unwrap().end(&params),
             LinkEvent::Notification { method, params } if method == "playback_end" => speaker.playback_end(params),
             LinkEvent::Notification { method, params } if method == "approval" => super::confirm::on_notification(&confirmations, &params),
