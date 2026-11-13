@@ -11,7 +11,7 @@
 
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -22,6 +22,8 @@ const WIDTH: f64 = 620.0;
 const HEIGHT: f64 = 520.0;
 /// How often the pointer is looked at.
 const POINTER_EVERY: Duration = Duration::from_millis(40);
+/// How often the microphone is kept ready while the pointer is on the notch.
+const WARM_EVERY: Duration = Duration::from_secs(5);
 /// Room around what the page draws that still counts as on it.
 const SLACK: f64 = 8.0;
 
@@ -193,6 +195,7 @@ pub fn place(app: &AppHandle, window: &WebviewWindow) {
 fn follow_pointer(app: AppHandle) {
     thread::spawn(move || {
         let mut over = false;
+        let mut last_warm = None;
         let mut screens = mac::screens_signature();
         loop {
             thread::sleep(POINTER_EVERY);
@@ -210,9 +213,14 @@ fn follow_pointer(app: AppHandle) {
                 over = on;
                 let _ = window.set_ignore_cursor_events(!on);
                 let _ = window.emit("notch-pointer", on);
-                if on {
-                    yoru_core::notch::warm();
-                }
+            }
+            // The microphone ready for a click, for as long as the pointer
+            // stays: it may have come before the notch's session was up.
+            if on && last_warm.is_none_or(|t: Instant| t.elapsed() >= WARM_EVERY) {
+                last_warm = Some(Instant::now());
+                yoru_core::notch::warm();
+            } else if !on {
+                last_warm = None;
             }
         }
     });

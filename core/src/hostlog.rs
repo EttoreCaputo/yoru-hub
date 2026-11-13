@@ -53,12 +53,13 @@ fn describe(event: &BridgeEvent) -> Option<String> {
         BridgeEvent::Wake { word, .. } => format!("wake word: {word}"),
         BridgeEvent::Listening { id, trigger } => format!("listening #{id} ({trigger})"),
         BridgeEvent::Utterance { utterance, duration_ms, peak_db, .. } => format!(
-            "heard #{} ({}): {duration_ms} ms, ended {}, speech {}, peak {}",
+            "heard #{} ({}): {duration_ms} ms, ended {}, speech {}, peak {}, clipped {:.1}%",
             utterance.id,
             utterance.trigger,
             utterance.reason,
             utterance.speech,
-            peak_db.map_or("-".into(), |p| format!("{p:.0} dB"))
+            peak_db.map_or("-".into(), |p| format!("{p:.0} dB")),
+            clipped(&utterance.samples)
         ),
         BridgeEvent::Transcript { id, transcript } => match transcript {
             Some(t) => format!("transcript #{id} ({}, {} ms): {}", t.language, t.elapsed_ms, t.text),
@@ -91,6 +92,15 @@ fn write(target: &str, line: &str) {
     let _ = OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| f.write_all(stamped.as_bytes()));
 }
 
+/// The share of samples at full scale, in percent: a microphone turned up
+/// too far, which spoils transcription.
+fn clipped(samples: &[i16]) -> f64 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    100.0 * samples.iter().filter(|s| s.unsigned_abs() >= 32_000).count() as f64 / samples.len() as f64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,3 +111,4 @@ mod tests {
         assert_eq!(describe(&BridgeEvent::VoiceError { message: "no key".into() }).as_deref(), Some("voice error: no key"));
     }
 }
+

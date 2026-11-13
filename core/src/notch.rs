@@ -110,8 +110,15 @@ pub fn talk(pressed: bool) {
 /// a second to start, and the first words were lost. It goes off again
 /// after [`ENGINE_IDLE`] unused. Only with the permission already given,
 /// so hovering never brings up macOS's question.
+/// Called again while the pointer stays there: an engine already on is
+/// only kept on; one that went off (or a notch that wasn't up yet when the
+/// pointer came) starts.
 pub fn warm() {
     let Some(board) = board() else { return };
+    if board.audio.lock().unwrap().as_ref().is_some_and(|a| a.running) {
+        board.state.lock().unwrap().used = Some(Instant::now());
+        return;
+    }
     let _ = thread::Builder::new().name("yoru-notch-warm".into()).spawn(move || {
         if microphone(false).is_ok_and(|status| status == "granted") && board.audio_on() {
             board.state.lock().unwrap().used = Some(Instant::now());
