@@ -81,6 +81,9 @@ pub fn on_event(listener: impl Fn(Event) + Send + Sync + 'static) {
 }
 
 fn tell(event: Event) {
+    if let Event::Error { message } = &event {
+        crate::hostlog::line(TARGET, &format!("error: {message}"));
+    }
     let listener = LISTENER.lock().unwrap().clone();
     if let Some(listener) = listener {
         listener(event);
@@ -93,6 +96,10 @@ fn board() -> Option<Arc<Board>> {
 
 /// Push-to-talk: listen while it's held, and send what was heard when let go.
 pub fn talk(pressed: bool) {
+    crate::hostlog::line(TARGET, if pressed { "talk: pressed" } else { "talk: let go" });
+    if board().is_none() {
+        crate::hostlog::line(TARGET, "talk: the notch's session isn't running");
+    }
     if let Some(board) = board() {
         if pressed { board.begin("button", None) } else { board.end_button() }
     }
@@ -327,9 +334,11 @@ impl Board {
             state.next_id
         };
         if !self.audio_on() {
+            crate::hostlog::line(TARGET, "the microphone wouldn't start");
             self.state.lock().unwrap().utterance = None;
             return;
         }
+        crate::hostlog::line(TARGET, &format!("utterance #{id} starts ({trigger})"));
         self.notify("utterance_start", json!({"id": id, "trigger": trigger, "rate": 16000, "format": "s16le"}));
         self.set_voice("listening");
         self.command(json!({"cmd": "mic", "on": true}));
@@ -350,6 +359,7 @@ impl Board {
         // Push-to-talk sends what it has: a short word may be quiet.
         let speech = u.speech || (u.trigger == "button" && u.seq > 8);
         let reason = if !speech && reason != "host" { "no_speech" } else { reason };
+        crate::hostlog::line(TARGET, &format!("utterance #{} ends: {reason}, speech {speech}, {} frames", u.id, u.seq));
         self.notify("utterance_end", json!({"id": u.id, "reason": reason, "speech": speech, "frames": u.seq}));
         tell(Event::Level { level: 0.0 });
         self.set_voice(if speech { "thinking" } else { "idle" });

@@ -720,7 +720,10 @@ impl LiveChat {
         if self.refused.is_some_and(|t| t.elapsed() < LIVE_PAUSE) {
             return false;
         }
-        let Some(key) = crate::cloud::GOOGLE.api_key() else { return false };
+        let Some(key) = crate::cloud::GOOGLE.api_key() else {
+            sink(BridgeEvent::BoardLog { line: "host: Gemini Live is on but there's no Google key: answering without it".into() });
+            return false;
+        };
         match live::Session::open_any(&key, &assistant.live_setup(host, voice)) {
             Ok((session, model)) => {
                 sink(BridgeEvent::BoardLog { line: format!("host: Gemini Live session open ({model}, {voice})") });
@@ -749,6 +752,7 @@ impl LiveChat {
         }
         self.streaming = self.session.as_mut().is_some_and(|s| s.begin().is_ok());
         if !self.streaming {
+            sink(BridgeEvent::BoardLog { line: "host: Gemini Live couldn't start hearing: the utterance goes whole at its end".into() });
             self.session = None;
         }
     }
@@ -890,6 +894,7 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
     assistant.live_turn(&turn.heard, &turn.said, actions, follow_up);
     let Some(played) = played else {
         // Google chose to stay silent: not meant for Yoru.
+        sink(BridgeEvent::BoardLog { line: format!("host: Gemini Live stayed silent (heard: {:?})", turn.heard) });
         return Some(Next::State("idle"));
     };
     Some(match played {

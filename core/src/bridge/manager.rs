@@ -176,6 +176,7 @@ fn tagged(sink: &ManagerSink, target: Option<String>, info: Option<Arc<SessionIn
     let sink = sink.clone();
     Arc::new(move |event| {
         let (board, board_kind) = info.as_ref().map_or((None, None), |i| (i.id(), *i.kind.lock().unwrap()));
+        crate::hostlog::event(target.as_deref(), &event);
         sink(ManagerEvent { target: target.clone(), board, board_kind, event })
     })
 }
