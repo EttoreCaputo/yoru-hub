@@ -456,7 +456,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
         }
         // Gemini Live hears and answers on its own.
         let live_next = match (&config.live, &session.assistant) {
-            (Some(voice), Some(assistant)) => respond_live(&link, session, assistant, sink, &utterance, voice, config.language.as_deref(), follow_up, &mut live, &mut thinking, &mut times),
+            (Some(voice), Some(assistant)) => respond_live(&link, session, assistant, sink, &utterance, voice, config.language.as_deref(), config.stt.as_ref(), follow_up, &mut live, &mut thinking, &mut times),
             _ => None,
         };
         let next = if let Some(next) = live_next { next } else {
@@ -874,8 +874,15 @@ impl live::Turner for LiveTurner<'_, '_, '_> {
 /// and speaks. `None` when it couldn't start (no Google key, the session
 /// wouldn't open): the usual pipeline answers instead.
 #[allow(clippy::too_many_arguments)]
-fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, sink: &EventSink, utterance: &Utterance, voice: &str, language: Option<&str>, follow_up: bool, chat: &mut LiveChat, thinking: &mut StillThinking, times: &mut Times) -> Option<Next> {
+fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, sink: &EventSink, utterance: &Utterance, voice: &str, language: Option<&str>, stt: Option<&Arc<Stt>>, follow_up: bool, chat: &mut LiveChat, thinking: &mut StillThinking, times: &mut Times) -> Option<Next> {
     let host = VoiceHost { link, session };
+    // Live's own transcript of the user is poor (other languages, made-up
+    // words) while it understands fine: Yoru's speech-to-text writes what
+    // was said, alongside the turn, for the conversation and the memory.
+    let written = stt.map(|stt| {
+        let (stt, samples) = (Arc::clone(stt), utterance.samples.clone());
+        thread::spawn(move || stt.transcribe(&samples))
+    });
     // Sent as it came (the quick way), or whole now: the session didn't open in time.
     let mut streamed = std::mem::take(&mut chat.streaming);
     if !streamed && !follow_up {
@@ -937,11 +944,23 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
             return Some(Next::State("error"));
         }
     };
-    let language = language.map(str::to_string).or(turn.language.clone()).unwrap_or_else(|| "en".into());
+    let mut turn = turn;
+    let written = written.and_then(|w| w.join().ok()).and_then(|t| match t {
+        Ok(t) if !t.text.trim().is_empty() => Some(t),
+        Ok(_) => None,
+        Err(e) => {
+            sink(BridgeEvent::BoardLog { line: format!("host: speech-to-text failed beside Gemini Live, keeping its transcript: {e}") });
+            None
+        }
+    });
+    if let Some(t) = &written {
+        turn.heard = t.text.trim().to_string();
+    }
+    let language = language.map(str::to_string).or(turn.language.clone()).or(written.as_ref().map(|t| t.language.clone())).unwrap_or_else(|| "en".into());
     if !turn.heard.is_empty() {
         sink(BridgeEvent::Transcript {
             id: utterance.id,
-            transcript: Some(crate::stt::Transcript { text: turn.heard.clone(), language: language.clone(), logprob: 0.0, elapsed_ms: started.elapsed().as_millis() as u64 }),
+            transcript: Some(crate::stt::Transcript { text: turn.heard.clone(), language: language.clone(), logprob: written.as_ref().map_or(0.0, |t| t.logprob), elapsed_ms: started.elapsed().as_millis() as u64 }),
         });
     }
     let lines = actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect();
