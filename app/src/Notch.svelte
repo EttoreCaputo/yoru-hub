@@ -51,6 +51,8 @@
   let typed = $state("");
   let typing = $state(false);
   let answering = $state<string | null>(null);
+  /** The microphone's permission: granted, denied, restricted, unknown. */
+  let mic = $state("granted");
   let shape: HTMLElement | undefined = $state();
 
   const ear = $derived(geometry.height + 8);
@@ -66,6 +68,26 @@
   const card = $derived(store.confirmations[0] ?? null);
   /** What the left of the top row says while open. */
   const status = $derived(error ? t.states.error : fetching && busy ? fetching : t.states[voice] || "Yoru");
+
+  /** Ask where it stands; macOS's own prompt comes up if it never did. */
+  async function checkMic(ask: boolean) {
+    try {
+      mic = await call<string>("notch_microphone", { ask });
+    } catch {
+      // No helper (the browser, a broken install): talking will say why.
+    }
+  }
+  async function allowMic() {
+    if (mic === "unknown") await checkMic(true);
+    else await call("open_microphone_privacy").catch(() => {});
+  }
+  void checkMic(false).then(() => {
+    if (mic === "unknown") return checkMic(true);
+  });
+  // Settings may have changed it meanwhile: look again on opening.
+  $effect(() => {
+    if (pointer && mic !== "granted") void checkMic(false);
+  });
 
   call<Geometry | null>("notch_geometry").then((g) => g && (geometry = g), () => {});
   on<Geometry>("notch-geometry", (g) => (geometry = g));
@@ -87,6 +109,7 @@
     else if (e.event === "error") {
       error = e.message;
       voice = "error";
+      void checkMic(false);
     }
   });
 
@@ -104,6 +127,7 @@
   });
 
   function talk(pressed: boolean) {
+    if (pressed && mic !== "granted") return void allowMic();
     if (held === pressed) return;
     held = pressed;
     void call("notch_talk", { pressed }).catch(() => {});
@@ -155,6 +179,8 @@
         <span class="wave" aria-hidden="true"><i></i><i></i><i></i></span>
       {:else if error}
         <span class="dot err"></span>
+      {:else if mic !== "granted"}
+        <svg class="mic-off" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M4 4l16 16" /></svg>
       {:else if store.confirmations.length}
         <span class="count wait">{store.confirmations.length}</span>
       {:else if store.unread}
@@ -165,6 +191,14 @@
 
   <div class="body">
     <div class="inner">
+      {#if mic !== "granted"}
+        <section class="ask">
+          <p class="label"><span class="dot wait"></span>{mic === "unknown" ? t.micAsk : t.micDenied}</p>
+          <div class="pills">
+            <button class="pill light" onclick={allowMic}>{mic === "unknown" ? t.micAllow : t.micSettings}</button>
+          </div>
+        </section>
+      {/if}
       {#if card}
         <section class="ask">
           <p class="label"><span class="dot wait"></span>{tc.yoruAsks}<span class="tool">{card.tool}</span></p>
@@ -350,6 +384,14 @@
   }
   .dot.wait {
     background: #ff9f43;
+  }
+  .mic-off {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: #ff9f43;
+    stroke-width: 2;
+    stroke-linecap: round;
   }
   .count {
     min-width: 18px;

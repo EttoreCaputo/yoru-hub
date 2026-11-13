@@ -85,6 +85,21 @@ func askMicrophone() {
     if !granted { fail("Yoru isn't allowed to use the microphone (System Settings, Privacy & Security, Microphone)") }
 }
 
+/// `yoru-audio microphone [--ask]`: whether Yoru may use the microphone
+/// (`granted`, `denied`, `restricted` or `unknown` before the user is ever
+/// asked), asking first with `--ask` if the user never answered.
+func microphone(ask: Bool) {
+    var status = AVCaptureDevice.authorizationStatus(for: .audio)
+    if ask && status == .notDetermined {
+        let done = DispatchSemaphore(value: 0)
+        AVCaptureDevice.requestAccess(for: .audio) { _ in done.signal() }
+        done.wait()
+        status = AVCaptureDevice.authorizationStatus(for: .audio)
+    }
+    let names: [AVAuthorizationStatus: String] = [.authorized: "granted", .denied: "denied", .restricted: "restricted"]
+    emit(["event": "microphone", "status": names[status] ?? "unknown"])
+}
+
 final class Recording {
     let tap: Tap?
     let tracks: [Track]
@@ -267,6 +282,8 @@ case "voiceprint":
     run { try await voiceprint(folder: URL(fileURLWithPath: folder, isDirectory: true)) }
 case "talk":
     talk()
+case "microphone":
+    microphone(ask: args.contains("--ask"))
 case "record":
     let recording: Recording
     do {

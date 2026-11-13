@@ -1988,6 +1988,8 @@ pub fn run() {
             notch::notch_geometry,
             notch::notch_talk,
             notch::notch_hush,
+            notch::notch_microphone,
+            notch::open_microphone_privacy,
             set_notch,
             show_app,
             status, list_ports, set_port, set_transport, boards, show_board, set_primary, rename_board,

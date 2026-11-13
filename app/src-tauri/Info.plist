@@ -5,7 +5,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Yoru records your microphone when you record a meeting.</string>
+	<string>Yoru hears you through the microphone when you talk to him in the notch, and records it when you record a meeting.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Yoru records the sound of your calls and apps when you record a meeting.</string>
 </dict>

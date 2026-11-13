@@ -582,6 +582,9 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   delete_spoken: (a) => (spoken = spoken.filter((c) => c.id !== a.id)),
   clear_spoken: () => void (spoken = []),
   export_spoken: () => "/Users/you/Downloads/yoru-spoken-20261022-153012.zip",
+  // ?mic=denied (or unknown, restricted) for the notch's permission row.
+  notch_microphone: (a) => (a.ask && params.get("mic") === "unknown" ? "granted" : (params.get("mic") ?? "granted")),
+  open_microphone_privacy: () => undefined,
   meeting_sources: () => meetingSources,
   meetings_list: () => meetings,
   meeting_active: () => recording,

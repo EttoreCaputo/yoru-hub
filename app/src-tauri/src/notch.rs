@@ -115,6 +115,27 @@ pub fn notch_hush() {
     yoru_core::notch::hush();
 }
 
+/// Whether Yoru may use the microphone; with `ask`, macOS's own prompt
+/// first if the user never answered it.
+#[tauri::command]
+pub async fn notch_microphone(ask: bool) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || yoru_core::notch::microphone(ask))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// System Settings at the microphone's permission, once the user said no:
+/// macOS doesn't ask twice.
+#[tauri::command]
+pub fn open_microphone_privacy() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        .status()
+        .map_err(|e| e.to_string())
+        .map(|_| ())
+}
+
 /// Show Yoru in the notch, or take him away.
 pub fn set_shown(app: &AppHandle, shown: bool) {
     match (shown, app.get_webview_window(LABEL)) {

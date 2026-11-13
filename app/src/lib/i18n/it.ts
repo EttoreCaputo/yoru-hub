@@ -516,6 +516,10 @@ const it: Messages = {
     waiting: (n: number) => (n === 1 ? "1 conferma in attesa" : `${n} conferme in attesa`),
     unread: (n: number) => `${n} da leggere`,
     fetching: "Sto cercando",
+    micAsk: "Non ti sento ancora: fammi usare il microfono.",
+    micDenied: "Non ti sento: in Impostazioni di Sistema il microfono è spento per Yoru.",
+    micAllow: "Consenti il microfono",
+    micSettings: "Apri Impostazioni di Sistema",
   },
 
   board: {

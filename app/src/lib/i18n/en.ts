@@ -518,6 +518,10 @@ const en = {
     waiting: (n: number) => (n === 1 ? "1 card waiting" : `${n} cards waiting`),
     unread: (n: number) => `${n} unread`,
     fetching: "Looking it up",
+    micAsk: "I can't hear you yet: let me use the microphone.",
+    micDenied: "I can't hear you: the microphone is off for Yoru in System Settings.",
+    micAllow: "Allow the microphone",
+    micSettings: "Open System Settings",
   },
 
   board: {
