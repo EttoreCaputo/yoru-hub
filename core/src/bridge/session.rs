@@ -242,7 +242,10 @@ pub(super) fn run(
                     info.ready.store(true, Ordering::Relaxed);
                     board_ready.store(true, Ordering::Relaxed);
                     unanswered = 0;
-                    if let Some(hub) = &config.hub {
+                    // The notch isn't a board Claude Code drives, nor one whose
+                    // tools are worth keeping: its list would replace the board's.
+                    let notch = port == crate::notch::TARGET;
+                    if let Some(hub) = config.hub.as_ref().filter(|_| !notch) {
                         hub.attach(link.clone(), hello.clone(), port, say_fn(&link, &speaker, config), hub_changed_settings.clone());
                     }
                     targets.set(info.number, AlertTarget { id: hello.id.clone(), link: Arc::downgrade(&link), kind, speaker: speaker.clone(), voice_state: voice_state.clone() });
@@ -250,7 +253,7 @@ pub(super) fn run(
                     // The voice asks the board for its tools while it streams the
                     // audio, too busy to answer in time, and falls back on the
                     // list kept on disk: keep it this firmware's.
-                    if let Ok(tools) = link.list_tools(TOOL_TIMEOUT) {
+                    if !notch && let Ok(tools) = link.list_tools(TOOL_TIMEOUT) {
                         crate::link::save_tools_cache(kind, &tools);
                     }
                     if let Some(assistant) = &config.assistant

@@ -35,6 +35,7 @@ use serde::Serialize;
 use crate::link::Hello;
 use crate::profile::BoardKind;
 use crate::serial;
+use crate::notch;
 use crate::wifi;
 
 use super::alerts::{self, AlertInput, Targets};
@@ -253,6 +254,15 @@ impl Running<'_> {
     fn is_wifi(&self) -> bool {
         wifi::target(&self.target).is_some()
     }
+
+    /// The Yoru in the notch: neither on USB nor on WiFi, and outside the cap.
+    fn is_notch(&self) -> bool {
+        self.target == notch::TARGET
+    }
+
+    fn is_usb(&self) -> bool {
+        !self.is_wifi() && !self.is_notch()
+    }
 }
 
 /// When a target may be tried again, and the pause after that.
@@ -279,11 +289,11 @@ fn manage<'scope, 'env>(scope: &'scope Scope<'scope, 'env>, shared: &'env Shared
         prefer_usb(&running, &usb, shared.config, max_boards, shared.host);
 
         // USB first, then WiFi once the USB boards have said who they are.
-        let introducing = running.iter().any(|r| !r.is_wifi() && !r.info.ready.load(Ordering::Relaxed) && r.started.elapsed() < USB_INTRODUCTION);
-        let on_usb: Vec<String> = running.iter().filter(|r| !r.is_wifi()).filter_map(|r| r.info.id()).collect();
+        let introducing = running.iter().any(|r| r.is_usb() && !r.info.ready.load(Ordering::Relaxed) && r.started.elapsed() < USB_INTRODUCTION);
+        let on_usb: Vec<String> = running.iter().filter(|r| r.is_usb()).filter_map(|r| r.info.id()).collect();
         let wifi_targets = wifi_targets.into_iter().filter(|t| !introducing && !wifi::target(t).flatten().is_some_and(|id| on_usb.iter().any(|u| u == id)));
         for target in usb.iter().cloned().chain(wifi_targets) {
-            if max_boards.is_some_and(|n| running.len() >= n) {
+            if max_boards.is_some_and(|n| boards(&running) >= n) {
                 break;
             }
             if running.iter().any(|r| r.target == target) || retry.get(&target).is_some_and(|r| Instant::now() < r.at) {
@@ -295,7 +305,21 @@ fn manage<'scope, 'env>(scope: &'scope Scope<'scope, 'env>, shared: &'env Shared
             }
         }
 
-        if running.is_empty() {
+        // The notch runs beside the boards while it's on.
+        let notch_on = notch::enabled() && !paused.contains(notch::TARGET);
+        for r in running.iter().filter(|r| r.is_notch() && !notch_on) {
+            r.info.stop.store(true, Ordering::Relaxed);
+        }
+        if notch_on
+            && !running.iter().any(Running::is_notch)
+            && retry.get(notch::TARGET).is_none_or(|r| Instant::now() >= r.at)
+            && let Some(started) = start(scope, shared, notch::TARGET, numbers.fetch_add(1, Ordering::Relaxed))
+        {
+            shared.control.running.lock().unwrap().insert(notch::TARGET.to_string());
+            running.push(started);
+        }
+
+        if boards(&running) == 0 {
             let reason = why_none.unwrap_or("connecting to the board");
             if waiting.as_ref().is_none_or(|(r, at)| r != reason || at.elapsed() >= WAITING_EVERY) {
                 if let Some(hub) = &shared.config.hub {
@@ -315,6 +339,11 @@ fn manage<'scope, 'env>(scope: &'scope Scope<'scope, 'env>, shared: &'env Shared
     for r in running {
         let _ = r.thread.join();
     }
+}
+
+/// The sessions of real boards, the notch left out.
+fn boards(running: &[Running]) -> usize {
+    running.iter().filter(|r| !r.is_notch()).count()
 }
 
 /// The targets to run sessions for: on USB, on WiFi, and why there are none.
@@ -341,8 +370,8 @@ fn candidates(config: &BridgeConfig) -> (Vec<String>, Vec<String>, Option<&'stat
 /// with `transport` auto and no fixed port).
 fn prefer_usb(running: &[Running], usb: &[String], config: &BridgeConfig, max_boards: Option<usize>, host: &EventSink) {
     let ready_on_usb: Vec<String> =
-        running.iter().filter(|r| !r.is_wifi() && r.info.ready.load(Ordering::Relaxed)).filter_map(|r| r.info.id()).collect();
-    let at_cap = max_boards.is_some_and(|n| running.len() >= n);
+        running.iter().filter(|r| r.is_usb() && r.info.ready.load(Ordering::Relaxed)).filter_map(|r| r.info.id()).collect();
+    let at_cap = max_boards.is_some_and(|n| boards(running) >= n);
     let usb_waiting = config.port.is_none() && config.transport == Transport::Auto && usb.iter().any(|p| !running.iter().any(|r| &r.target == p));
     for r in running.iter().filter(|r| r.is_wifi() && !r.info.stop.load(Ordering::Relaxed)) {
         let same_board = r.info.id().is_some_and(|id| ready_on_usb.contains(&id));
@@ -393,7 +422,11 @@ fn reap(running: &mut Vec<Running>, retry: &mut HashMap<String, Retry>, shared: 
                 *slot = Retry { at: Instant::now(), delay: Duration::from_secs(1) };
                 if !shared.stop.load(Ordering::Relaxed) {
                     let paused = shared.control.paused.lock().unwrap().contains(&r.target);
-                    let reason = if paused { "the port is paused for another program" } else { "the board is on USB now" };
+                    let reason = match () {
+                        _ if r.target == notch::TARGET => "the notch is off",
+                        _ if paused => "the port is paused for another program",
+                        _ => "the board is on USB now",
+                    };
                     tagged(shared.sink, Some(r.target.clone()), Some(r.info.clone()))(BridgeEvent::Disconnected {
                         port: label.clone(),
                         reason: reason.into(),

@@ -12,6 +12,9 @@
 //   yoru-audio model <folder> [--download]
 //       Whether the transcription model is in <folder>; fetches it first
 //       with --download, reporting `progress`.
+//   yoru-audio talk
+//       The Mac as Yoru's microphone and speaker, for the Yoru in the
+//       notch: commands on stdin, audio on stdout (Talk.swift).
 //   yoru-audio transcribe <file> --model <folder> [--language <code>] [--speakers <folder>]
 //       The file's words as segments (`done` with `segments`), each with
 //       its speaker when --speakers says where the diarization model is,
@@ -262,6 +265,8 @@ case "voiceprint":
     }
     guard let folder else { fail("voiceprint: no --model") }
     run { try await voiceprint(folder: URL(fileURLWithPath: folder, isDirectory: true)) }
+case "talk":
+    talk()
 case "record":
     let recording: Recording
     do {
@@ -292,5 +297,5 @@ case "record":
     keep = timer
     dispatchMain()
 default:
-    fail("usage: yoru-audio sources | record <folder> [--system | --app <bundle id>] [--mic <uid|default>]... | finalize <folder> | import <file> <folder> | model <folder> [--download] | transcribe <file> --model <folder> [--language <code>] [--speakers <folder>] | voiceprint --model <folder>")
+    fail("usage: yoru-audio sources | record <folder> [--system | --app <bundle id>] [--mic <uid|default>]... | finalize <folder> | import <file> <folder> | model <folder> [--download] | transcribe <file> --model <folder> [--language <code>] [--speakers <folder>] | voiceprint --model <folder> | talk")
 }

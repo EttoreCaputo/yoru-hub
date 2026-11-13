@@ -107,8 +107,9 @@
   }
 
   let followPointer = $state(true);
+  let notch = $state(false);
   $effect(() => {
-    void call<{ follow_pointer: boolean }>("status").then((s) => (followPointer = s?.follow_pointer ?? true), () => {});
+    void call<{ follow_pointer: boolean; notch?: boolean }>("status").then((s) => ((followPointer = s?.follow_pointer ?? true), (notch = s?.notch ?? false)), () => {});
   });
   const running = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   // Updated over its link instead of esptool (core's ota.rs).
@@ -154,6 +155,13 @@
     {#if !store.boards.some((b) => b.primary)}<p class="faint hint">{tb.noMain}</p>{/if}
     <h2 class="of">{tb.settingsOf(store.boardName(store.shown))}</h2>
   {/if}
+  <h2 class="section-title">{t.mac}</h2>
+  <section class="panel">
+    <div class="setting">
+      <div class="what"><b>{t.notch}</b><span>{t.notchHint}</span></div>
+      <div class="how"><Toggle checked={notch} label={t.notch} onchange={(on) => ((notch = on), call("set_notch", { on }))} /></div>
+    </div>
+  </section>
   <h2 class="section-title" class:sub={several}>{t.connection}</h2>
   <section class="panel">
     {#if !live}

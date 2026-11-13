@@ -34,6 +34,7 @@
 mod assistant;
 mod instances;
 mod meetings;
+mod notch;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
@@ -114,6 +115,9 @@ struct Settings {
     /// The last version of the tour seen (or declined): a newer one offers its new steps.
     #[serde(default)]
     tour_version: u32,
+    /// Yoru in the Mac's notch too (docs/notch.md).
+    #[serde(default)]
+    notch: bool,
 }
 
 fn yes() -> bool {
@@ -326,6 +330,10 @@ impl Devices {
             self.host.record(&event.event);
             return;
         };
+        // The notch has its own window: not a board to switch to, flash or update.
+        if target == yoru_core::notch::TARGET {
+            return;
+        }
         if let BridgeEvent::Disconnected { .. } = &event.event {
             self.boards.remove(target);
             // A UI that knows one board shows it gone once none is left.
@@ -1125,12 +1133,19 @@ struct Status {
     transcripts: Vec<TranscriptEntry>,
     port_setting: Option<String>,
     follow_pointer: bool,
+    /// Yoru in the notch is on.
+    notch: bool,
 }
 
 /// What the UI shows about `board` (an id or a target), or about the board it shows.
 #[tauri::command]
 fn status(state: State<AppState>, board: Option<String>) -> Status {
     let primary = state.primary.lock().unwrap().clone();
+    // Read before the struct: a guard in a field lives to its end.
+    let (port_setting, notch) = {
+        let settings = state.settings.lock().unwrap();
+        (settings.port.clone(), settings.notch)
+    };
     let devices = state.devices.lock().unwrap();
     let link = board.as_deref().and_then(|b| devices.find(b)).or_else(|| devices.current(primary.as_deref())).unwrap_or(&devices.host);
     let age = |t: Option<Instant>| t.map(|t| t.elapsed().as_millis() as u64);
@@ -1150,8 +1165,9 @@ fn status(state: State<AppState>, board: Option<String>) -> Status {
         logs: link.logs.iter().cloned().collect(),
         voice: link.voice.clone(),
         transcripts: link.transcripts.iter().cloned().collect(),
-        port_setting: state.settings.lock().unwrap().port.clone(),
+        port_setting,
         follow_pointer: state.follow_pointer.load(Ordering::Relaxed),
+        notch,
     }
 }
 
@@ -1384,6 +1400,20 @@ fn set_follow_pointer(state: State<AppState>, on: bool) {
     state.follow_pointer.store(on, Ordering::Relaxed);
     state.settings.lock().unwrap().ignore_pointer = !on;
     state.save_settings();
+}
+
+/// Bring the app's window up (from the notch).
+#[tauri::command]
+fn show_app(app: AppHandle) {
+    show_main(&app);
+}
+
+/// Yoru in the Mac's notch, or not.
+#[tauri::command]
+fn set_notch(app: AppHandle, state: State<AppState>, on: bool) {
+    state.settings.lock().unwrap().notch = on;
+    state.save_settings();
+    notch::apply(&app, on);
 }
 
 /// The app's language: `None` follows the system's.
@@ -1864,6 +1894,7 @@ pub fn run() {
                 show_main(app);
             }
         }))
+        .plugin(notch::plugin())
         .setup(|app| {
             // We hold the single instance now; older copies must let go of the port.
             instances::stop_strays();
@@ -1927,12 +1958,15 @@ pub fn run() {
                 embedder: Mutex::default(),
                 voiceprinter: yoru_core::voiceprint::Voiceprinter::new().map(Arc::new),
             });
+            app.manage(notch::Notch::default());
             apply_voice(&app.state::<AppState>());
             let handle = app.handle();
             // A logout or `kill` quits like the tray's Quit, so the port is
             // released and the whisper-server sidecar stopped.
             let quitter = handle.clone();
             let _ = ctrlc::set_handler(move || quitter.exit(0));
+            let notch_on = app.state::<AppState>().settings.lock().unwrap().notch;
+            notch::apply(handle, notch_on);
             let manager = start_bridge(handle, port);
             *app.state::<AppState>().manager.lock().unwrap() = Some(manager);
             assistant::start(handle);
@@ -1950,6 +1984,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            notch::notch_content,
+            notch::notch_geometry,
+            notch::notch_talk,
+            notch::notch_hush,
+            set_notch,
+            show_app,
             status, list_ports, set_port, set_transport, boards, show_board, set_primary, rename_board,
             wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair,
             firmware_info, identify_board, flash_board,

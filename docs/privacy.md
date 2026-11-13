@@ -15,6 +15,8 @@ Everything Yoru knows lives in a folder on your computer (on macOS, `~/Library/A
 - your conversations, notifications and timers, and the clips Yoru spoke with ElevenLabs;
 - the meetings you record or import: the sound of each track and its transcript, on the Meetings page, until you delete them. Recording and transcribing them never sends anything anywhere (the models are downloaded once, from Hugging Face). Their summaries are written on this computer too, unless you pick the brain for them in the meetings' settings: then the transcript goes to that brain's provider.
 
+If you turn on Yoru in the notch, he hears through the Mac's microphone only while you hold ⌥ Space or his button, or for the few seconds he listens after an answer; what he hears is treated as the board's voice is.
+
 The sign-in tokens of your services and your API keys are kept in the macOS Keychain, never in a plain file. The API keys of the speech, brain and voice providers you picked are also copied to the board's own memory, so that it can talk with you while the computer is away (see The board, below).
 
 We have no account system, no analytics and no telemetry. We never receive your data, your tokens or your conversations.

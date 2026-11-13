@@ -70,7 +70,8 @@ impl Targets {
 
     /// The board that speaks: the one `origin` names (where a timer was
     /// set), else the `primary` board, else the one of the latest
-    /// conversation, else the one connected first.
+    /// conversation, else the one connected first (a real one before the
+    /// notch).
     pub fn speaker(&self, origin: Option<&str>, primary: Option<&str>) -> Option<AlertTarget> {
         choose(&self.boards.lock().unwrap(), origin, primary, self.floor.last()).cloned()
     }
@@ -81,6 +82,8 @@ fn choose<'a>(boards: &'a [(u64, AlertTarget)], origin: Option<&str>, primary: O
     by_id(origin)
         .or_else(|| by_id(primary))
         .or_else(|| last.and_then(|n| boards.iter().find(|(s, _)| *s == n)))
+        // A real board before the notch, which is only on the Mac.
+        .or_else(|| boards.iter().find(|(_, t)| t.id.as_deref() != Some(crate::notch::ID)))
         .or_else(|| boards.first())
         .map(|(_, t)| t)
 }

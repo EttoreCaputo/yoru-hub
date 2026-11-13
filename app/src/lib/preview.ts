@@ -458,6 +458,8 @@ const handlers = new Map<string, Handler[]>();
 function emit(event: string, payload: unknown) {
   for (const h of handlers.get(event) ?? []) h(structuredClone(payload));
 }
+// From the browser's console: `yoruEmit("notch-pointer", true)` and the like.
+(globalThis as { yoruEmit?: typeof emit }).yoruEmit = emit;
 
 const emitInbox = () => emit("inbox", inbox);
 const emitChat = () => emit("chat", chat);
@@ -518,6 +520,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     voice: "idle",
     port_setting: null,
     follow_pointer: true,
+    notch: false,
   }),
   assistant_info: () => info,
   set_assistant_settings: (a) => ((info.settings = a.settings), resolveBrain(), info),

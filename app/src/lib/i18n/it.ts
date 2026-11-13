@@ -506,7 +506,22 @@ const it: Messages = {
     emptyHint: "La scheda ha mandato una lista vuota.",
   },
 
+  notch: {
+    states: { idle: "", listening: "Ti ascolto", thinking: "Ci penso", speaking: "Parlo", error: "Non ti sento" } as Record<string, string>,
+    hold: "Tieni premuto per parlare",
+    key: "⌥ Spazio",
+    stop: "Basta",
+    open: "Apri Yoru",
+    empty: "Tieni premuto ⌥ Spazio e parlami.",
+    waiting: (n: number) => (n === 1 ? "1 conferma in attesa" : `${n} conferme in attesa`),
+    unread: (n: number) => `${n} da leggere`,
+    fetching: "Sto cercando",
+  },
+
   board: {
+    mac: "Sul Mac",
+    notch: "Yoru nella notch",
+    notchHint: "Un piccolo Yoru accanto alla fotocamera. Tieni premuto ⌥ Spazio, o il suo pulsante, per parlargli col microfono del Mac.",
     connection: "Collegamento",
     transport: "Raggiungilo via",
     transports: { auto: "USB, altrimenti WiFi", usb: "Solo USB", wifi: "Solo WiFi" },

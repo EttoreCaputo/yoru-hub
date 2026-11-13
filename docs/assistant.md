@@ -82,6 +82,8 @@ The board streams what it hears after its wake word, with PWR held, or while it 
 - **Keep listening after an answer.** The board listens again without the wake word, for as long as the answer calls for (`voice/listen` with `wait_ms` and `pause_ms`, firmware 0.11.6). What is heard then may only close the conversation ("no, thanks") or acknowledge it ("ok"): fixed phrases, or EmbeddingGemma on a `llama-server --embedding` sidecar (`intent.rs`) telling a goodbye from a new request; anything else goes to the assistant.
 - **When you finished.** A short pause on the board, or Pipecat's Smart Turn v3.2 (`turn.rs`, run with tract) hearing from the voice whether the sentence is finished, on each `utterance_pause`, then `voice/stop` (firmware 0.11.7).
 
+- **On the Mac.** Yoru in the notch is a board made of software that hears through the Mac's microphone and speaks through its speakers, push-to-talk on ⌥ Space ([notch.md](notch.md)).
+
 ### Gemini Live
 
 Added 2026-11-13, off by default (Voice page, "Gemini Live", a voice to pick; needs a Google key and listening on). Gemini Live hears the request, thinks and speaks in one model, over a WebSocket (`cloud/live.rs`, `BidiGenerateContent`), instead of Whisper, the brain and the voice one after another.

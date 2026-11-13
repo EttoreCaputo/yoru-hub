@@ -508,7 +508,22 @@ const en = {
     emptyHint: "The board sent an empty list.",
   },
 
+  notch: {
+    states: { idle: "", listening: "Listening", thinking: "Thinking", speaking: "Speaking", error: "Can't hear you" } as Record<string, string>,
+    hold: "Hold to talk",
+    key: "⌥ Space",
+    stop: "Stop",
+    open: "Open Yoru",
+    empty: "Hold ⌥ Space and talk to me.",
+    waiting: (n: number) => (n === 1 ? "1 card waiting" : `${n} cards waiting`),
+    unread: (n: number) => `${n} unread`,
+    fetching: "Looking it up",
+  },
+
   board: {
+    mac: "On the Mac",
+    notch: "Yoru in the notch",
+    notchHint: "A small Yoru beside the camera. Hold ⌥ Space, or his button, to talk to him through the Mac's microphone.",
     connection: "Connection",
     transport: "Reach it by",
     transports: { auto: "USB, else WiFi", usb: "USB only", wifi: "WiFi only" },

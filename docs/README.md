@@ -21,6 +21,7 @@ Platform: **macOS only** for now (Apple Silicon and Intel). Some code still buil
 - **Keeps time**: timers, a pomodoro and reminders, shown and handled in the board's Timers app.
 - **Remembers**: a graph of the people and things in your life and the facts about them (`memory.db`), searched for each answer, learnt from conversations and meetings while Yoru rests, edited in the app. It knows who is speaking by their voice and keeps feelings for each person.
 - **Talks**: after the wake word or with PWR held on the board, it transcribes on this computer (whisper.cpp) or with your provider's Whisper, and speaks with Piper on this computer or with ElevenLabs or Groq. It keeps listening after an answer, tells a goodbye from a new request (EmbeddingGemma) and hears when you finished the sentence (Smart Turn); the Spoken page keeps what ElevenLabs said.
+- **Lives in your notch too**: if you like, a small Yoru around the Mac's camera notch, who opens into a panel with the last exchange and the cards waiting, and listens while you hold ⌥ Space, through the Mac's microphone and speakers ([notch.md](notch.md)).
 - **Records meetings**: what the computer plays (everything, or one app such as a call) and your microphones, each as a track of its own, or an audio or video file you bring in; transcribed on this computer with Parakeet, who speaks told apart with Nemotron (up to 8 people per track, each nameable), saved as Markdown, SRT or text, and summarized (points, decisions, things to do, open questions) by the local model or the brain ([meetings.md](meetings.md)).
 - **Has a body**: the board shows notifications, timers, tasks and Allow/Deny cards, goes on an errand while a connector is called, listens after its wake word, and speaks. Any MCP client (Claude Code, Claude Desktop…) can make it react, speak, notify you and set timers, through its MCP server.
 
@@ -32,7 +33,8 @@ core/            library: the assistant (inbox, memory, routines, watchers), con
                  (STT, TTS), MCP server, timers, flasher
 cli/             `yoru` command line
 app/             desktop app: Svelte UI in src/, Tauri shell in src-tauri/
-audio/           yoru-audio, the Swift helper that records meetings (built by the app's build.rs)
+audio/           yoru-audio, the Swift helper that records meetings and is the notch's ears and voice
+                 (built by the app's build.rs)
 firmware/        the board's firmware image, embedded in the app (fetched, not committed)
 tools/           firmware fetch, the signed Mac build and voice sidecar builds
 docs/            this README, the plans, the app's code, OAuth clients, licenses, privacy and terms

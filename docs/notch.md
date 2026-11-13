@@ -1,0 +1,23 @@
+# Yoru in the notch
+
+Added 2026-11-13, off by default (Settings → The board → On the Mac → "Yoru in the notch"). A small Yoru lives around the Mac's camera notch: closed, he's a black shape on either side of it, a little Yoru on the left and what he's doing on the right (the microphone's level while he listens, a dot while he thinks or speaks, the cards waiting for an answer, what's unread). With the pointer on him, or while he hears or talks, he opens into a panel: the last exchange, the cards to allow or deny, a field to type in and a button to hold and talk. Hold **⌥ Space** anywhere to talk to him through the Mac's microphone; he answers through the Mac's speakers. On a screen without a notch he sits in the middle of the menu bar.
+
+## A board made of software
+
+The notch is a board as far as the rest of the host knows, so the whole voice runs as it does on the real one: the transcription, the brain, the voice, Gemini Live, the follow-ups and Smart Turn, the confirmations, the reactions.
+
+- **`core/src/notch.rs`** answers the board's protocol (protocol v2, `docs/protocol.md` in the firmware's repository) over a socket pair inside the process: `hello` (firmware `notch`, id `mac`, no capabilities, so no cloud keys are sent and nothing offers to flash it), `tools/list` (`react` as the real board names it, `get_state`, `set_volume`), the cards' tools answered and shown by the app instead, `voice/state`, `voice/listen`, `voice/stop`, and the speech on `audio_down`, reported back with `playback_end`. What it hears goes up as `utterance_start` with `trigger: "button"` (push-to-talk) or `"follow_up"`, `audio_up` frames and `utterance_end`.
+- **`Link::open("mac")`** (`link.rs`) starts it; the manager (`bridge/manager.rs`) runs its session beside the boards while it's on (`notch::set_enabled`), outside `max_boards`, and doesn't count it when saying no board is found. A real board comes first for timers and alerts. Its session doesn't attach to the hub (Claude Code drives the real board) and doesn't overwrite the board's cached tool list.
+- **Hearing.** Push-to-talk sends what was heard while the key was held. After an answer, the follow-up the host asks for listens without a key: a simple level detector (about −42 dBFS for three frames in a row) tells speech from silence, the pause the host gives ends it, and nothing heard in `wait_ms` closes it. No wake word.
+- **The Mac's audio.** `yoru-audio talk` (`audio/Sources/yoru-audio/Talk.swift`): one AVAudioEngine with Apple's voice processing on, so the microphone doesn't hear Yoru from the speakers and you can talk over him; other sounds aren't ducked. The microphone runs only while it's needed, and the engine stops after 20 seconds unused, taking the Mac's microphone indicator with it. JSON lines on stdin and stdout, 16 kHz mono 16-bit PCM in base64.
+
+## The window
+
+- **`app/src-tauri/src/notch.rs`**: a transparent, borderless window 620 × 520 points at the top of the screen with the notch (else the main one), put above the menu bar, on every Space and over full-screen apps through AppKit (`NSStatusWindowLevel + 1`). The notch's width comes from `NSScreen`'s `auxiliaryTopLeftArea` and `auxiliaryTopRightArea`, its height from `safeAreaInsets`. Clicks go through it everywhere but on what the page draws: the page reports that rectangle (`notch_content`), and a thread follows the pointer, turning `set_ignore_cursor_events` off on it and telling the page (`notch-pointer`). Plugging a screen in or out places it again.
+- **⌥ Space** is a global shortcut (`tauri-plugin-global-shortcut`), registered only while the notch is on; if another app holds it, the panel's button still works.
+- **`app/src/Notch.svelte`**: the same bundle as the main window, mounted in the notch's window (`window.__YORU_NOTCH__`, or `?notch` in the browser preview). It keeps the store (conversation, cards, inbox) and listens to the `notch` event for the voice's state, the microphone's level, reactions and errands.
+- The notch isn't in the app's board switcher, firmware updates or Flash.
+
+## Privacy
+
+The Mac's microphone is used only while you hold the key or the button, or in the few seconds of a follow-up after an answer. What it hears goes where the board's voice would go: the transcription you chose (this computer or your provider) or Gemini Live.

@@ -222,6 +222,7 @@ export type Status = {
   voice: VoiceState | null;
   port_setting: string | null;
   follow_pointer: boolean;
+  notch: boolean;
 };
 
 export type Transport = "auto" | "usb" | "wifi";

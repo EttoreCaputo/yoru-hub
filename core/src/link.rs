@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
@@ -140,6 +141,8 @@ struct Shared {
 struct Tx {
     out: Box<dyn Write + Send>,
     seal: Option<Cipher>,
+    /// Whether bytes outside the framing reach anything: only a real port.
+    raw: bool,
 }
 
 /// How the reader thread gets its bytes.
@@ -167,6 +170,9 @@ impl Link {
     /// Open the port (without resetting the board) and start reading. `wifi`
     /// or `wifi:<id>` is a paired board on the network ([`wifi::open`]).
     pub fn open(port: &str, on_event: impl Fn(LinkEvent) + Send + 'static) -> io::Result<Self> {
+        if port == crate::notch::TARGET {
+            return Self::local(crate::notch::open()?, on_event);
+        }
         if wifi::target(port).is_some() {
             return Self::wifi(wifi::open(port)?, on_event);
         }
@@ -175,7 +181,7 @@ impl Link {
 
     pub fn new(port: Box<dyn SerialPort>, on_event: impl Fn(LinkEvent) + Send + 'static) -> io::Result<Self> {
         let rx = Rx { input: port.try_clone()?, eof_closes: false, decoder: Decoder::new(), pending: Vec::new(), open: None };
-        Self::start(Tx { out: Box::new(port), seal: None }, rx, None, on_event)
+        Self::start(Tx { out: Box::new(port), seal: None, raw: true }, rx, None, on_event)
     }
 
     /// A WiFi session that passed the handshake.
@@ -185,7 +191,14 @@ impl Link {
         let input = stream.try_clone()?;
         let hangup = stream.try_clone()?;
         let rx = Rx { input: Box::new(input), eof_closes: true, decoder, pending, open: Some(rx) };
-        Self::start(Tx { out: Box::new(stream), seal: Some(tx) }, rx, Some((addr, hangup)), on_event)
+        Self::start(Tx { out: Box::new(stream), seal: Some(tx), raw: false }, rx, Some((addr, hangup)), on_event)
+    }
+
+    /// A board in this process: the Yoru in the notch ([`crate::notch`]).
+    pub fn local(stream: UnixStream, on_event: impl Fn(LinkEvent) + Send + 'static) -> io::Result<Self> {
+        stream.set_read_timeout(Some(Duration::from_millis(200)))?;
+        let rx = Rx { input: Box::new(stream.try_clone()?), eof_closes: true, decoder: Decoder::new(), pending: Vec::new(), open: None };
+        Self::start(Tx { out: Box::new(stream), seal: None, raw: false }, rx, None, on_event)
     }
 
     fn start(tx: Tx, rx: Rx, peer: Option<(SocketAddr, TcpStream)>, on_event: impl Fn(LinkEvent) + Send + 'static) -> io::Result<Self> {
@@ -234,7 +247,7 @@ impl Link {
     /// Not on WiFi, where there is no firmware that old.
     pub fn send_raw(&self, bytes: &[u8]) -> io::Result<()> {
         let mut tx = self.tx.lock().unwrap();
-        if tx.seal.is_some() {
+        if !tx.raw {
             return Ok(());
         }
         tx.out.write_all(bytes)?;
