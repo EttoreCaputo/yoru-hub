@@ -710,8 +710,9 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
     })
 }
 
-/// The Gemini Live session of the conversation: a follow-up goes to the
-/// same one, so it remembers what was said; a new wake word opens another.
+/// The Gemini Live session of the conversation: a follow-up, or another
+/// press within [`LIVE_CONVERSATION`], goes to the same one, so it remembers
+/// what was said; after that a new wake word or press opens another.
 #[derive(Default)]
 struct LiveChat {
     session: Option<live::Session>,
@@ -723,7 +724,16 @@ struct LiveChat {
     refused: Option<Instant>,
     /// The session was opened ahead, for a conversation not started yet.
     prepared: Option<Instant>,
+    /// When its last turn ended: the next press within
+    /// [`LIVE_CONVERSATION`] goes on with the same session, as the other
+    /// brains go on with the same conversation.
+    last_turn: Option<Instant>,
 }
+
+/// How long after its last turn a Live session still is the conversation
+/// going on (the assistant's own conversation lasts as long). Google may
+/// close it sooner; then the turn goes to a new one.
+const LIVE_CONVERSATION: Duration = Duration::from_secs(15 * 60);
 
 /// How long a session opened ahead waits for the user to talk; then the
 /// next conversation opens its own.
@@ -762,26 +772,29 @@ impl LiveChat {
         }
     }
 
-    /// Open a session for the next conversation, ahead of it. One still
-    /// waiting is kept; one a conversation used is replaced.
+    /// Open a session for the next press, ahead of it. One still waiting,
+    /// or the conversation going on, is kept.
     fn prepare(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, sink: &EventSink) {
         if self.streaming || self.ready_for(voice) {
             return;
         }
         self.session = None;
+        self.last_turn = None;
         if self.open(assistant, host, voice, sink) {
             self.prepared = Some(Instant::now());
         }
     }
 
-    /// A session opened ahead in `voice`, fresh and still open.
+    /// The session in `voice` is still open and the next press may use it:
+    /// opened ahead not long ago, or the conversation going on.
     fn ready_for(&self, voice: &str) -> bool {
-        self.prepared.is_some_and(|t| t.elapsed() < PREPARED_FOR) && self.voice == voice && self.session.as_ref().is_some_and(|s| s.is_open())
+        let fresh = self.prepared.is_some_and(|t| t.elapsed() < PREPARED_FOR) || self.last_turn.is_some_and(|t| t.elapsed() < LIVE_CONVERSATION);
+        fresh && self.voice == voice && self.session.as_ref().is_some_and(|s| s.is_open())
     }
 
-    /// The board started streaming: Google listens from now. A new
-    /// conversation (not a follow-up) gets a new session, or the one
-    /// opened ahead for it.
+    /// The board started streaming: Google listens from now. A follow-up,
+    /// or a press while the conversation goes on, uses the same session; a
+    /// new conversation gets a new one, or the one opened ahead for it.
     fn start(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, follow_up: bool, sink: &EventSink) {
         self.streaming = false;
         if !follow_up && !self.ready_for(voice) {
@@ -910,6 +923,7 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
             turn => break (turn, actions, first_sound, played),
         }
     };
+    chat.last_turn = Some(Instant::now());
     times.first_words = first_sound;
     times.first_sentence = first_sound;
     times.answered = Some(Instant::now());
