@@ -20,6 +20,7 @@
     void store.chat.length;
     void store.confirmations.length;
     void store.asking;
+    void store.hearing;
     queueMicrotask(() => end?.scrollIntoView({ block: "end", behavior: "smooth" }));
   });
 
@@ -76,6 +77,13 @@
         {/if}
       </li>
     {/each}
+    {#if store.hearing}
+      <!-- What the user is saying, as Gemini writes it: the chat line replaces it. -->
+      <li class="line you live" aria-live="polite">
+        <div class="meta"><span class="who">{t.you}</span><span class="tag">{t.voice}</span></div>
+        <p class="text">{store.hearing}</p>
+      </li>
+    {/if}
     {#if store.asking}
       <!-- The question itself is in the log already: the Rust side adds it before thinking. -->
       <li class="line yoru thinking" aria-live="polite">
@@ -146,6 +154,9 @@
     border-radius: 18px 18px 4px 18px;
     background: var(--ink-3);
     text-align: left;
+  }
+  .live .text {
+    opacity: 0.7;
   }
   .yoru .text {
     font-size: 15.5px;

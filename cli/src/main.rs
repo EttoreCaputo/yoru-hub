@@ -499,6 +499,7 @@ fn main() -> ExitCode {
                     if spoken.underruns + spoken.lost > 0 { format!(", {} underruns, {} frames lost", spoken.underruns, spoken.lost) } else { String::new() }
                 ),
                 BridgeEvent::Listening { id, trigger } => println!("{tag}utterance {id}: listening ({trigger})"),
+                BridgeEvent::Hearing { .. } => {}
                 BridgeEvent::Utterance { utterance: u, duration_ms, peak_db, wav } => println!(
                     "utterance {}: {:.1} s, {}{}{}{}",
                     u.id,

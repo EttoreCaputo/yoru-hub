@@ -300,7 +300,7 @@ impl Link {
                 }
             }
             // `AppState::stt_error` keeps the last error.
-            BridgeEvent::Listening { .. } | BridgeEvent::Utterance { .. } | BridgeEvent::VoiceError { .. } => {}
+            BridgeEvent::Listening { .. } | BridgeEvent::Hearing { .. } | BridgeEvent::Utterance { .. } | BridgeEvent::VoiceError { .. } => {}
             BridgeEvent::VoiceState { state } => self.voice = Some(state.clone()),
             BridgeEvent::Disconnected { reason, .. } => {
                 self.kind = "offline";
@@ -1802,6 +1802,11 @@ fn on_bridge_event(app: &AppHandle, event: &ManagerEvent) {
                 &state.stt_state
             };
             *status.lock().unwrap() = ("error", Some(message.clone()));
+        }
+        // The words being said, from any board or the notch: the notch and
+        // the conversation show them as they come.
+        if let BridgeEvent::Hearing { text } = &event.event {
+            let _ = app.emit("hearing", text);
         }
         // Touched on the board's inbox: what it's about opens here.
         if let BridgeEvent::NotificationOpened { url: Some(url), .. } = &event.event {

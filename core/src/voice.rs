@@ -412,7 +412,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             }
             Hearing::Started { trigger } => {
                 if let (Some(voice), Some(assistant), Some(link)) = (&config.live, &session.assistant, session.link.upgrade()) {
-                    live.start(assistant, &VoiceHost { link: &link, session }, voice, trigger == "follow_up", sink);
+                    live.start(assistant, &VoiceHost { link: &link, session }, voice, config.language.as_deref(), trigger == "follow_up", sink);
                 }
                 // Priming the local model takes seconds on the pipeline's
                 // thread, holding back the words Live is hearing: not with Live.
@@ -724,6 +724,8 @@ struct LiveChat {
     refused: Option<Instant>,
     /// The session was opened ahead, for a conversation not started yet.
     prepared: Option<Instant>,
+    /// Gemini Transcribe, writing the utterance going on as it comes.
+    scribe: Option<live::Scribe>,
     /// When its last turn ended: the next press within
     /// [`LIVE_CONVERSATION`] goes on with the same session, as the other
     /// brains go on with the same conversation.
@@ -795,8 +797,14 @@ impl LiveChat {
     /// The board started streaming: Google listens from now. A follow-up,
     /// or a press while the conversation goes on, uses the same session; a
     /// new conversation gets a new one, or the one opened ahead for it.
-    fn start(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, follow_up: bool, sink: &EventSink) {
+    fn start(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, language: Option<&str>, follow_up: bool, sink: &EventSink) {
         self.streaming = false;
+        // The user's words, shown while they speak; first, so a session
+        // that won't open doesn't hold them back.
+        self.scribe = crate::cloud::GOOGLE.api_key().map(|key| {
+            let sink = sink.clone();
+            live::Scribe::start(&key, transcribe_languages(language), &["Yoru"], move |text| sink(BridgeEvent::Hearing { text: text.to_string() }))
+        });
         if !follow_up && !self.ready_for(voice) {
             self.session = None;
         }
@@ -813,6 +821,9 @@ impl LiveChat {
 
     /// The utterance so far, as it comes.
     fn audio(&mut self, samples: &[i16]) {
+        if let Some(scribe) = &self.scribe {
+            scribe.audio(samples);
+        }
         if self.streaming && self.session.as_mut().is_none_or(|s| s.audio(samples).is_err()) {
             self.streaming = false;
             self.session = None;
@@ -822,9 +833,19 @@ impl LiveChat {
     /// Nothing to answer (no speech): a turn left open can't be closed
     /// without an answer, so the session goes.
     fn drop_turn(&mut self) {
+        self.scribe = None;
         if std::mem::take(&mut self.streaming) {
             self.session = None;
         }
+    }
+}
+
+/// The languages Gemini Transcribe expects for the user's `language`.
+fn transcribe_languages(language: Option<&str>) -> &'static [&'static str] {
+    match language {
+        Some("it") => &["it-IT"],
+        Some("en") => &["en-US"],
+        _ => &["it-IT", "en-US"],
     }
 }
 
@@ -882,22 +903,24 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
     // Live's own transcript of the user is poor (other languages, made-up
     // words) while it understands fine: Gemini Transcribe, on the same key,
     // writes what was said beside the turn, for the conversation and the
-    // memory; Yoru's speech-to-text if there's no key. It is shown as soon
-    // as it's written, while Live is still answering.
+    // memory; Yoru's speech-to-text if there's no key. It was writing while
+    // the user spoke (the scribe), and is shown as soon as it's done, while
+    // Live is still answering.
     let started = Instant::now();
     let written = {
         let (key, stt, samples) = (crate::cloud::GOOGLE.api_key(), stt.cloned(), utterance.samples.clone());
         let (early, id, shown) = (sink.clone(), utterance.id, language.unwrap_or("en").to_string());
         let keeper = session.assistant.clone();
-        let languages: &'static [&'static str] = match language {
-            Some("it") => &["it-IT"],
-            Some("en") => &["en-US"],
-            _ => &["it-IT", "en-US"],
-        };
+        let languages = transcribe_languages(language);
+        let scribe = chat.scribe.take();
         (key.is_some() || stt.is_some()).then(|| {
             thread::spawn(move || {
                 let text = match (key, stt) {
-                    (Some(key), _) => live::transcribe(&key, &samples, languages, &["Yoru"]),
+                    // It may have lost the start (it opens as the user speaks): then whole.
+                    (Some(key), _) => scribe
+                        .map(live::Scribe::finish)
+                        .filter(|t| t.as_ref().is_ok_and(|t| !t.is_empty()))
+                        .unwrap_or_else(|| live::transcribe(&key, &samples, languages, &["Yoru"])),
                     (None, Some(stt)) => stt.transcribe(&samples).map(|t| t.text).map_err(|e| e.to_string()),
                     (None, None) => Err("nothing transcribes".into()),
                 };

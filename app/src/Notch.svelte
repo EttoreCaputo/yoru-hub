@@ -35,6 +35,8 @@
   const tc = $derived(i18n.t.card);
 
   const PANEL = 460;
+  /** How much of the words being said fits two lines. */
+  const HEARD_CHARS = 110;
   /** How long an answer stays open once Yoru is done, to be read. */
   const LINGER_MS = 6000;
   /** The pointer has to rest a moment to open it, and be away a moment to close it. */
@@ -215,6 +217,9 @@
             {#if store.confirmations.length > 1}<span class="more">+{store.confirmations.length - 1}</span>{/if}
           </div>
         </section>
+      {:else if store.hearing}
+        <!-- The newest words matter: the start gives way when it's long. -->
+        <p class="you live" aria-live="polite">{store.hearing.length > HEARD_CHARS ? `…${store.hearing.slice(-HEARD_CHARS)}` : store.hearing}</p>
       {:else if store.asking}
         <p class="you">{store.asking}</p>
       {:else if last.you || last.yoru}
@@ -480,6 +485,9 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+  .you.live {
+    color: rgba(255, 255, 255, 0.85);
   }
   .answer {
     font-size: 15px;

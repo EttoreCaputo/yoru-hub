@@ -52,6 +52,8 @@ fn describe(event: &BridgeEvent) -> Option<String> {
         BridgeEvent::Firmware { firmware } => format!("firmware {}", serde_json::to_string(firmware).unwrap_or_default()),
         BridgeEvent::Wake { word, .. } => format!("wake word: {word}"),
         BridgeEvent::Listening { id, trigger } => format!("listening #{id} ({trigger})"),
+        // Drafts, a few a second: the transcript says it once.
+        BridgeEvent::Hearing { .. } => return None,
         BridgeEvent::Utterance { utterance, duration_ms, peak_db, .. } => format!(
             "heard #{} ({}): {duration_ms} ms, ended {}, speech {}, peak {}, clipped {:.1}%",
             utterance.id,

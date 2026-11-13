@@ -138,6 +138,10 @@ pub enum BridgeEvent {
     /// An utterance ended and arrived. `wav` is where a copy was saved, when
     /// [`VoiceConfig::dump_dir`] is set.
     Utterance { utterance: Utterance, duration_ms: u64, peak_db: Option<f64>, wav: Option<String> },
+    /// What the user is saying, written so far, while they still speak
+    /// (Gemini Live's way): each one replaces the last, until the
+    /// utterance's [`BridgeEvent::Transcript`].
+    Hearing { text: String },
     /// What was said in utterance `id`; `None` when Whisper heard no words.
     Transcript { id: u8, transcript: Option<Transcript> },
     /// What the host made of transcript `id`: the board tools it called

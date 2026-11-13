@@ -316,11 +316,17 @@ impl Session {
 
     /// The next message from Google, as JSON (it comes as text or binary).
     fn receive(&mut self) -> Result<Value, String> {
+        self.poll()?.ok_or_else(|| "Gemini Live stopped answering".to_string())
+    }
+
+    /// The next message, or `None` when none came within the read timeout.
+    fn poll(&mut self) -> Result<Option<Value>, String> {
         loop {
-            let message = self.socket.read().map_err(|e| match e {
-                tungstenite::Error::Io(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => "Gemini Live stopped answering".to_string(),
-                e => format!("Gemini Live: {e}"),
-            })?;
+            let message = match self.socket.read() {
+                Ok(m) => m,
+                Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => return Ok(None),
+                Err(e) => return Err(format!("Gemini Live: {e}")),
+            };
             let bytes = match message {
                 Message::Text(t) => t.as_bytes().to_vec(),
                 Message::Binary(b) => b.to_vec(),
@@ -330,7 +336,7 @@ impl Session {
                 }
                 _ => continue,
             };
-            return serde_json::from_slice(&bytes).map_err(|e| format!("Gemini Live sent something unreadable: {e}"));
+            return serde_json::from_slice(&bytes).map(Some).map_err(|e| format!("Gemini Live sent something unreadable: {e}"));
         }
     }
 }
@@ -438,6 +444,110 @@ pub fn transcribe_at(url: &str, samples: &[i16], languages: &[&str], words: &[&s
 
 /// How long a transcription may take: it runs beside the answer.
 const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a [`Scribe`] waits for Google before sending what came meanwhile.
+const SCRIBE_POLL: Duration = Duration::from_millis(40);
+
+enum ScribeInput {
+    Audio(Vec<i16>),
+    End,
+}
+
+/// [`TRANSCRIBE_MODEL`] while the user speaks: the audio goes in as it
+/// comes, and the words written so far go to `on_words` as Google writes
+/// them, so they can be shown before the user has finished. It runs on its
+/// own thread, which also opens the connection: nothing waits for it.
+pub struct Scribe {
+    tx: std::sync::mpsc::Sender<ScribeInput>,
+    done: std::sync::mpsc::Receiver<Result<String, String>>,
+}
+
+impl Scribe {
+    /// Start writing down what comes, in `languages` (BCP-47; none: any),
+    /// spelling `words` as given.
+    pub fn start(key: &str, languages: &[&str], words: &[&str], on_words: impl FnMut(&str) + Send + 'static) -> Scribe {
+        Self::start_at(format!("{URL}?key={key}"), languages, words, on_words)
+    }
+
+    /// [`Scribe::start`] at `url` (a test's server).
+    pub fn start_at(url: String, languages: &[&str], words: &[&str], mut on_words: impl FnMut(&str) + Send + 'static) -> Scribe {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done) = std::sync::mpsc::channel();
+        let setup = json!({"setup": {
+            "model": format!("models/{TRANSCRIBE_MODEL}"),
+            "generationConfig": {"responseModalities": ["TEXT"]},
+            "inputAudioTranscription": {"languageCodes": languages, "customVocabulary": words},
+            "realtimeInputConfig": {"automaticActivityDetection": {"disabled": true}},
+        }});
+        let _ = std::thread::Builder::new().name("yoru-scribe".into()).spawn(move || {
+            let _ = done_tx.send(Self::write(&url, &setup, &rx, &mut on_words));
+        });
+        Scribe { tx, done }
+    }
+
+    /// More of what the user says.
+    pub fn audio(&self, samples: &[i16]) {
+        let _ = self.tx.send(ScribeInput::Audio(samples.to_vec()));
+    }
+
+    /// The user is done: everything they said, written.
+    pub fn finish(self) -> Result<String, String> {
+        let _ = self.tx.send(ScribeInput::End);
+        self.done.recv_timeout(TRANSCRIBE_TIMEOUT + Duration::from_secs(5)).map_err(|_| "the transcription took too long".to_string())?
+    }
+
+    fn write(url: &str, setup: &Value, rx: &std::sync::mpsc::Receiver<ScribeInput>, on_words: &mut dyn FnMut(&str)) -> Result<String, String> {
+        let mut session = Session::connect(url, setup)?;
+        session.set_timeout(SCRIBE_POLL);
+        session.begin()?;
+        let (mut text, mut shown) = (String::new(), String::new());
+        let mut show = |words: String| {
+            if words != shown {
+                on_words(&words);
+                shown = words;
+            }
+        };
+        let mut ended: Option<Instant> = None;
+        loop {
+            // What came while connecting or waiting goes out first.
+            loop {
+                match rx.try_recv() {
+                    Ok(ScribeInput::Audio(samples)) => {
+                        for chunk in samples.chunks(SEND_CHUNK) {
+                            session.audio(chunk)?;
+                        }
+                    }
+                    Ok(ScribeInput::End) => {
+                        session.send(&json!({"realtimeInput": {"activityEnd": {}}}))?;
+                        ended = Some(Instant::now());
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    // Nobody wants the words any more.
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) if ended.is_none() => return Err("the utterance was dropped".into()),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                }
+            }
+            if let Some(content) = session.poll()?.as_ref().and_then(|m| m.get("serverContent")) {
+                // A draft of everything so far, rewritten as more is heard.
+                if let Some(t) = content.pointer("/interimInputTranscription/text").and_then(Value::as_str) {
+                    if text.is_empty() {
+                        show(tidy(t));
+                    }
+                }
+                if let Some(t) = content.pointer("/inputTranscription/text").and_then(Value::as_str) {
+                    text.push_str(t);
+                    show(tidy(&text));
+                }
+                let complete = content["turnComplete"].as_bool().unwrap_or(false) || content["generationComplete"].as_bool().unwrap_or(false);
+                if complete && ended.is_some() {
+                    return Ok(tidy(&text));
+                }
+            }
+            if ended.is_some_and(|e| e.elapsed() > TRANSCRIBE_TIMEOUT) {
+                return Err("the transcription took too long".into());
+            }
+        }
+    }
+}
 
 /// Install rustls' process-wide crypto provider once. The app links both ring
 /// and aws-lc-rs (the connectors' reqwest), and then rustls can't choose and
@@ -682,6 +792,27 @@ mod tests {
             let text = transcribe(&key, &samples, &["it-IT", "en-US"], &["Yoru"]);
             eprintln!("{path}: {} ms: {text:?}", asked.elapsed().as_millis());
         }
+    }
+
+    /// Streams a clip at speaking pace and prints when each piece of text came.
+    /// `LIVE_WAV=q.wav cargo test -p yoru-core google_writes_while_speaking -- --ignored --nocapture`
+    #[test]
+    #[ignore = "talks to Google"]
+    fn google_writes_while_speaking() {
+        let key = crate::cloud::GOOGLE.api_key().expect("a Google key");
+        let wav = std::fs::read(std::env::var("LIVE_WAV").expect("LIVE_WAV")).unwrap();
+        let start = wav.windows(4).position(|w| w == b"data").unwrap() + 8;
+        let samples: Vec<i16> = wav[start..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+        let began = Instant::now();
+        let scribe = Scribe::start(&key, &["it-IT", "en-US"], &["Yoru"], move |t| eprintln!("{:>5} ms: {t}", began.elapsed().as_millis()));
+        for chunk in samples.chunks(1600) {
+            scribe.audio(chunk);
+            thread::sleep(Duration::from_millis(100));
+        }
+        eprintln!("{:>5} ms: spoken", began.elapsed().as_millis());
+        let text = scribe.finish();
+        eprintln!("{:>5} ms: final {text:?}", began.elapsed().as_millis());
+        assert!(text.is_ok_and(|t| !t.is_empty()));
     }
 
     #[test]

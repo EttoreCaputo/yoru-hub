@@ -46,6 +46,8 @@ const LOG_LINES = 300;
 const SCHEDULE_LOG = 30;
 /** How often the coding agents are looked at. */
 const AGENTS_MS = 5000;
+/** How long the words being said stay without a new draft or the chat line. */
+const HEARING_MS = 15_000;
 
 class Store {
   readonly preview = inPreview;
@@ -83,6 +85,9 @@ class Store {
   info = $state<AssistantInfo | null>(null);
   inbox = $state<Notification[]>([]);
   chat = $state<ChatLine[]>([]);
+  /** What the user is saying, written so far, while they speak; gone once the line is in the chat. */
+  hearing = $state("");
+  #hearingTimer: ReturnType<typeof setTimeout> | undefined;
   /** A question typed and not answered yet. */
   asking = $state<string | null>(null);
   askError = $state("");
@@ -137,7 +142,16 @@ class Store {
     on<DeviceInfo[]>("boards", (list) => (this.boards = list));
     on<Notification[]>("inbox", (items) => (this.inbox = items));
     on<TaskEntry[]>("tasks", (items) => (this.tasks = items));
-    on<ChatLine[]>("chat", (lines) => (this.chat = lines));
+    on<ChatLine[]>("chat", (lines) => {
+      this.chat = lines;
+      this.hearing = "";
+    });
+    on<string>("hearing", (text) => {
+      this.hearing = text;
+      // No line came (nothing to answer, an error): the draft doesn't stay.
+      clearTimeout(this.#hearingTimer);
+      this.#hearingTimer = setTimeout(() => (this.hearing = ""), HEARING_MS);
+    });
     on<ScheduleEvent>("schedule", (e) => this.#onSchedule(e));
     on<ConnectorStatus[]>("connectors", (list) => (this.connectors = list));
     on<AssistantInfo>("assistant", (info) => (this.info = info));
