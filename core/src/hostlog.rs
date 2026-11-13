@@ -29,6 +29,20 @@ pub fn line(target: &str, line: &str) {
     write(target, line);
 }
 
+/// Log panics too, with where they happened: a thread that dies (the
+/// voice's, a session's) otherwise leaves no trace, the app having no
+/// terminal. The previous hook still runs.
+pub fn log_panics() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("unnamed");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        write("panic", &format!("thread {name}: {info}\n{backtrace}"));
+        previous(info);
+    }));
+}
+
 fn describe(event: &BridgeEvent) -> Option<String> {
     Some(match event {
         BridgeEvent::Waiting { reason } => format!("waiting: {reason}"),

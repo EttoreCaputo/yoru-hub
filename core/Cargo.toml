@@ -37,6 +37,9 @@ tract-onnx = "0.23"
 rustfft = "6"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+# Gemini Live's TLS provider, chosen by hand: the app's connectors also bring
+# in aws-lc-rs, and with two providers rustls refuses to pick one.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 # The mouse pointer (Yoru's eyes) on X11, loaded at run time.
 [target.'cfg(target_os = "linux")'.dependencies]

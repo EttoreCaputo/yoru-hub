@@ -431,7 +431,10 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             (session.conversation_over)();
             continue;
         }
-        let Some(link) = session.link.upgrade() else { break };
+        let Some(link) = session.link.upgrade() else {
+            sink(BridgeEvent::BoardLog { line: "host: the link is gone, the voice pipeline stops".into() });
+            break;
+        };
         let mut times = Times { heard: Some(Instant::now()), silence_ms: utterance.trailing_silence_ms(), ..Times::default() };
         // The board shows thinking meanwhile, however long the model takes.
         let mut thinking = StillThinking::start(session);
@@ -523,6 +526,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
         }
     }
     // The board is gone mid-conversation.
+    sink(BridgeEvent::BoardLog { line: "host: the voice pipeline stopped".into() });
     (session.conversation_over)();
 }
 

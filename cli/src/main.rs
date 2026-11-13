@@ -334,6 +334,7 @@ enum ModelsAction {
 static BOARD: OnceLock<Option<String>> = OnceLock::new();
 
 fn main() -> ExitCode {
+    yoru_core::hostlog::log_panics();
     let args = Args::parse();
     let _ = BOARD.set(args.board.clone());
     match args.command {

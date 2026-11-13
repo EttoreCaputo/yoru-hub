@@ -1885,6 +1885,7 @@ fn remove_claude_code_hooks() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    yoru_core::hostlog::log_panics();
     instances::wait_for_predecessor();
     tauri::Builder::default()
         // Closing the window leaves the app in the tray; launching it again must

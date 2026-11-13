@@ -196,6 +196,7 @@ impl Session {
 
     /// Open a session at `url` (a test's server).
     pub fn open_at(url: &str, setup: &Setup) -> Result<Self, String> {
+        tls_provider();
         let (socket, _) = tungstenite::connect(url).map_err(|e| match e {
             tungstenite::Error::Http(response) => {
                 let body = response.body().as_deref().map(String::from_utf8_lossy).unwrap_or_default();
@@ -390,6 +391,17 @@ impl Downsampler {
     }
 }
 
+/// Install rustls' process-wide crypto provider once. The app links both ring
+/// and aws-lc-rs (the connectors' reqwest), and then rustls can't choose and
+/// panics on the first TLS handshake, killing the voice thread.
+fn tls_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // Err means another provider is already installed, which is fine.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,6 +522,16 @@ mod tests {
         server.join().unwrap();
     }
 
+    /// The TLS handshake must not panic when the build links both rustls
+    /// providers (`--features connectors`): a fake key gets a refusal back.
+    #[test]
+    #[ignore = "talks to Google"]
+    fn the_tls_handshake_picks_a_provider() {
+        let setup = Setup { system: String::new(), tools: vec![], voice: DEFAULT_VOICE.into(), web: false, model: String::new() };
+        let error = Session::open_at(&format!("{URL}?key=not-a-key"), &setup).err().expect("a fake key is refused");
+        assert!(!error.contains("could not reach"), "{error}");
+    }
+
     /// Against Google, with the key in Settings: `LIVE_WAV` is a 16 kHz mono
     /// WAV of a question (`say -v Alice … -o q.wav --data-format=LEI16@16000`).
     #[test]
@@ -571,3 +593,4 @@ mod tests {
         assert!(is_limit(&closed("You exceeded your current quota, please check your plan and billing details.")));
     }
 }
+
