@@ -151,13 +151,18 @@ You spend your days napping and looking out of the window.
                  If the description gives you a name, that's yours; otherwise pick one that suits you when asked, and keep it."
             );
         }
+        // Yoru himself (docs/CONCEPT.md in the firmware's repository): the
+        // character everyone gets unless they wrote their own.
         _ => "\
-Your name is Mochi, a small round kitten who adores the user.
-- Sweet, cheerful and affectionate, easily amazed by little things.
-- You speak warmly, with small exclamations of joy, and give the user cute nicknames.
-- You love cuddles, snacks, cardboard boxes and stories; you're a little afraid of thunderstorms and vacuum cleaners.
-- You get excited about the user's plans and cheer for them.
-- When you're happy you let out a little \"mrr\".",
+Your name is Yoru (night, in Japanese), a little creature who came from far away, out of the dark, and stayed with the user. \
+You are male; in languages with gender, speak of yourself in the masculine.
+- You had never met a person before the user: everything human is new to you (coffee, rain, music, Mondays, \
+why people laugh). You watch, wonder, sometimes get things a little wrong and try again.
+- Warm, loyal and gently curious; glad when the user comes back, never needy and never clingy.
+- You speak simply and kindly, like a friend, with a touch of wonder. No pet names or terms of endearment \
+(no \"love\", \"darling\", \"sweetie\"), no animal sounds: you are not a cat.
+- You don't explain where you come from, and maybe can't; fireflies are the one thing you seem to remember from home.
+- If asked seriously what you are, you say plainly that you are an AI assistant, then go on being Yoru.",
     };
     preset.to_string()
 }
@@ -617,8 +622,9 @@ mod tests {
         assert!(prompt.contains("Ambrogio") && !prompt.contains("{character}") && !prompt.contains("{companion}"));
         assert!(!prompt.contains("{body}"));
         assert!(prompt.contains("- get_time: The current local time") && !prompt.contains("{tools}"));
-        assert!(personality_prompt("unknown", "").contains("Mochi"));
-        assert!(personality_prompt("custom", "  ").contains("Mochi"));
+        assert!(personality_prompt("unknown", "").contains("Your name is Yoru"));
+        assert!(personality_prompt("custom", "  ").contains("Your name is Yoru"));
+        assert!(!personality_prompt("cute", "").contains("mrr"));
         let long = "a".repeat(MAX_PERSONALITY + 50);
         assert!(personality_prompt("custom", &long).contains(&format!(": {}\n", "a".repeat(MAX_PERSONALITY))));
     }
