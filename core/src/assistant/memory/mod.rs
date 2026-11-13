@@ -18,10 +18,12 @@
 //! `memory.md` is imported once, as the first episode.
 
 pub mod feelings;
+pub mod growth;
 pub mod kin;
 mod search;
 pub mod sleep;
 pub mod style;
+pub mod verdicts;
 pub mod voice;
 
 use std::collections::HashSet;
@@ -190,6 +192,8 @@ CREATE TABLE IF NOT EXISTS turns(
 CREATE TABLE IF NOT EXISTS style_changes(
     id INTEGER PRIMARY KEY, at INTEGER NOT NULL, person INTEGER NOT NULL, setting TEXT NOT NULL, before REAL NOT NULL,
     after REAL NOT NULL, measure TEXT NOT NULL, baseline REAL NOT NULL, outcome TEXT);
+CREATE TABLE IF NOT EXISTS verdicts(
+    id INTEGER PRIMARY KEY, at INTEGER NOT NULL, source TEXT NOT NULL, by TEXT, title TEXT NOT NULL, useful INTEGER NOT NULL);
 ";
 
 fn fact_row(r: &rusqlite::Row) -> rusqlite::Result<Fact> {

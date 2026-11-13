@@ -353,13 +353,15 @@ the keys of the items already seen, and what the user cares about.\n\n\
 List every item in the output (a mail, an event, an issue…) with a key that stays the same for that item across runs \
 (its id if it has one). For each item whose key is not among the seen ones, decide whether the user would want to be told now \
 (notify), and how urgently: low (just keep it in the inbox), normal, high (time-sensitive: someone waiting on them, \
-something starting soon), urgent (can't wait; rare). Respect what the memory says to tell and not to tell. \
+something starting soon), urgent (can't wait; rare). Respect what the memory says to tell and not to tell, and what the user \
+said of what this check told them before (feedback): more like what they called useful, none like what they said enough to. \
 Write the title (a few words) and the text (one or two sentences) in the user's language.\n\n\
 <watcher_instructions>\n{instructions}\n</watcher_instructions>\n\n<memory>\n{memory}\n</memory>\n\n\
-<seen_keys>\n{seen}\n</seen_keys>\n\n<output>\n{output}\n</output>",
+<feedback>\n{feedback}\n</feedback>\n\n<seen_keys>\n{seen}\n</seen_keys>\n\n<output>\n{output}\n</output>",
         name = watcher.name,
         instructions = if watcher.instructions.trim().is_empty() { "(none)" } else { watcher.instructions.trim() },
         memory = assistant.memory.core(8000, assistant.settings().brain() != Some(super::Brain::Ollama)),
+        feedback = Some(assistant.memory.verdict_lines(Some(&watcher.id), &watcher.name)).filter(|f| !f.is_empty()).unwrap_or_else(|| "(none)".into()),
     );
     let prompt = if baseline { format!("{prompt}\n\nThis is the first run: just list the items; nothing will be told.") } else { prompt };
     let schema = json!({

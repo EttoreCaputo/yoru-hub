@@ -136,10 +136,12 @@ fn say_timer(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, fired:
 }
 
 /// Put `n` on every board's inbox; an urgent one is also said, by the board
-/// that speaks. In quiet hours anything less than urgent arrives silently.
+/// that speaks. In quiet hours anything less than urgent arrives silently, and
+/// a source the user said «Enough» to arrives a step quieter.
 fn deliver_notification(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, n: &Notification) -> Result<(), String> {
     let quiet = config.assistant.as_ref().is_some_and(|a| a.quiet_now());
     let urgency = if quiet && n.urgency < Urgency::Urgent { Urgency::Low } else { n.urgency };
+    let urgency = config.assistant.as_ref().map_or(urgency, |a| a.memory.braked(n.by.as_deref(), &n.source, urgency));
     let boards: Vec<Arc<Link>> = targets.all().into_iter().filter_map(|t| t.link.upgrade()).collect();
     if boards.is_empty() {
         return Err("the board isn't connected".into());

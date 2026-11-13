@@ -104,6 +104,7 @@ What was built on 2026-11-08, all of G1 to G5 below, in `core/src/assistant/memo
 - **G3. Feelings.** The reply's feeling tag driving the board's clips, the mood advice in the prompt, the relationship with the user on their node and the quick feelings' half-lives, shared with the board's mood.
 - **G4. Who speaks.** Voice prints from the meetings, the person recognised on the board and the computer, relationships for each person, the board's own memory synced from the core.
 - **G5. Style.** The measured, bounded tuning of how Yoru talks.
+- **G6. Verdicts and growth** (2026-11-13). The user's verdict on each notification (`verdicts.rs`: kept, and Enough as a "Don't tell me about" fact), and the counts the board grows from (`growth.rs`: days talked, facts about the user, people known, useful notifications).
 
 ## Sources
 

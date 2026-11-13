@@ -309,10 +309,16 @@ struct Lists {
     cloud_checked: Option<Instant>,
     /// The meeting's revision (firmware 0.20.15).
     meeting: Option<Sent<u64>>,
+    /// What Yoru has grown into, counted from the memory, and when it was
+    /// last counted (firmware 0.20.20).
+    growth: Option<Sent<crate::assistant::memory::growth::Growth>>,
+    growth_checked: Option<Instant>,
 }
 
 /// How often the services sent to the board are looked at again.
 const CLOUD_EVERY: Duration = Duration::from_secs(30);
+/// How often the memory is counted for the board's growth.
+const GROWTH_EVERY: Duration = Duration::from_secs(60);
 
 /// One list: whether the board takes it, and what it got last.
 #[derive(Default)]
@@ -330,6 +336,8 @@ impl Lists {
             cloud: has("cloud").then(Sent::default),
             cloud_checked: None,
             meeting: has("meetings").then(Sent::default),
+            growth: has("growth").then(Sent::default),
+            growth_checked: None,
         }
     }
 
@@ -362,6 +370,21 @@ impl Lists {
                 let _ = link.call_tool("set_meeting", json!({"state": state, "source": source}), TOOL_TIMEOUT);
             }
         }
+        if let (Some(sent), Some(assistant)) = (&mut self.growth, &config.assistant)
+            && self.growth_checked.is_none_or(|t| t.elapsed() >= GROWTH_EVERY)
+        {
+            self.growth_checked = Some(Instant::now());
+            let growth = assistant.memory.growth();
+            if sent.last != Some(growth)
+                && let Ok(result) = link.call_tool("set_growth", json!(growth), TOOL_TIMEOUT)
+                && !result.is_error
+            {
+                sent.last = Some(growth);
+                if let Some(new) = result.structured_content.as_ref().and_then(|s| s["new"].as_array()).filter(|n| !n.is_empty()) {
+                    eprintln!("growth: the board unlocked {new:?}");
+                }
+            }
+        }
         if let Some(sent) = &mut self.cloud
             && self.cloud_checked.is_none_or(|t| t.elapsed() >= CLOUD_EVERY)
         {
@@ -389,7 +412,7 @@ fn resend_inbox(link: &Link, assistant: &crate::Assistant) {
     }
 }
 
-/// The board's `notification_action`: read, dismissed, opened, or one of its buttons.
+/// The board's `notification_action`: read, dismissed, judged, opened, or one of its buttons.
 fn on_notification_action(assistant: &crate::Assistant, params: &serde_json::Value, sink: &EventSink) {
     let (Some(id), Some(action)) = (params["id"].as_str(), params["action"].as_str()) else { return };
     match action {
@@ -398,6 +421,13 @@ fn on_notification_action(assistant: &crate::Assistant, params: &serde_json::Val
         }
         "read" => {
             assistant.inbox.mark_read(id);
+        }
+        // The verdict takes it away, as on the board.
+        "useful" | "enough" => {
+            if let Some(n) = assistant.inbox.list().into_iter().find(|n| n.id == id) {
+                assistant.memory.judge(&n, action == "useful");
+            }
+            assistant.inbox.dismiss(id);
         }
         // "open", or its one button, "Open".
         _ => {
