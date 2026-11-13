@@ -509,6 +509,8 @@ const it: Messages = {
   notch: {
     states: { idle: "", listening: "Ti ascolto", thinking: "Ci penso", speaking: "Parlo", error: "Non ti sento" } as Record<string, string>,
     hold: "Tieni premuto per parlare",
+    micStart: "Parla (clicca di nuovo quando hai finito)",
+    micStop: "Ho finito di parlare",
     key: "⌥ Spazio",
     stop: "Basta",
     open: "Apri Yoru",

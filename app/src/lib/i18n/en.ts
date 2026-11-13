@@ -511,6 +511,8 @@ const en = {
   notch: {
     states: { idle: "", listening: "Listening", thinking: "Thinking", speaking: "Speaking", error: "Can't hear you" } as Record<string, string>,
     hold: "Hold to talk",
+    micStart: "Talk (click again when you're done)",
+    micStop: "Done talking",
     key: "⌥ Space",
     stop: "Stop",
     open: "Open Yoru",

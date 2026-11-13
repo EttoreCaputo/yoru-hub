@@ -5,7 +5,8 @@
   bar, nothing drawn under the camera. Closed, a little Yoru sits on its
   left and what he's doing on its right. With the pointer on him, or while
   he hears or talks, it opens downwards: the last exchange as plain text,
-  the cards to allow or deny, a field and a button to hold and talk. No
+  the cards to allow or deny, a field and a button that turns the microphone on and, clicked
+  again, off. No
   cards, no greys: white text at a few strengths, and pills.
 
   The window is bigger than all this and lets clicks through but on what
@@ -103,6 +104,8 @@
       if (voice !== "error") error = "";
       if (voice === "idle" && was !== "idle") lingerUntil = Date.now() + LINGER_MS;
       if (voice !== "listening") level = 0;
+      // The turn ended on its own (an error, or Yoru stopped): the button is off.
+      if (held && (voice === "idle" || voice === "error")) held = false;
     } else if (e.event === "level") level = e.level;
     else if (e.event === "react") reaction = { name: e.name, at: Date.now() };
     else if (e.event === "fetch") fetching = e.state === "start" ? e.source || t.fetching : null;
@@ -236,13 +239,10 @@
         <button
           class="round mic"
           class:on={held || voice === "listening"}
-          title={t.hold}
-          aria-label={t.hold}
-          onpointerdown={(e) => (e.currentTarget.setPointerCapture(e.pointerId), talk(true))}
-          onpointerup={() => talk(false)}
-          onpointercancel={() => talk(false)}
-          onkeydown={(e) => e.key === " " && !e.repeat && (e.preventDefault(), talk(true))}
-          onkeyup={(e) => e.key === " " && talk(false)}
+          title={held ? t.micStop : t.micStart}
+          aria-label={held ? t.micStop : t.micStart}
+          aria-pressed={held}
+          onclick={() => talk(!held)}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></svg>
         </button>
