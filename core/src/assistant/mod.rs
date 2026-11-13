@@ -33,6 +33,7 @@
 //! to: thinking blocks are tied to the history they were made in, so a long
 //! or old conversation starts over instead of being trimmed.
 
+pub mod coding;
 pub mod compat;
 pub mod confirm;
 pub mod external;
@@ -312,6 +313,8 @@ pub struct Assistant {
     pub inbox: Arc<Inbox>,
     pub tasks: Arc<Tasks>,
     pub timers: Arc<Timers>,
+    /// Prompts sent to the user's coding agents (the `code` tool).
+    pub coding: Arc<coding::Coding>,
     /// What the boards show of the meetings recorded.
     pub meeting: Arc<crate::meetings::BoardMeeting>,
     external: Mutex<Option<Arc<dyn ExternalTools>>>,
@@ -355,9 +358,11 @@ impl Assistant {
         let file = |name: &str| dir.as_ref().map(|d| d.join(name));
         let settings = file("assistant.json").and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let log = file("conversation.json").and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let inbox = Arc::new(Inbox::open(file("inbox.json")));
         Self {
             memory: Memory::open(dir.as_deref()),
-            inbox: Arc::new(Inbox::open(file("inbox.json"))),
+            coding: coding::Coding::new(inbox.clone()),
+            inbox,
             tasks: Arc::new(Tasks::open(file("tasks.json"))),
             timers,
             meeting: Arc::default(),
@@ -1004,6 +1009,7 @@ impl Assistant {
                 return result;
             }
             "this_is" => return self.this_is(input["name"].as_str().unwrap_or_default(), input["is_user"].as_bool().unwrap_or(false)),
+            "code" => return self.coding.call_tool(input),
             "tasks" => {
                 let result = self.tasks.call_tool(input);
                 // Only a change is worth a stamp, not a look at the list.
@@ -1343,6 +1349,7 @@ Says the fact's id, or the one that already says it.",
             "input_schema": {"type": "object", "properties": {}},
         }),
         Tasks::tool(),
+        coding::Coding::tool(),
     ]
 }
 

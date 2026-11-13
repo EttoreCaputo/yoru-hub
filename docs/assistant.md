@@ -125,6 +125,15 @@ What stays:
 - The Allow/Deny card (`show_approval`, `hide_approval`, the `approval` notification), now only for the assistant's own confirmations (`assistant/confirm.rs`, `bridge/confirm.rs`).
 - `claude/cleanup.rs`: at start the app takes out of Claude Code's settings.json the hooks (`"<exe>" --claude-hook`) and the status line (`"<exe>" --claude-statusline`) older versions installed, matching only Yoru's own executable (`yoru-app`, `yoru`), and puts back the status line it had replaced. Until then the app binary ends at once, silently, when run with either flag.
 
+### Prompts by voice (the `code` tool, since 2026-11-13)
+
+Yoru doesn't follow the agents any more, but he can work them: `assistant/coding.rs` gives every brain (Gemini Live included) a `code` tool for Claude Code and Codex on this computer.
+- **sessions**: the user's conversations with them, newest first, read from the files they keep (`~/.claude/projects/<folder>/<id>.jsonl`, with the title the app gave it or the first message; `~/.codex/sessions/.../rollout-*-<id>.jsonl`, titled by `~/.codex/session_index.jsonl`). The newest 60 files of each are read; subagents' files and conversations in scratch or temporary folders are left out. A query keeps those whose title, folder or id have its words.
+- **send**: the prompt, in the user's words, to an agent in the background. With a conversation's id it continues it (in its folder); with a project (a folder, or a name matched against the folders of the user's conversations, `rome maps` finds `RomeMaps`) it starts a new one there; with neither, a new one in a fresh folder, `~/Documents/Yoru Code/<date>/<the prompt's first words>`. Claude Code runs as `claude -p --output-format json --permission-mode auto [--resume <id>]` (its auto mode: it works on its own and risky actions are checked); Codex as `codex exec [resume <id>] --skip-git-repo-check --json -c sandbox_mode="workspace-write" -o <file>` (the ChatGPT app's own `codex` when it isn't on the PATH). The agent gets the PATH of the user's login shell, since the app started from the Finder has a bare one. When it ends (an hour at most) its last answer goes to the inbox (source Claude Code or Codex, title `<folder>: done`), with the tools it wasn't allowed to run; a login that ran out says how to log in again.
+- **runs** and **stop**: the last 20 prompts sent and how they went; stop kills a running one.
+
+It doesn't talk to the agents' apps: a conversation open in the Claude or Codex app doesn't show what Yoru sent until it is opened again. The `claude` command has its own login, apart from the Claude app's.
+
 ## The app: Yoru only, redone
 
 Until 2026-10-19 the window was DualEye's: a home with the board's mirror and pills, and a settings drawer with Voice, Pet, Timers, Claude, Device and Diagnostics tabs. The new app has a sidebar:
