@@ -1,6 +1,6 @@
 //! What the host says of its own accord, on a thread of its own: timers that
-//! are up and the assistant's notifications, each once the board is out of
-//! any voice conversation.
+//! are up, the assistant's notifications and what the coding agents did,
+//! each once the board is out of any voice conversation.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -25,6 +25,9 @@ pub(super) enum AlertInput {
     Timer(Fired),
     /// The assistant's inbox changed.
     Inbox(InboxChange),
+    /// Something to say out loud, in a language (`it`, `en`): a coding
+    /// agent finished or needs the user.
+    Say { text: String, language: String },
 }
 
 /// A board the alerts can go to, while its session has it ready.
@@ -117,6 +120,10 @@ pub(super) fn alert_loop(config: &BridgeConfig, stop: &AtomicBool, targets: &Tar
                 let error = say_timer(config, stop, targets, &fired).err();
                 on_event(BridgeEvent::TimerFired { fired, text, error });
             }
+            AlertInput::Say { text, language } => match say(config, stop, targets, &text, &language) {
+                Ok(()) => crate::hostlog::line("said", &text),
+                Err(e) => crate::hostlog::line("said", &format!("{text} (not said: {e})")),
+            },
         }
     }
 }
@@ -136,6 +143,24 @@ fn say_timer(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, fired:
         return Ok(());
     }
     speaker.speak(&link, &tts, &fired.spoken(), &fired.timer.language).map(|_| ())
+}
+
+/// Say `text` once the board is out of any conversation, and show it in the
+/// conversation; in quiet hours only show it (it's in the inbox too).
+fn say(config: &BridgeConfig, stop: &AtomicBool, targets: &Targets, text: &str, language: &str) -> Result<(), String> {
+    if let Some(assistant) = &config.assistant {
+        assistant.said_unasked(text);
+        if assistant.quiet_now() {
+            return Err("quiet hours".into());
+        }
+    }
+    let Some(tts) = config.voice.lock().unwrap().tts.clone() else { return Err("spoken replies are off".into()) };
+    let (link, AlertTarget { speaker, voice_state, .. }) = self::speaker(config, targets, None).ok_or("the board isn't connected")?;
+    let until = Instant::now() + CONVERSATION_WAIT;
+    while *voice_state.lock().unwrap() != "idle" && Instant::now() < until && !stop.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(250));
+    }
+    speaker.speak(&link, &tts, text, language).map(|_| ())
 }
 
 /// Put `n` on every board's inbox; an urgent one is also said, by the board

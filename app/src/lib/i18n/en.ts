@@ -93,7 +93,7 @@ const en = {
     title: "Agents at work",
     none: "No coding agent is working right now.",
     byYoru: "sent by Yoru",
-    states: { working: "working", done: "done", failed: "didn't work", stopped: "stopped" } as Record<string, string>,
+    states: { working: "working", done: "done", needs_you: "needs you", failed: "didn't work", stopped: "stopped" } as Record<string, string>,
     stop: "Stop",
   },
 

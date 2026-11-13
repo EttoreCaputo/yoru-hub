@@ -313,7 +313,7 @@ pub struct Assistant {
     pub inbox: Arc<Inbox>,
     pub tasks: Arc<Tasks>,
     pub timers: Arc<Timers>,
-    /// Prompts sent to the user's coding agents (the `code` tool).
+    /// The user's coding agents (the `code_*` tools).
     pub coding: Arc<coding::Coding>,
     /// What the boards show of the meetings recorded.
     pub meeting: Arc<crate::meetings::BoardMeeting>,
@@ -1009,7 +1009,7 @@ impl Assistant {
                 return result;
             }
             "this_is" => return self.this_is(input["name"].as_str().unwrap_or_default(), input["is_user"].as_bool().unwrap_or(false)),
-            "code" => return self.coding.call_tool(input),
+            n if coding::TOOLS.contains(&n) => return self.coding.call_tool(n, input),
             "tasks" => {
                 let result = self.tasks.call_tool(input);
                 // Only a change is worth a stamp, not a look at the list.
@@ -1085,6 +1085,12 @@ impl Assistant {
         self.memory.enrol(person, &print);
         self.show_done("Memory", "remember");
         Ok(format!("[e{person}] {name}: their voice is learnt; the next requests will say who speaks"))
+    }
+
+    /// Something Yoru said of his own accord (a coding agent finished), in
+    /// the conversation the app shows.
+    pub fn said_unasked(&self, text: &str) {
+        self.add_line("yoru", text, Channel::Voice, Vec::new());
     }
 
     fn add_line(&self, from: &str, text: &str, channel: Channel, actions: Vec<Action>) {
@@ -1265,7 +1271,7 @@ never rude yourself.",
 /// Yoru's own tools.
 fn own_tools() -> Vec<Value> {
     let sections: Vec<&str> = memory::SECTIONS.iter().map(|(k, _)| *k).collect();
-    vec![
+    let mut tools = vec![
         json!({
             "name": "notify",
             "description": "Put a notification in the user's inbox and on Yoru's board.",
@@ -1350,8 +1356,9 @@ Says the fact's id, or the one that already says it.",
             "input_schema": {"type": "object", "properties": {}},
         }),
         Tasks::tool(),
-        coding::Coding::tool(),
-    ]
+    ];
+    tools.extend(coding::Coding::tools());
+    tools
 }
 
 /// The board's tools every turn gets: a reaction and a look at its state.

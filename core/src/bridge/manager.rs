@@ -201,6 +201,10 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
         assistant.inbox.set_delivery(Some(Arc::new(move |change| {
             let _ = tx.lock().unwrap().send(AlertInput::Inbox(change));
         })));
+        let tx = Mutex::new(alert_tx.clone());
+        assistant.coding.set_announcer(Some(Arc::new(move |text: &str, language: &str| {
+            let _ = tx.lock().unwrap().send(AlertInput::Say { text: text.into(), language: language.into() });
+        })));
     }
     let cards = confirm::listen(config);
     let errands = errands::listen(config);
@@ -223,6 +227,7 @@ fn run_with(config: &BridgeConfig, max_boards: Option<usize>, stop: &AtomicBool,
     });
     if let Some(assistant) = &config.assistant {
         assistant.inbox.set_delivery(None);
+        assistant.coding.set_announcer(None);
         assistant.set_errands(None);
     }
     if let Some(hub) = &config.hub {

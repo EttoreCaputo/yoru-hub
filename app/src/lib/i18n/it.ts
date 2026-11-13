@@ -91,7 +91,7 @@ const it: Messages = {
     title: "Agenti al lavoro",
     none: "Nessun agente sta programmando adesso.",
     byYoru: "mandata da Yoru",
-    states: { working: "al lavoro", done: "finita", failed: "non è andata", stopped: "fermata" } as Record<string, string>,
+    states: { working: "al lavoro", done: "finita", needs_you: "ti aspetta", failed: "non è andata", stopped: "fermata" } as Record<string, string>,
     stop: "Ferma",
   },
 

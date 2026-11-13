@@ -27,7 +27,9 @@ export type ActiveAgent = {
   session: string | null;
   updated: number;
   run: number | null;
-  state: "working" | "done" | "failed" | "stopped";
+  state: "working" | "done" | "needs_you" | "failed" | "stopped";
+  /** Its last step (`ran cargo build`), for Yoru's runs. */
+  now: string | null;
 };
 export type ChatLine = { from: "you" | "yoru"; text: string; channel: Channel; actions?: Action[]; at: number };
 export type Reply = { text: string; actions: Action[]; model: string; elapsed_ms: number };

@@ -362,9 +362,9 @@ const info: AssistantInfo = {
 
 let confirmations: Confirmation[] = [];
 let agents: ActiveAgent[] = [
-  { agent: "claude", title: "Show the user's words as soon as they're transcribed", project: "/Users/you/Code/yoru-hub", session: null, updated: Date.now() - 40_000, run: 1, state: "working" },
-  { agent: "codex", title: "Bigger menu on the home page", project: "/Users/you/Sites/pub", session: "c3", updated: Date.now() - 70_000, run: null, state: "working" },
-  { agent: "opencode", title: "Centralise the open-data API calls", project: "/Users/you/Code/Venezia-Marea", session: "ses_4", updated: Date.now() - 300_000, run: 2, state: "done" },
+  { agent: "claude", title: "Show the user's words as soon as they're transcribed", project: "/Users/you/Code/yoru-hub", session: null, updated: Date.now() - 40_000, run: 1, state: "working", now: "edited AgentList.svelte" },
+  { agent: "codex", title: "Bigger menu on the home page", project: "/Users/you/Sites/pub", session: "c3", updated: Date.now() - 70_000, run: null, state: "working", now: null },
+  { agent: "opencode", title: "Centralise the open-data API calls", project: "/Users/you/Code/Venezia-Marea", session: "ses_4", updated: Date.now() - 300_000, run: 2, state: "done", now: null },
 ];
 
 const timers: TimersInfo = {
