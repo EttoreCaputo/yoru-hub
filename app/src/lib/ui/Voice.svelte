@@ -142,6 +142,23 @@
   </section>
   {#if info.tts_error}<p class="error-text note">{info.tts_error}</p>{/if}
 
+  <h2 class="section-title">{t.live}</h2>
+  <section class="panel" class:active={!!s.live}>
+    <div class="setting">
+      <div class="what">
+        <b>{t.liveVoice}</b>
+        <span class="dim">{t.liveHint}</span>
+        {#if !keyed("google")}<span class="dim">{t.liveNeedsKey}</span>{:else if s.live && !s.enabled}<span class="error-text">{t.liveNeedsListening}</span>{/if}
+      </div>
+      <div class="how">
+        <select value={s.live} disabled={!keyed("google") && !s.live} onchange={(e) => set({ live: e.currentTarget.value })} aria-label={t.liveVoice}>
+          <option value="">{t.off}</option>
+          {#each info.live_voices as [name, style] (name)}<option value={name}>{name} — {t.liveStyles[style] ?? style}</option>{/each}
+        </select>
+      </div>
+    </div>
+  </section>
+
   {#each services as svc (svc)}
     {@const hears = of(whispers, svc)}
     {@const langs = LANGS.filter((l) => voicesIn(svc, l).length)}

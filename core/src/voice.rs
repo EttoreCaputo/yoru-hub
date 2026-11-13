@@ -48,6 +48,7 @@ use crate::agent::{Action, Agent, Toolbox};
 use crate::intent::{IntentModel, Meaning};
 use crate::turn::{self, SmartTurn};
 use crate::bridge::{BridgeEvent, EventSink};
+use crate::cloud::live;
 use crate::intents::{self, Context};
 use crate::link::{Link, Tool};
 use crate::profile::BoardKind;
@@ -162,26 +163,29 @@ impl Capture {
     }
 
     /// One `audio_up` frame. Frames of another utterance are ignored.
-    pub fn audio(&mut self, payload: &[u8]) {
+    /// The samples it added (a gap's silence first).
+    pub fn audio(&mut self, payload: &[u8]) -> &[i16] {
         let Some(b) = self.current.as_mut() else {
-            return;
+            return &[];
         };
         if payload.len() < HEADER || payload[0] != b.id || !(payload.len() - HEADER).is_multiple_of(2) {
-            return;
+            return &[];
         }
         let seq = u16::from_le_bytes([payload[2], payload[3]]);
         let pcm = &payload[HEADER..];
         let gap = seq.wrapping_sub(b.next_seq);
         if gap >= MAX_GAP_FRAMES {
             // A repeat or something from long ago.
-            return;
+            return &[];
         }
+        let before = b.samples.len();
         let frame_samples = pcm.len() / 2;
         b.samples.resize(b.samples.len() + gap as usize * frame_samples.max(b.frame_samples), 0);
         b.lost += gap as u32;
         b.frame_samples = frame_samples;
         b.samples.extend(pcm.as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes(*c)));
         b.next_seq = seq.wrapping_add(1);
+        &b.samples[before..]
     }
 
     /// The samples of utterance `id` so far, while it's the one being built.
@@ -243,6 +247,10 @@ pub struct VoiceConfig {
     /// The language every answer is in (`it`, `en`), the one picked in the
     /// app; `None` answers in the one heard.
     pub language: Option<String>,
+    /// Answer with Gemini Live in this Google voice ([`crate::cloud::live::VOICES`])
+    /// instead of transcribing, thinking and speaking apart; the usual way
+    /// answers when it can't (no Google key, a session that won't open).
+    pub live: Option<String>,
 }
 
 /// The voice print of `samples` (once the helper's models are here: the
@@ -362,6 +370,8 @@ pub enum Hearing {
     /// The board started streaming (`wake`, `host` or `follow_up`): the
     /// language model can read its prompt meanwhile.
     Started { trigger: String },
+    /// More of the utterance going on, as it comes: Gemini Live hears it then.
+    Audio(Vec<i16>),
     Utterance(Utterance),
     /// The board started streaming while another board had the voice
     /// floor: it's told to stop and go back to idle.
@@ -373,9 +383,15 @@ pub enum Hearing {
 /// weak because the link's reader holds that sender.
 pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSink, rx: Receiver<Hearing>) {
     let mut chain = FollowUp::default();
+    let mut live = LiveChat::default();
     for heard in rx {
+        if let Hearing::Audio(samples) = &heard {
+            live.audio(samples);
+            continue;
+        }
         let config = config.lock().unwrap().clone();
         let utterance = match heard {
+            Hearing::Audio(_) => continue,
             Hearing::Utterance(u) => u,
             Hearing::Refused => {
                 if let Some(link) = session.link.upgrade() {
@@ -385,7 +401,10 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 sink(BridgeEvent::BoardLog { line: "host: another board is answering, this one stopped listening".into() });
                 continue;
             }
-            Hearing::Started { .. } => {
+            Hearing::Started { trigger } => {
+                if let (Some(voice), Some(assistant), Some(link)) = (&config.live, &session.assistant, session.link.upgrade()) {
+                    live.start(assistant, &VoiceHost { link: &link, session }, voice, trigger == "follow_up", sink);
+                }
                 if let (Some(agent), Some(link)) = (&config.agent, session.link.upgrade())
                     && let Err(e) = agent.prime(&BoardToolbox { link: &link, session, language: "en" })
                 {
@@ -408,6 +427,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
             utterance: utterance.clone(),
         });
         if !utterance.speech {
+            live.drop_turn();
             (session.conversation_over)();
             continue;
         }
@@ -419,50 +439,57 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
         if !follow_up {
             chain = FollowUp::default();
         }
-        let transcript = match &config.stt {
-            // Voice is off or its model isn't usable: say so rather than drop the words.
-            None => {
-                sink(BridgeEvent::VoiceError { message: "nothing transcribes what Yoru hears: turn voice on and pick a speech-to-text model".into() });
-                Err(if follow_up { "idle" } else { "error" })
-            }
-            Some(stt) => match times.transcribed({
-                // Whose voice and how it sounded, while the words are transcribed.
-                let (transcribed, heard) = thread::scope(|scope| {
-                    let heard = session.assistant.as_ref().map(|_| scope.spawn(|| listen_to(config.voiceprint.as_ref(), &utterance.samples)));
-                    (stt.transcribe(&utterance.samples), heard.and_then(|h| h.join().ok()))
-                });
-                if let (Some(a), Some((print, (loudness, pitch, seconds)))) = (&session.assistant, heard) {
-                    a.hear(print, loudness, pitch, seconds);
-                }
-                transcribed
-            }) {
-                Ok(t) if is_non_speech(&t.text) => {
-                    sink(BridgeEvent::Transcript { id: utterance.id, transcript: None });
-                    // Nothing said after an answer is no mistake.
+        // Gemini Live hears and answers on its own.
+        let live_next = match (&config.live, &session.assistant) {
+            (Some(voice), Some(assistant)) => respond_live(&link, session, assistant, sink, &utterance, voice, config.language.as_deref(), follow_up, &mut live, &mut thinking, &mut times),
+            _ => None,
+        };
+        let next = if let Some(next) = live_next { next } else {
+            let transcript = match &config.stt {
+                // Voice is off or its model isn't usable: say so rather than drop the words.
+                None => {
+                    sink(BridgeEvent::VoiceError { message: "nothing transcribes what Yoru hears: turn voice on and pick a speech-to-text model".into() });
                     Err(if follow_up { "idle" } else { "error" })
                 }
-                Ok(t) => {
-                    sink(BridgeEvent::Transcript { id: utterance.id, transcript: Some(t.clone()) });
-                    if follow_up && t.logprob < FOLLOW_UP_MIN_LOGPROB {
-                        // Unsure words without the wake word: the room, not the user.
-                        sink(BridgeEvent::BoardLog { line: format!("host: follow-up ignored, unsure transcript ({:.2})", t.logprob) });
-                        Err("idle")
-                    } else if follow_up && !alarm_near(&session.timers) && closes(&config, sink, &chain, &t.text) {
-                        sink(BridgeEvent::BoardLog { line: "host: the user closed the conversation".into() });
-                        Err("idle")
-                    } else {
-                        Ok(t)
+                Some(stt) => match times.transcribed({
+                    // Whose voice and how it sounded, while the words are transcribed.
+                    let (transcribed, heard) = thread::scope(|scope| {
+                        let heard = session.assistant.as_ref().map(|_| scope.spawn(|| listen_to(config.voiceprint.as_ref(), &utterance.samples)));
+                        (stt.transcribe(&utterance.samples), heard.and_then(|h| h.join().ok()))
+                    });
+                    if let (Some(a), Some((print, (loudness, pitch, seconds)))) = (&session.assistant, heard) {
+                        a.hear(print, loudness, pitch, seconds);
                     }
-                }
-                Err(e) => {
-                    sink(BridgeEvent::VoiceError { message: e.to_string() });
-                    Err("error")
-                }
-            },
-        };
-        let next = match transcript {
-            Ok(t) => respond(&link, session, &config, sink, utterance.id, &t.text, &t.language, follow_up, &mut thinking, &mut times),
-            Err(state) => Next::State(state),
+                    transcribed
+                }) {
+                    Ok(t) if is_non_speech(&t.text) => {
+                        sink(BridgeEvent::Transcript { id: utterance.id, transcript: None });
+                        // Nothing said after an answer is no mistake.
+                        Err(if follow_up { "idle" } else { "error" })
+                    }
+                    Ok(t) => {
+                        sink(BridgeEvent::Transcript { id: utterance.id, transcript: Some(t.clone()) });
+                        if follow_up && t.logprob < FOLLOW_UP_MIN_LOGPROB {
+                            // Unsure words without the wake word: the room, not the user.
+                            sink(BridgeEvent::BoardLog { line: format!("host: follow-up ignored, unsure transcript ({:.2})", t.logprob) });
+                            Err("idle")
+                        } else if follow_up && !alarm_near(&session.timers) && closes(&config, sink, &chain, &t.text) {
+                            sink(BridgeEvent::BoardLog { line: "host: the user closed the conversation".into() });
+                            Err("idle")
+                        } else {
+                            Ok(t)
+                        }
+                    }
+                    Err(e) => {
+                        sink(BridgeEvent::VoiceError { message: e.to_string() });
+                        Err("error")
+                    }
+                },
+            };
+            match transcript {
+                Ok(t) => respond(&link, session, &config, sink, utterance.id, &t.text, &t.language, follow_up, &mut thinking, &mut times),
+                Err(state) => Next::State(state),
+            }
         };
         thinking.stop();
         times.report(sink);
@@ -663,6 +690,223 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
                 sink(BridgeEvent::VoiceError { message: e });
                 Next::State("error")
             }
+        }
+    })
+}
+
+/// The Gemini Live session of the conversation: a follow-up goes to the
+/// same one, so it remembers what was said; a new wake word opens another.
+#[derive(Default)]
+struct LiveChat {
+    session: Option<live::Session>,
+    voice: String,
+    /// The utterance going on is being sent as it comes.
+    streaming: bool,
+    /// Google refused a session then (no quota left, a bad key): the usual
+    /// pipeline answers for [`LIVE_PAUSE`] before it's asked again.
+    refused: Option<Instant>,
+}
+
+/// How long the usual pipeline answers after Gemini Live couldn't.
+const LIVE_PAUSE: Duration = Duration::from_secs(600);
+
+impl LiveChat {
+    /// A session for `voice`, open; `false` when Google refused it (said once).
+    fn open(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, sink: &EventSink) -> bool {
+        if self.session.as_ref().is_some_and(|s| s.is_open()) && self.voice == voice {
+            return true;
+        }
+        self.session = None;
+        if self.refused.is_some_and(|t| t.elapsed() < LIVE_PAUSE) {
+            return false;
+        }
+        let Some(key) = crate::cloud::GOOGLE.api_key() else { return false };
+        match live::Session::open_any(&key, &assistant.live_setup(host, voice)) {
+            Ok((session, model)) => {
+                sink(BridgeEvent::BoardLog { line: format!("host: Gemini Live session open ({model}, {voice})") });
+                self.session = Some(session);
+                self.voice = voice.to_string();
+                self.refused = None;
+                true
+            }
+            Err(e) => {
+                sink(BridgeEvent::VoiceError { message: format!("{e}; answering without Gemini Live for now") });
+                self.refused = Some(Instant::now());
+                false
+            }
+        }
+    }
+
+    /// The board started streaming: Google listens from now. A new
+    /// conversation (not a follow-up) gets a new session.
+    fn start(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, follow_up: bool, sink: &EventSink) {
+        self.streaming = false;
+        if !follow_up {
+            self.session = None;
+        }
+        if !self.open(assistant, host, voice, sink) {
+            return;
+        }
+        self.streaming = self.session.as_mut().is_some_and(|s| s.begin().is_ok());
+        if !self.streaming {
+            self.session = None;
+        }
+    }
+
+    /// The utterance so far, as it comes.
+    fn audio(&mut self, samples: &[i16]) {
+        if self.streaming && self.session.as_mut().is_none_or(|s| s.audio(samples).is_err()) {
+            self.streaming = false;
+            self.session = None;
+        }
+    }
+
+    /// Nothing to answer (no speech): a turn left open can't be closed
+    /// without an answer, so the session goes.
+    fn drop_turn(&mut self) {
+        if std::mem::take(&mut self.streaming) {
+            self.session = None;
+        }
+    }
+}
+
+/// What a Live turn does with what Google sends: its speech goes to the
+/// board as it comes (the player starts with the first sound), its tool
+/// calls to the assistant.
+struct LiveTurner<'a, 's, 'e> {
+    scope: &'s thread::Scope<'s, 'e>,
+    link: &'e Link,
+    speaker: &'e Speaker,
+    assistant: &'a crate::Assistant,
+    host: &'a VoiceHost<'a>,
+    thinking: &'a mut StillThinking,
+    down: live::Downsampler,
+    tx: Option<Sender<Result<Vec<i16>, String>>>,
+    player: Option<thread::ScopedJoinHandle<'s, Result<Spoken, String>>>,
+    first_sound: Option<Instant>,
+    actions: Vec<crate::assistant::Action>,
+}
+
+impl live::Turner for LiveTurner<'_, '_, '_> {
+    fn audio(&mut self, samples: Vec<i16>) {
+        let samples = self.down.push(&samples);
+        if self.tx.is_none() {
+            // The board stopped playing it (barge-in): the rest goes nowhere.
+            if self.player.is_some() {
+                return;
+            }
+            self.thinking.stop();
+            self.first_sound = Some(Instant::now());
+            let (tx, rx) = mpsc::channel();
+            let (link, speaker) = (self.link, self.speaker);
+            self.player = Some(self.scope.spawn(move || speaker.play_from(link, rx, &mut || {})));
+            self.tx = Some(tx);
+        }
+        if self.tx.as_ref().is_some_and(|tx| tx.send(Ok(samples)).is_err()) {
+            self.tx = None;
+        }
+    }
+
+    fn call(&mut self, name: &str, arguments: &Value) -> Result<String, String> {
+        self.assistant.live_call(name, arguments, self.host, &mut self.actions)
+    }
+}
+
+/// Answer the utterance with Gemini Live: Google hears it, calls the tools
+/// and speaks. `None` when it couldn't start (no Google key, the session
+/// wouldn't open): the usual pipeline answers instead.
+#[allow(clippy::too_many_arguments)]
+fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, sink: &EventSink, utterance: &Utterance, voice: &str, language: Option<&str>, follow_up: bool, chat: &mut LiveChat, thinking: &mut StillThinking, times: &mut Times) -> Option<Next> {
+    let host = VoiceHost { link, session };
+    // Sent as it came (the quick way), or whole now: the session didn't open in time.
+    let mut streamed = std::mem::take(&mut chat.streaming);
+    if !streamed && !follow_up {
+        chat.session = None;
+    }
+    let started = Instant::now();
+    times.asked = Some(started);
+    let mut tries = 0;
+    let (turn, actions, first_sound, played) = loop {
+        tries += 1;
+        if !streamed && !chat.open(assistant, &host, voice, sink) {
+            return None;
+        }
+        let live_session = chat.session.as_mut()?;
+        let (turn, actions, first_sound, played) = thread::scope(|scope| {
+            let mut turner = LiveTurner {
+                scope,
+                link,
+                speaker: &session.speaker,
+                assistant,
+                host: &host,
+                thinking: &mut *thinking,
+                down: live::Downsampler::default(),
+                tx: None,
+                player: None,
+                first_sound: None,
+                actions: Vec::new(),
+            };
+            let turn = if streamed { live_session.finish(&mut turner) } else { live_session.turn(&utterance.samples, &mut turner) };
+            turner.tx = None;
+            let played = turner.player.take().map(|p| p.join().unwrap_or_else(|_| Err("the voice stopped".into())));
+            (turn, turner.actions, turner.first_sound, played)
+        });
+        match turn {
+            // Google closed a session kept from before: once more, whole, with a new one.
+            Err(_) if tries == 1 && played.is_none() => {
+                chat.session = None;
+                streamed = false;
+            }
+            Err(e) if played.is_none() => {
+                chat.session = None;
+                sink(BridgeEvent::VoiceError { message: format!("{e}; answering without Gemini Live") });
+                return None;
+            }
+            turn => break (turn, actions, first_sound, played),
+        }
+    };
+    times.first_words = first_sound;
+    times.first_sentence = first_sound;
+    times.answered = Some(Instant::now());
+    times.voice_ms = first_sound.map(|_| 0);
+    let turn = match turn {
+        Ok(turn) => turn,
+        Err(e) => {
+            // It broke off mid-answer.
+            chat.session = None;
+            sink(BridgeEvent::VoiceError { message: e });
+            return Some(Next::State("error"));
+        }
+    };
+    let language = language.map(str::to_string).or(turn.language.clone()).unwrap_or_else(|| "en".into());
+    if !turn.heard.is_empty() {
+        sink(BridgeEvent::Transcript {
+            id: utterance.id,
+            transcript: Some(crate::stt::Transcript { text: turn.heard.clone(), language: language.clone(), logprob: 0.0, elapsed_ms: started.elapsed().as_millis() as u64 }),
+        });
+    }
+    let lines = actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect();
+    sink(BridgeEvent::Reply { id: utterance.id, text: turn.said.clone(), language, actions: lines, understood: true, by: "gemini-live".into(), elapsed_ms: started.elapsed().as_millis() as u64 });
+    assistant.live_turn(&turn.heard, &turn.said, actions, follow_up);
+    let Some(played) = played else {
+        // Google chose to stay silent: not meant for Yoru.
+        return Some(Next::State("idle"));
+    };
+    Some(match played {
+        Ok(mut spoken) => {
+            spoken.text = turn.said.clone();
+            spoken.first_audio_ms = first_sound.map_or(0, |t| t.saturating_duration_since(started).as_millis() as u64);
+            let next = match spoken.reason.as_str() {
+                "done" => Next::Spoken { question: asks(&turn.said) },
+                "barge_in" => Next::Interrupted,
+                _ => Next::State("idle"),
+            };
+            sink(BridgeEvent::Spoken { id: utterance.id, spoken });
+            next
+        }
+        Err(e) => {
+            sink(BridgeEvent::VoiceError { message: e });
+            Next::State("error")
         }
     })
 }
@@ -1346,7 +1590,10 @@ impl Receiving {
     }
 
     pub fn audio(&mut self, payload: &[u8]) {
-        self.capture.audio(payload);
+        let added = self.capture.audio(payload);
+        if !added.is_empty() {
+            let _ = self.pipeline.send(Hearing::Audio(added.to_vec()));
+        }
     }
 
     pub fn end(&mut self, params: &Value) {

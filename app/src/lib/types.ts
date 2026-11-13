@@ -254,6 +254,8 @@ export type VoiceSettings = {
   llm_model: string;
   personality: string;
   personality_custom: string;
+  /** Gemini Live's voice, which then hears and speaks itself; "" for off. */
+  live: string;
 };
 export type ModelInfo = {
   id: string;
@@ -283,6 +285,8 @@ export type VoiceInfo = {
   llm_server?: string | null;
   download: [string, number] | null;
   providers: ProviderInfo[];
+  /** Gemini Live's voices: the name, and how Google describes it. */
+  live_voices: [string, string][];
 };
 export type AccountVoice = { voice_id: string; name: string; category: string; description: string | null };
 export type KeyCheck = { state: "valid" | "invalid" | "unknown"; error: string | null };

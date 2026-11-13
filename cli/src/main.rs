@@ -425,6 +425,7 @@ fn main() -> ExitCode {
             intent: None,
             turn: None,
             language: None,
+            live: None,
         })),
         confirmations: Arc::default(),
         timers: timers.clone(),

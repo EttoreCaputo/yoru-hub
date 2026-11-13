@@ -564,6 +564,12 @@ const it: Messages = {
     off: "Spento",
     offListen: "Non ti sente",
     offSpeak: "Risponde senza parlare",
+    live: "Gemini Live",
+    liveVoice: "Parla con Gemini Live",
+    liveHint: "Il modello vocale di Google sente le richieste a Yoru e risponde lui a voce, con la memoria e gli strumenti: più rapido e naturale, gratis nel piano free di AI Studio. Il cervello e la voce qui sopra subentrano quando non può rispondere.",
+    liveNeedsKey: "Serve una chiave di Google AI Studio: aggiungila in Cervello.",
+    liveNeedsListening: "Attiva l'ascolto qui sopra: Gemini Live risponde a quello che sente la scheda.",
+    liveStyles: { upbeat: "allegra", excitable: "vivace", informative: "informativa", firm: "decisa", friendly: "amichevole", lively: "brillante", "easy-going": "rilassata", clear: "chiara", smooth: "morbida", breathy: "sussurrata" } as Record<string, string>,
     local: "Su questo Mac",
     serviceNotes: {
       local: "Gratis e privato",

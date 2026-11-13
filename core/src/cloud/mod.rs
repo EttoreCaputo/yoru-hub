@@ -26,6 +26,7 @@
 
 pub mod anthropic;
 pub mod elevenlabs;
+pub mod live;
 mod ollama;
 mod openai;
 pub mod tavily;

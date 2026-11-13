@@ -394,6 +394,7 @@ const voice: VoiceInfo = {
     llm_model: "qwen3-4b",
     personality: "cute",
     personality_custom: "",
+    live: "",
   },
   models: [
     { id: "large-v3-turbo-q5", kind: "whisper", language: null, engine: null, bytes: 574_000_000, note: "Fast and accurate on a Mac", license: "MIT", installed: true, provider: null },
@@ -414,6 +415,7 @@ const voice: VoiceInfo = {
   llm: "off",
   llm_error: null,
   llm_server: "/opt/homebrew/bin/llama-server",
+  live_voices: [["Puck", "upbeat"], ["Fenrir", "excitable"], ["Charon", "informative"], ["Orus", "firm"]],
   download: null,
   providers: [
     { id: "anthropic", name: "Anthropic", note: "Claude, Yoru's brain; paid by use.", keys_url: "https://platform.claude.com/settings/keys", key_env: "ANTHROPIC_API_KEY", key: info.key },
