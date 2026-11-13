@@ -89,6 +89,14 @@ const en = {
     details: "Details",
   },
 
+  agents: {
+    title: "Agents at work",
+    none: "No coding agent is working right now.",
+    byYoru: "sent by Yoru",
+    states: { working: "working", done: "done", failed: "didn't work", stopped: "stopped" } as Record<string, string>,
+    stop: "Stop",
+  },
+
   today: {
     greeting: { morning: "Good morning", afternoon: "Good afternoon", evening: "Good evening", night: "Still up?" },
     quietLine: "Nothing new. I'm keeping an eye on things.",

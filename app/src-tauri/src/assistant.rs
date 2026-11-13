@@ -272,6 +272,18 @@ pub fn toggle_dnd(app: &AppHandle) {
 }
 
 /// Something typed to Yoru, answered in the conversation.
+/// What the coding agents are working on now (`code` tool, docs/assistant.md).
+#[tauri::command]
+pub async fn coding_active(app: AppHandle) -> Result<Vec<yoru_core::assistant::coding::Active>, String> {
+    blocking(app, |state| Ok(state.assistant.coding.active())).await
+}
+
+/// Stop a run Yoru sent.
+#[tauri::command]
+pub async fn coding_stop(app: AppHandle, run: u64) -> Result<String, String> {
+    blocking(app, move |state| state.assistant.coding.call_tool(&serde_json::json!({"action": "stop", "run": run}))).await
+}
+
 #[tauri::command]
 pub async fn ask(app: AppHandle, text: String) -> Result<Reply, String> {
     blocking(app, move |state| {

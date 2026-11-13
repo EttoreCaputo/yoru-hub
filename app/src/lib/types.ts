@@ -19,6 +19,16 @@ export type Notification = {
 
 export type Action = { tool: string; ok: boolean; summary: string };
 export type Channel = "voice" | "text";
+/** A coding agent's conversation being worked on now, or a run of Yoru's that just ended. */
+export type ActiveAgent = {
+  agent: "claude" | "codex" | "opencode";
+  title: string;
+  project: string;
+  session: string | null;
+  updated: number;
+  run: number | null;
+  state: "working" | "done" | "failed" | "stopped";
+};
 export type ChatLine = { from: "you" | "yoru"; text: string; channel: Channel; actions?: Action[]; at: number };
 export type Reply = { text: string; actions: Action[]; model: string; elapsed_ms: number };
 

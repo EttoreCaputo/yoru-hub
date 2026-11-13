@@ -9,6 +9,7 @@
 
 import type {
   AccountVoice,
+  ActiveAgent,
   AssistantInfo,
   BoardClip,
   ChatLine,
@@ -360,6 +361,11 @@ const info: AssistantInfo = {
 };
 
 let confirmations: Confirmation[] = [];
+let agents: ActiveAgent[] = [
+  { agent: "claude", title: "Show the user's words as soon as they're transcribed", project: "/Users/you/Code/yoru-hub", session: null, updated: Date.now() - 40_000, run: 1, state: "working" },
+  { agent: "codex", title: "Bigger menu on the home page", project: "/Users/you/Sites/pub", session: "c3", updated: Date.now() - 70_000, run: null, state: "working" },
+  { agent: "opencode", title: "Centralise the open-data API calls", project: "/Users/you/Code/Venezia-Marea", session: "ses_4", updated: Date.now() - 300_000, run: 2, state: "done" },
+];
 
 const timers: TimersInfo = {
   timers: [{ id: 1, kind: "timer", label: "Tea", total_s: 300, left_s: 184, state: "run", ends_at: "10:42" }],
@@ -712,6 +718,11 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   logout_connector: (a) => patch(a.id, { signed_in: false, state: "needs_login" }),
   set_connector_secret: () => undefined,
   confirmations: () => confirmations,
+  coding_active: () => agents,
+  coding_stop: (a) => {
+    agents = agents.map((x) => (x.run === a.run ? { ...x, state: "stopped" as const, updated: now() } : x));
+    return `stopped run ${a.run}`;
+  },
   confirm: (a) => {
     lastAnswer = a.allow;
     confirmations = confirmations.filter((x) => x.id !== a.id);

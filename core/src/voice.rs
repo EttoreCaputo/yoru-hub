@@ -882,19 +882,33 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
     // Live's own transcript of the user is poor (other languages, made-up
     // words) while it understands fine: Gemini Transcribe, on the same key,
     // writes what was said beside the turn, for the conversation and the
-    // memory; Yoru's speech-to-text if there's no key.
+    // memory; Yoru's speech-to-text if there's no key. It is shown as soon
+    // as it's written, while Live is still answering.
+    let started = Instant::now();
     let written = {
         let (key, stt, samples) = (crate::cloud::GOOGLE.api_key(), stt.cloned(), utterance.samples.clone());
+        let (early, id, shown) = (sink.clone(), utterance.id, language.unwrap_or("en").to_string());
+        let keeper = session.assistant.clone();
         let languages: &'static [&'static str] = match language {
             Some("it") => &["it-IT"],
             Some("en") => &["en-US"],
             _ => &["it-IT", "en-US"],
         };
         (key.is_some() || stt.is_some()).then(|| {
-            thread::spawn(move || match (key, stt) {
-                (Some(key), _) => live::transcribe(&key, &samples, languages, &["Yoru"]),
-                (None, Some(stt)) => stt.transcribe(&samples).map(|t| t.text).map_err(|e| e.to_string()),
-                (None, None) => Err("nothing transcribes".into()),
+            thread::spawn(move || {
+                let text = match (key, stt) {
+                    (Some(key), _) => live::transcribe(&key, &samples, languages, &["Yoru"]),
+                    (None, Some(stt)) => stt.transcribe(&samples).map(|t| t.text).map_err(|e| e.to_string()),
+                    (None, None) => Err("nothing transcribes".into()),
+                };
+                if let Some(t) = text.as_deref().ok().map(str::trim).filter(|t| !t.is_empty()) {
+                    let elapsed_ms = started.elapsed().as_millis() as u64;
+                    early(BridgeEvent::Transcript { id, transcript: Some(crate::stt::Transcript { text: t.to_string(), language: shown, logprob: 0.0, elapsed_ms }) });
+                    if let Some(a) = keeper {
+                        a.live_heard(t);
+                    }
+                }
+                text
             })
         })
     };
@@ -903,7 +917,6 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
     if !streamed && !follow_up {
         chat.session = None;
     }
-    let started = Instant::now();
     times.asked = Some(started);
     let mut tries = 0;
     let (turn, actions, first_sound, played) = loop {
@@ -962,13 +975,18 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
         }
     };
     let mut turn = turn;
+    // Shown already when it was written; Live's own words otherwise.
+    let mut shown = false;
     match written.map(|w| w.join().unwrap_or_else(|_| Err("the transcription stopped".into()))) {
-        Some(Ok(text)) if !text.trim().is_empty() => turn.heard = text.trim().to_string(),
+        Some(Ok(text)) if !text.trim().is_empty() => {
+            turn.heard = text.trim().to_string();
+            shown = true;
+        }
         Some(Ok(_)) | None => {}
         Some(Err(e)) => sink(BridgeEvent::BoardLog { line: format!("host: the transcription beside Gemini Live failed, keeping Live's own: {e}") }),
     }
     let language = language.map(str::to_string).or(turn.language.clone()).unwrap_or_else(|| "en".into());
-    if !turn.heard.is_empty() {
+    if !shown && !turn.heard.is_empty() {
         sink(BridgeEvent::Transcript {
             id: utterance.id,
             transcript: Some(crate::stt::Transcript { text: turn.heard.clone(), language: language.clone(), logprob: 0.0, elapsed_ms: started.elapsed().as_millis() as u64 }),
@@ -976,7 +994,7 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
     }
     let lines = actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect();
     sink(BridgeEvent::Reply { id: utterance.id, text: turn.said.clone(), language: language.clone(), actions: lines, understood: true, by: "gemini-live".into(), elapsed_ms: started.elapsed().as_millis() as u64 });
-    assistant.live_turn(&turn.heard, &turn.said, actions, follow_up);
+    assistant.live_turn(&turn.heard, &turn.said, actions, follow_up, shown && session.assistant.is_some());
     if !kept.is_empty() && turn.said.chars().any(char::is_alphanumeric) {
         // Kept apart from ElevenLabs' (crate::spoken::GEMINI_LIVE), off this
         // thread: the next turn shouldn't wait for the disk.

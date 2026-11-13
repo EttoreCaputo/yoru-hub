@@ -38,6 +38,12 @@ const KEPT_RUNS: usize = 20;
 const RUN_LIMIT: Duration = Duration::from_secs(60 * 60);
 /// What the inbox gets of an agent's answer.
 const ANSWER_CHARS: usize = 900;
+/// A conversation written to this recently is being worked on.
+pub const ACTIVE_MS: u64 = 3 * 60 * 1000;
+/// A run of Yoru's stays in the active list this long after it ends, to be seen.
+const ENDED_SHOWN_MS: u64 = 10 * 60 * 1000;
+/// The active list is looked for again after this long, however often it's asked.
+const ACTIVE_CACHE: Duration = Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -94,6 +100,24 @@ pub struct Run {
     /// The agent's last answer, or what went wrong.
     pub result: String,
     pub started: u64,
+    /// Unix ms it ended, once it has.
+    pub ended: Option<u64>,
+}
+
+/// A conversation being worked on now, or a run of Yoru's that just ended:
+/// what the app and the notch show.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Active {
+    pub agent: Agent,
+    pub title: String,
+    pub project: String,
+    pub session: Option<String>,
+    /// Unix ms of its last change.
+    pub updated: u64,
+    /// Yoru's run, when Yoru sent it.
+    pub run: Option<u64>,
+    /// `working`, or how Yoru's run ended (`done`, `failed`, `stopped`).
+    pub state: &'static str,
 }
 
 /// The runs, and where their answers go.
@@ -103,6 +127,8 @@ pub struct Coding {
     /// The running agents' processes, to stop them.
     children: Mutex<HashMap<u64, Arc<Mutex<Child>>>>,
     next: Mutex<u64>,
+    /// The last active list, and when it was made.
+    active: Mutex<Option<(Instant, Vec<Active>)>>,
 }
 
 impl std::fmt::Debug for Coding {
@@ -113,7 +139,7 @@ impl std::fmt::Debug for Coding {
 
 impl Coding {
     pub fn new(inbox: Arc<Inbox>) -> Arc<Self> {
-        Arc::new(Self { inbox, runs: Mutex::default(), children: Mutex::default(), next: Mutex::new(0) })
+        Arc::new(Self { inbox, runs: Mutex::default(), children: Mutex::default(), next: Mutex::new(0), active: Mutex::default() })
     }
 
     /// The model's tool.
@@ -121,16 +147,20 @@ impl Coding {
         json!({
             "name": "code",
             "description": "The user's coding agents on this computer, Claude Code (claude), Codex (codex) and OpenCode (opencode). \
-sessions: their conversations, newest first, each with its id, title and project folder; query keeps those whose title, folder or first \
-message has its words. send: give an agent a prompt, run in the background: to continue a conversation pass its session id (find it with \
+active: what is being worked on right now (conversations written to in the last few minutes, the user's own or yours) and your runs \
+that just ended; this is what to answer when asked which sessions are active or how they're going. \
+sessions: their past conversations, newest first, each with its id, title and project folder (not whether they're active); query keeps \
+those whose title, folder or first message has its words. send: give an agent a prompt, run in the background: to continue a conversation pass its session id (find it with \
 sessions first); for a new conversation in one of the user's projects pass project (its name or folder); with neither, a new conversation \
 in a fresh folder outside any project. The prompt goes in the user's words, whole, in their language: don't summarize or add to it. \
 The agent works on its own (it may take minutes): tell the user it started; its answer comes to the inbox when it's done. \
-runs: what was sent and how it went (an answer you can read out). stop: stop a running one by its run id.",
+runs: what was sent and how it went (an answer you can read out). stop: stop a running one by its run id. \
+When the user asks you to have an agent do something, call send: saying you sent it without calling send sends nothing. \
+Say it started only once send answered \"sent to\".",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["sessions", "send", "runs", "stop"]},
+                    "action": {"type": "string", "enum": ["active", "sessions", "send", "runs", "stop"]},
                     "agent": {"type": "string", "enum": ["claude", "codex", "opencode"], "description": "Default claude; for sessions, all of them when left out"},
                     "query": {"type": "string", "description": "sessions: words of the title, project or first message"},
                     "session": {"type": "string", "description": "send: the id of the conversation to continue"},
@@ -149,6 +179,17 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
         let agent = text("agent").and_then(Agent::parse);
         let home = crate::paths::home_dir().ok_or("no home folder")?;
         match input["action"].as_str().unwrap_or("sessions") {
+            "active" => {
+                let active = self.active();
+                if active.is_empty() {
+                    return Ok("nothing is being worked on now".into());
+                }
+                Ok(json!(active
+                    .iter()
+                    .map(|a| json!({"agent": a.agent, "title": a.title, "project": a.project, "session": a.session, "state": a.state, "by_yoru": a.run.is_some(), "updated": local(a.updated)}))
+                    .collect::<Vec<_>>())
+                .to_string())
+            }
             "sessions" => {
                 let all = sessions(&home, agent);
                 let found = matching(&all, text("query").unwrap_or_default());
@@ -189,6 +230,23 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
         }
     }
 
+    /// What is being worked on now: Yoru's runs (going, or ended in the last
+    /// minutes) and the conversations any agent wrote to in the last
+    /// [`ACTIVE_MS`], the user's own included. Newest first.
+    pub fn active(&self) -> Vec<Active> {
+        if let Some((at, list)) = self.active.lock().unwrap().as_ref() {
+            if at.elapsed() < ACTIVE_CACHE {
+                return list.clone();
+            }
+        }
+        let home = crate::paths::home_dir().unwrap_or_default();
+        let now = crate::assistant::inbox::now_ms();
+        let runs = self.runs.lock().unwrap().clone();
+        let list = active_list(&runs, sessions_since(&home, None, now.saturating_sub(ACTIVE_MS)), now);
+        *self.active.lock().unwrap() = Some((Instant::now(), list.clone()));
+        list
+    }
+
     /// Send `prompt` to `agent` in `project` (continuing `session`), in the
     /// background. The run's id.
     fn start(self: &Arc<Self>, agent: Agent, project: &Path, session: Option<&str>, prompt: &str) -> Result<u64, String> {
@@ -224,6 +282,7 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
             state: "running",
             result: String::new(),
             started: crate::assistant::inbox::now_ms(),
+            ended: None,
         };
         {
             let mut runs = self.runs.lock().unwrap();
@@ -233,6 +292,7 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
         }
         let child = Arc::new(Mutex::new(child));
         self.children.lock().unwrap().insert(id, child.clone());
+        *self.active.lock().unwrap() = None;
         crate::hostlog::line("code", &format!("run {id}: {} in {} {}", agent.name(), project.display(), session.map_or("(new conversation)".into(), |s| format!("(continuing {s})"))));
         let me = self.clone();
         thread::Builder::new()
@@ -313,11 +373,13 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
             }
             run.state = state;
             run.result = result;
+            run.ended = Some(crate::assistant::inbox::now_ms());
             if run.session.is_none() {
                 run.session = session;
             }
             run.clone()
         };
+        *self.active.lock().unwrap() = None;
         crate::hostlog::line("code", &format!("run {id}: {state}"));
         let place = Path::new(&run.project).file_name().map_or(run.project.clone(), |n| n.to_string_lossy().into_owned());
         let title = match state {
@@ -328,6 +390,35 @@ runs: what was sent and how it went (an answer you can read out). stop: stop a r
         let text = format!("{}\n\nAsked: {}", clip(&run.result, ANSWER_CHARS), clip(&run.prompt, 200));
         self.inbox.post(run.agent.name(), &title, &text, Urgency::Normal, None, Some("code".into()));
     }
+}
+
+/// [`Coding::active`] from Yoru's `runs` and the conversations written to
+/// lately (`recent`), at `now`. A conversation of Yoru's run is shown once,
+/// as the run: by its id, or (a new one, not named yet) by its folder.
+fn active_list(runs: &[Run], recent: Vec<Session>, now: u64) -> Vec<Active> {
+    let shown: Vec<&Run> = runs.iter().filter(|r| r.state == "running" || r.ended.is_some_and(|e| now.saturating_sub(e) < ENDED_SHOWN_MS)).collect();
+    let mut list: Vec<Active> = shown
+        .iter()
+        .map(|r| Active {
+            agent: r.agent,
+            title: clip(&r.prompt.replace('\n', " "), 120),
+            project: r.project.clone(),
+            session: r.session.clone(),
+            updated: r.ended.unwrap_or(r.started),
+            run: Some(r.id),
+            state: if r.state == "running" { "working" } else { r.state },
+        })
+        .collect();
+    for s in recent {
+        let yorus = shown.iter().any(|r| {
+            r.agent == s.agent && (r.session.as_deref() == Some(s.id.as_str()) || (r.session.is_none() && r.project == s.project && s.updated >= r.started))
+        });
+        if !yorus {
+            list.push(Active { agent: s.agent, title: s.title, project: s.project, session: Some(s.id), updated: s.updated, run: None, state: "working" });
+        }
+    }
+    list.sort_by(|a, b| (a.state != "working").cmp(&(b.state != "working")).then(b.updated.cmp(&a.updated)));
+    list
 }
 
 /// How an agent's run ended, read from what it printed.
@@ -468,17 +559,22 @@ fn login_path() -> Option<String> {
     .clone()
 }
 
-/// Every conversation of `agent` (both when `None`), newest first.
+/// Every conversation of `agent` (all of them when `None`), newest first.
 pub fn sessions(home: &Path, agent: Option<Agent>) -> Vec<Session> {
+    sessions_since(home, agent, 0)
+}
+
+/// The conversations of `agent` changed since `since` (Unix ms), newest first.
+pub fn sessions_since(home: &Path, agent: Option<Agent>, since: u64) -> Vec<Session> {
     let mut all = Vec::new();
     if agent.is_none_or(|a| a == Agent::Claude) {
-        all.extend(claude_sessions(home));
+        all.extend(claude_sessions(home, since));
     }
     if agent.is_none_or(|a| a == Agent::Codex) {
-        all.extend(codex_sessions(home));
+        all.extend(codex_sessions(home, since));
     }
     if agent.is_none_or(|a| a == Agent::OpenCode) {
-        all.extend(opencode_sessions(home).into_iter().map(|(s, _)| s));
+        all.extend(opencode_sessions(home, since).into_iter().map(|(s, _)| s));
     }
     // A conversation in a scratch or temporary folder isn't the user's work.
     all.retain(|s| !scratch(&s.project));
@@ -509,8 +605,9 @@ fn matching<'a>(all: &'a [Session], query: &str) -> Vec<&'a Session> {
     scored.into_iter().take(LISTED).map(|(_, s)| s).collect()
 }
 
-/// The newest `.jsonl` files under `dir` (recursively), with their times.
-fn newest_files(dir: &Path, n: usize) -> Vec<(PathBuf, u64)> {
+/// The newest `.jsonl` files under `dir` (recursively) changed since
+/// `since` (Unix ms), with their times.
+fn newest_files(dir: &Path, n: usize, since: u64) -> Vec<(PathBuf, u64)> {
     let mut files = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -521,7 +618,9 @@ fn newest_files(dir: &Path, n: usize) -> Vec<(PathBuf, u64)> {
                 stack.push(p);
             } else if p.extension().is_some_and(|x| x == "jsonl") {
                 let at = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
-                files.push((p, at));
+                if at >= since {
+                    files.push((p, at));
+                }
             }
         }
     }
@@ -537,8 +636,8 @@ fn first_words(text: &str) -> Option<String> {
 }
 
 /// Claude Code's conversations: `~/.claude/projects/<folder>/<id>.jsonl`.
-fn claude_sessions(home: &Path) -> Vec<Session> {
-    newest_files(&home.join(".claude/projects"), NEWEST)
+fn claude_sessions(home: &Path, since: u64) -> Vec<Session> {
+    newest_files(&home.join(".claude/projects"), NEWEST, since)
         .into_iter()
         // A subagent's work is kept beside its conversation, not one of its own.
         .filter(|(path, _)| !path.components().any(|c| c.as_os_str() == "subagents") && !path.file_stem().is_some_and(|s| s.to_string_lossy().starts_with("agent-")))
@@ -573,14 +672,14 @@ fn claude_sessions(home: &Path) -> Vec<Session> {
 
 /// Codex's conversations: `~/.codex/sessions/<y>/<m>/<d>/rollout-<time>-<id>.jsonl`,
 /// titled by `~/.codex/session_index.jsonl`.
-fn codex_sessions(home: &Path) -> Vec<Session> {
+fn codex_sessions(home: &Path, since: u64) -> Vec<Session> {
     let names: HashMap<String, String> = fs::read_to_string(home.join(".codex/session_index.jsonl"))
         .unwrap_or_default()
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter_map(|v| Some((v["id"].as_str()?.to_string(), v["thread_name"].as_str()?.to_string())))
         .collect();
-    newest_files(&home.join(".codex/sessions"), NEWEST)
+    newest_files(&home.join(".codex/sessions"), NEWEST, since)
         .into_iter()
         .filter_map(|(path, updated)| {
             let (mut id, mut cwd, mut first) = (None, None, None);
@@ -620,7 +719,7 @@ fn opencode_db(home: &Path) -> PathBuf {
 /// OpenCode's conversations (not the subagents' or archived ones), newest
 /// first, each with the model it used (`provider/model#variant`). Its
 /// database has two tables, `session_v2` and the older `session`.
-fn opencode_sessions(home: &Path) -> Vec<(Session, Option<String>)> {
+fn opencode_sessions(home: &Path, since: u64) -> Vec<(Session, Option<String>)> {
     let path = opencode_db(home);
     if !path.is_file() {
         return Vec::new();
@@ -629,7 +728,7 @@ fn opencode_sessions(home: &Path) -> Vec<(Session, Option<String>)> {
     let mut found: Vec<(Session, Option<String>)> = Vec::new();
     for table in ["session_v2", "session"] {
         let sql = format!(
-            "SELECT id, title, directory, time_updated, model FROM {table} WHERE parent_id IS NULL AND time_archived IS NULL ORDER BY time_updated DESC LIMIT {NEWEST}"
+            "SELECT id, title, directory, time_updated, model FROM {table} WHERE parent_id IS NULL AND time_archived IS NULL AND time_updated >= {since} ORDER BY time_updated DESC LIMIT {NEWEST}"
         );
         let Ok(mut query) = db.prepare(&sql) else { continue };
         let rows = query.query_map([], |r| {
@@ -669,7 +768,7 @@ fn opencode_model_name(json: &str) -> Option<String> {
 /// user last used in that folder, else anywhere. OpenCode's default may be
 /// one its provider can't run, and the user's last choice is what works.
 fn opencode_model(home: &Path, session: Option<&str>, project: &Path) -> Option<String> {
-    let all = opencode_sessions(home);
+    let all = opencode_sessions(home, 0);
     let here = project.display().to_string();
     let pick = |f: &dyn Fn(&Session) -> bool| all.iter().find(|(s, m)| m.is_some() && f(s)).and_then(|(_, m)| m.clone());
     session
@@ -854,6 +953,38 @@ mod tests {
     }
 
     #[test]
+    fn whats_active_now() {
+        let now = 10_000_000;
+        let run = |id, session: Option<&str>, project: &str, state, started, ended| Run {
+            id,
+            agent: Agent::Claude,
+            project: project.into(),
+            session: session.map(str::to_string),
+            prompt: format!("job {id}"),
+            state,
+            result: String::new(),
+            started,
+            ended,
+        };
+        let session = |agent, id: &str, project: &str, updated| Session { agent, id: id.into(), title: format!("chat {id}"), project: project.into(), updated };
+        let runs = [
+            run(1, None, "/p/yoru", "running", now - 5_000, None),
+            run(2, Some("s2"), "/p/maps", "done", now - 200_000, Some(now - 60_000)),
+            run(3, Some("s3"), "/p/old", "done", now - 9_000_000, Some(now - 8_000_000)),
+        ];
+        let recent = vec![
+            session(Agent::Claude, "s1", "/p/yoru", now - 1_000),
+            session(Agent::Claude, "s2", "/p/maps", now - 60_000),
+            session(Agent::Codex, "x9", "/p/yoru", now - 2_000),
+            session(Agent::OpenCode, "o4", "/p/marea", now - 30_000),
+        ];
+        let list = active_list(&runs, recent, now);
+        let seen: Vec<(Option<u64>, Option<&str>, &str)> = list.iter().map(|a| (a.run, a.session.as_deref(), a.state)).collect();
+        // Yoru's run 1 stands for the new conversation s1; run 2 for s2; run 3 ended long ago.
+        assert_eq!(seen, [(None, Some("x9"), "working"), (Some(1), None, "working"), (None, Some("o4"), "working"), (Some(2), Some("s2"), "done")]);
+    }
+
+    #[test]
     fn reads_opencodes_conversations() {
         let h = home("opencode");
         let path = opencode_db(&h);
@@ -894,6 +1025,7 @@ mod tests {
             println!("{:?} {} | {} | {}", s.agent, s.id, s.title, s.project);
         }
         println!("projects: {:?}", project_folder(&home, "dualeye"));
+        println!("active: {:#?}", Coding::new(Arc::new(Inbox::open(None))).active());
         if std::env::var("CODE_SEND").is_ok() {
             let inbox = Arc::new(Inbox::open(None));
             let coding = Coding::new(inbox.clone());

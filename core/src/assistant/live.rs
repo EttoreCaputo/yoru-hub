@@ -18,6 +18,7 @@ fn live_prompt(name: &str, character: &str) -> String {
         "You are {name}, the user's personal assistant. Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker. \
 You talk with the user out loud.
 - Use the tools instead of guessing; never invent facts about the user's data. You can search the web with Google Search.
+- Never say you did something (sent, started, added, saved) unless the tool that does it answered that it did: if you haven't called it, call it.
 - Tools that change something ask the user first; if they say no, accept it.
 - Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
 - {memory}
@@ -57,13 +58,22 @@ impl Assistant {
         if ok { Ok(text) } else { Err(text) }
     }
 
+    /// What the user said in a Live turn, in the app's conversation as soon
+    /// as it's written, before Live has answered.
+    pub fn live_heard(&self, heard: &str) {
+        if !heard.trim().is_empty() {
+            self.add_line("you", heard.trim(), Channel::Voice, Vec::new());
+        }
+    }
+
     /// A Live turn, kept: in the app's conversation, and in the memory's
-    /// episode like the other brains' turns.
-    pub fn live_turn(&self, heard: &str, said: &str, actions: Vec<Action>, follow_up: bool) {
+    /// episode like the other brains' turns. `shown`: the user's words are
+    /// in the conversation already ([`Assistant::live_heard`]).
+    pub fn live_turn(&self, heard: &str, said: &str, actions: Vec<Action>, follow_up: bool, shown: bool) {
         if heard.is_empty() && said.is_empty() {
             return;
         }
-        if !heard.is_empty() {
+        if !heard.is_empty() && !shown {
             self.add_line("you", heard, Channel::Voice, Vec::new());
         }
         if said.is_empty() {
@@ -109,11 +119,11 @@ mod tests {
     #[test]
     fn a_live_turn_is_kept_in_the_conversation() {
         let a = Assistant::open(None, Arc::new(Timers::default()));
-        a.live_turn("che ore sono?", "Sono le dieci.", Vec::new(), false);
+        a.live_turn("che ore sono?", "Sono le dieci.", Vec::new(), false, false);
         let chat = a.chat();
         assert_eq!(chat.len(), 2);
         assert_eq!((chat[0].from.as_str(), chat[1].text.as_str()), ("you", "Sono le dieci."));
-        a.live_turn("", "", Vec::new(), true);
+        a.live_turn("", "", Vec::new(), true, false);
         assert_eq!(a.chat().len(), 2);
     }
 }

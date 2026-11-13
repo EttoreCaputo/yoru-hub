@@ -9,6 +9,7 @@ import { call, inPreview, on, why } from "./api";
 import { BUNDLED_VERSION } from "./bundled";
 import { changelog, updateFor, type Update } from "./updates";
 import type {
+  ActiveAgent,
   AssistantInfo,
   AssistantSettings,
   BoardFirmware,
@@ -43,6 +44,8 @@ export type Page = "today" | "conversation" | "inbox" | "connectors" | "tasks" |
 const BOOT_MS = 1100;
 const LOG_LINES = 300;
 const SCHEDULE_LOG = 30;
+/** How often the coding agents are looked at. */
+const AGENTS_MS = 5000;
 
 class Store {
   readonly preview = inPreview;
@@ -114,6 +117,10 @@ class Store {
   /** The last summary written, for the Meetings page to pick up. */
   summarized = $state<{ id: string; summary: Summary } | null>(null);
 
+  /** The coding agents' conversations being worked on now, and Yoru's runs that just ended. */
+  agents = $state<ActiveAgent[]>([]);
+  working = $derived(this.agents.filter((a) => a.state === "working").length);
+
   unread = $derived(this.inbox.filter((n) => !n.read).length);
 
   #started = false;
@@ -122,6 +129,9 @@ class Store {
     if (this.#started) return;
     this.#started = true;
     setInterval(() => (this.now = Date.now()), 1000);
+    // Nothing tells when an agent writes: they're looked at every few seconds.
+    void this.refreshAgents();
+    setInterval(() => void this.refreshAgents(), AGENTS_MS);
     on<BridgeEvent>("bridge", (e) => this.#apply(e));
     on<FlashEvent>("flash", (e) => this.#applyFlash(e));
     on<DeviceInfo[]>("boards", (list) => (this.boards = list));
@@ -350,6 +360,15 @@ class Store {
 
   async runTask(id: string) {
     await call<string>("run_task_now", { id });
+  }
+
+  async refreshAgents() {
+    this.agents = (await call<ActiveAgent[]>("coding_active").catch(() => null)) ?? this.agents;
+  }
+
+  async stopAgent(run: number) {
+    await call<string>("coding_stop", { run }).catch(() => {});
+    await this.refreshAgents();
   }
 
   async refreshTimers() {

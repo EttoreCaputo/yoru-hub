@@ -9,6 +9,7 @@
   import { store } from "../store.svelte";
   import type { VoiceState } from "../types";
     import Composer from "../ui/Composer.svelte";
+  import AgentList from "../ui/AgentList.svelte";
   import ConfirmCard from "../ui/ConfirmCard.svelte";
   import NotificationRow from "../ui/NotificationRow.svelte";
   import { ago, clock } from "../ui/when";
@@ -102,6 +103,13 @@
         {/if}
       </ul>
       {#if nothingNext}<p class="dim calm">{t.nothingNext}</p>{/if}
+
+      <h2 class="section-title">{i18n.t.agents.title}</h2>
+      {#if store.agents.length}
+        <AgentList />
+      {:else}
+        <p class="dim calm">{i18n.t.agents.none}</p>
+      {/if}
     </div>
   </section>
 </div>

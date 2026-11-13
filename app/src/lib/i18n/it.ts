@@ -87,6 +87,14 @@ const it: Messages = {
     details: "Dettagli",
   },
 
+  agents: {
+    title: "Agenti al lavoro",
+    none: "Nessun agente sta programmando adesso.",
+    byYoru: "mandata da Yoru",
+    states: { working: "al lavoro", done: "finita", failed: "non è andata", stopped: "fermata" } as Record<string, string>,
+    stop: "Ferma",
+  },
+
   today: {
     greeting: { morning: "Buongiorno", afternoon: "Buon pomeriggio", evening: "Buonasera", night: "Ancora sveglio?" },
     quietLine: "Niente di nuovo. Tengo d'occhio le cose.",

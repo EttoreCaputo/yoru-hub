@@ -18,6 +18,7 @@
   import { i18n } from "./lib/i18n/index.svelte";
   import { store } from "./lib/store.svelte";
   import type { VoiceState } from "./lib/types";
+  import AgentList from "./lib/ui/AgentList.svelte";
   import YoruBoard from "./lib/YoruBoard.svelte";
 
   type Geometry = { notch: boolean; width: number; height: number; window: number };
@@ -188,6 +189,8 @@
         <span class="count wait">{store.confirmations.length}</span>
       {:else if store.unread}
         <span class="count">{store.unread}</span>
+      {:else if store.working}
+        <span class="count agents" title={i18n.t.agents.title}>{store.working}</span>
       {/if}
     </div>
   </div>
@@ -223,6 +226,12 @@
         <p class="hint">{t.empty}</p>
       {/if}
       {#if error || store.askError}<p class="error">{error || store.askError}</p>{/if}
+      {#if store.agents.length}
+        <section class="at-work">
+          <p class="label">{i18n.t.agents.title}</p>
+          <AgentList limit={3} dark />
+        </section>
+      {/if}
 
       <div class="dock">
         <form class="field" onsubmit={send}>
@@ -405,6 +414,17 @@
   .count.wait {
     background: #ff9f43;
     color: #000;
+  }
+  /* Coding agents working: the firmware's thinking tint. */
+  .count.agents {
+    background: rgba(74, 163, 255, 0.85);
+    color: #000;
+  }
+  .at-work {
+    margin-top: 10px;
+  }
+  .at-work .label {
+    color: rgba(255, 255, 255, 0.55);
   }
 
   /* What opens below: its height eases with the width. */
