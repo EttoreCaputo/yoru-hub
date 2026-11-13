@@ -1,9 +1,12 @@
 <!--
-  Yoru in the notch (docs/notch.md). Closed, he's a black shape around the
-  camera: a little Yoru on its left, what he's doing on its right. With the
-  pointer on him, or while he hears or talks, he opens into a panel: the
-  last exchange, the cards waiting for an answer, a field to type in and a
-  button to hold and talk.
+  Yoru in the notch (docs/notch.md). One black shape that grows out of the
+  camera's notch, so it reads as part of the hardware: pure black, flush
+  with the top of the screen, its top corners curving out into the menu
+  bar, nothing drawn under the camera. Closed, a little Yoru sits on its
+  left and what he's doing on its right. With the pointer on him, or while
+  he hears or talks, it opens downwards: the last exchange as plain text,
+  the cards to allow or deny, a field and a button to hold and talk. No
+  cards, no greys: white text at a few strengths, and pills.
 
   The window is bigger than all this and lets clicks through but on what
   is drawn here: `notch_content` says where that is, and the Rust side
@@ -13,8 +16,6 @@
   import { call, on } from "./lib/api";
   import { i18n } from "./lib/i18n/index.svelte";
   import { store } from "./lib/store.svelte";
-  import Composer from "./lib/ui/Composer.svelte";
-  import ConfirmCard from "./lib/ui/ConfirmCard.svelte";
   import type { VoiceState } from "./lib/types";
   import YoruBoard from "./lib/YoruBoard.svelte";
 
@@ -29,11 +30,13 @@
   store.start();
   i18n.start();
   const t = $derived(i18n.t.notch);
+  const tc = $derived(i18n.t.card);
 
-  const PANEL = 440;
+  const PANEL = 460;
   /** How long an answer stays open once Yoru is done, to be read. */
   const LINGER_MS = 6000;
-  /** How long the pointer may be away before it closes. */
+  /** The pointer has to rest a moment to open it, and be away a moment to close it. */
+  const ENTER_MS = 120;
   const LEAVE_MS = 350;
 
   let geometry = $state<Geometry>({ notch: false, width: 190, height: 32, window: 620 });
@@ -45,26 +48,31 @@
   let pointer = $state(false);
   let lingerUntil = $state(0);
   let held = $state(false);
+  let typed = $state("");
+  let typing = $state(false);
+  let answering = $state<string | null>(null);
   let shape: HTMLElement | undefined = $state();
 
-  const ear = $derived(geometry.height + 6);
+  const ear = $derived(geometry.height + 8);
   const closedWidth = $derived(geometry.width + 2 * ear);
   const busy = $derived(voice !== "idle" && voice !== "error");
-  const open = $derived(pointer || busy || held || store.now < lingerUntil);
+  const open = $derived(pointer || busy || held || typing || !!store.asking || store.now < lingerUntil);
   const last = $derived.by(() => {
     const lastOf = (from: "you" | "yoru") => store.chat.map((l) => l.from).lastIndexOf(from);
     const yoru = lastOf("yoru");
     const you = lastOf("you");
     return { you: you >= 0 ? store.chat[you] : null, yoru: yoru > you ? store.chat[yoru] : null };
   });
+  const card = $derived(store.confirmations[0] ?? null);
+  /** What the left of the top row says while open. */
+  const status = $derived(error ? t.states.error : fetching && busy ? fetching : t.states[voice] || "Yoru");
 
   call<Geometry | null>("notch_geometry").then((g) => g && (geometry = g), () => {});
   on<Geometry>("notch-geometry", (g) => (geometry = g));
-  let leaving: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   on<boolean>("notch-pointer", (over) => {
-    clearTimeout(leaving);
-    if (over) pointer = true;
-    else leaving = setTimeout(() => (pointer = false), LEAVE_MS);
+    clearTimeout(timer);
+    timer = setTimeout(() => (pointer = over), over ? ENTER_MS : LEAVE_MS);
   });
   on<NotchEvent>("notch", (e) => {
     if (e.event === "state") {
@@ -101,29 +109,52 @@
     void call("notch_talk", { pressed }).catch(() => {});
   }
 
+  async function send(e: SubmitEvent) {
+    e.preventDefault();
+    const text = typed.trim();
+    if (!text || store.asking) return;
+    typed = "";
+    await store.ask(text);
+    lingerUntil = Date.now() + LINGER_MS;
+  }
+
+  async function answer(allow: boolean) {
+    if (!card || answering) return;
+    answering = card.id;
+    try {
+      await store.confirm(card.id, allow);
+    } finally {
+      answering = null;
+    }
+  }
+
   /** A few bars for how loud the microphone is. */
-  const bars = $derived([0.55, 1, 0.75].map((k) => Math.max(0.18, Math.min(1, level * k * 1.4))));
+  const bars = $derived([0.5, 0.85, 1, 0.7].map((k) => Math.max(0.2, Math.min(1, level * k * 1.5))));
 </script>
 
 <div
   class="shape"
   class:open
-  class:soft={!geometry.notch}
   bind:this={shape}
   style:--w="{open ? PANEL : closedWidth}px"
   style:--bar="{geometry.height}px"
-  style:--notch="{geometry.width}px"
   style:--ear="{ear}px"
+  style:--notch="{geometry.width}px"
 >
   <div class="top">
-    <div class="ear left">
-      {#if !open}<YoruBoard board="live" size={geometry.height - 6} {voice} {reaction} />{/if}
+    <div class="side left">
+      <span class="yoru"><YoruBoard board="live" size={geometry.height - 8} {voice} {reaction} /></span>
+      {#if open}<span class="status" class:err={!!error}>{status}</span>{/if}
     </div>
-    <div class="ear right">
+    <div class="side right">
       {#if voice === "listening"}
         <span class="bars" aria-hidden="true">{#each bars as b, i (i)}<i style:--h={b}></i>{/each}</span>
-      {:else if busy || voice === "error"}
-        <span class="dot {voice}"></span>
+      {:else if voice === "thinking" || store.asking}
+        <span class="spinner" aria-hidden="true"></span>
+      {:else if voice === "speaking"}
+        <span class="wave" aria-hidden="true"><i></i><i></i><i></i></span>
+      {:else if error}
+        <span class="dot err"></span>
       {:else if store.confirmations.length}
         <span class="count wait">{store.confirmations.length}</span>
       {:else if store.unread}
@@ -132,49 +163,66 @@
     </div>
   </div>
 
-  {#if open}
-    <div class="panel">
-      <div class="who">
-        <YoruBoard board="live" size={84} {voice} {reaction} />
-        <div class="state">
-          <b>{t.states[voice] || (fetching ?? "Yoru")}</b>
-          {#if error}<span class="error-text">{error}</span>
-          {:else if fetching && busy}<span class="dim">{fetching}</span>
-          {:else if store.confirmations.length}<span class="dim">{t.waiting(store.confirmations.length)}</span>
-          {:else if store.unread}<span class="dim">{t.unread(store.unread)}</span>{/if}
-        </div>
-      </div>
-
-      {#if last.you || last.yoru}
-        <div class="exchange">
+  <div class="body">
+    <div class="inner">
+      {#if card}
+        <section class="ask">
+          <p class="label"><span class="dot wait"></span>{tc.yoruAsks}<span class="tool">{card.tool}</span></p>
+          <p class="what">{card.text}</p>
+          <div class="pills">
+            <button class="pill light" disabled={!!answering} onclick={() => answer(true)}>{tc.allow}</button>
+            <button class="pill" disabled={!!answering} onclick={() => answer(false)}>{tc.deny}</button>
+            {#if store.confirmations.length > 1}<span class="more">+{store.confirmations.length - 1}</span>{/if}
+          </div>
+        </section>
+      {:else if store.asking}
+        <p class="you">{store.asking}</p>
+      {:else if last.you || last.yoru}
+        <section class="exchange">
           {#if last.you}<p class="you">{last.you.text}</p>{/if}
-          {#if last.yoru}<p class="yoru">{last.yoru.text}</p>{/if}
-        </div>
+          {#if last.yoru}<p class="answer">{last.yoru.text}</p>{/if}
+        </section>
       {:else}
-        <p class="dim empty">{t.empty}</p>
+        <p class="hint">{t.empty}</p>
       {/if}
+      {#if error || store.askError}<p class="error">{error || store.askError}</p>{/if}
 
-      {#each store.confirmations as card (card.id)}<ConfirmCard {card} />{/each}
-
-      <Composer />
-
-      <div class="actions">
+      <div class="dock">
+        <form class="field" onsubmit={send}>
+          <input
+            bind:value={typed}
+            placeholder={store.asking ? i18n.t.composer.thinking : i18n.t.composer.placeholder}
+            disabled={!!store.asking}
+            onfocus={() => (typing = true)}
+            onblur={() => (typing = false)}
+            spellcheck="false"
+          />
+          <kbd>{t.key}</kbd>
+        </form>
         <button
-          class="btn talk"
+          class="round mic"
           class:on={held || voice === "listening"}
+          title={t.hold}
+          aria-label={t.hold}
           onpointerdown={(e) => (e.currentTarget.setPointerCapture(e.pointerId), talk(true))}
           onpointerup={() => talk(false)}
           onpointercancel={() => talk(false)}
           onkeydown={(e) => e.key === " " && !e.repeat && (e.preventDefault(), talk(true))}
           onkeyup={(e) => e.key === " " && talk(false)}
         >
-          {t.hold} <kbd>{t.key}</kbd>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></svg>
         </button>
-        {#if busy}<button class="btn quiet" onclick={() => call("notch_hush").catch(() => {})}>{t.stop}</button>{/if}
-        <button class="btn quiet" onclick={() => call("show_app").catch(() => {})}>{t.open}</button>
+        {#if busy}
+          <button class="round" title={t.stop} aria-label={t.stop} onclick={() => call("notch_hush").catch(() => {})}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" class="solid" /></svg>
+          </button>
+        {/if}
+        <button class="round" title={t.open} aria-label={t.open} onclick={() => call("show_app").catch(() => {})}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" /></svg>
+        </button>
       </div>
     </div>
-  {/if}
+  </div>
 </div>
 
 <style>
@@ -184,44 +232,81 @@
     overflow: hidden;
   }
 
+  /* One black island: flush with the top, as wide as the notch and its ears. */
   .shape {
+    --r: calc(var(--bar) * 0.42);
+    --shoulder: 8px;
+    --spring: cubic-bezier(0.32, 1.25, 0.5, 1);
     position: absolute;
     top: 0;
     left: 50%;
     width: var(--w);
     transform: translateX(-50%);
     background: #000;
-    color: var(--pearl);
-    border-radius: 0 0 calc(var(--bar) * 0.5) calc(var(--bar) * 0.5);
+    color: #fff;
+    border-radius: 0 0 var(--r) var(--r);
+    font: 400 13px/1.45 var(--sans);
     transition:
-      width 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.15),
-      border-radius 0.32s ease;
-    overflow: hidden;
-    box-shadow: 0 0 0 0 transparent;
+      width 0.42s var(--spring),
+      border-radius 0.42s var(--spring),
+      box-shadow 0.3s ease;
   }
   .shape.open {
-    border-radius: 0 0 26px 26px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    --r: 30px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
   }
-  /* Without a camera notch it sits on the menu bar, a little shorter. */
-  .shape.soft:not(.open) {
-    border-radius: 0 0 14px 14px;
+  /* The top corners curve out into the menu bar, as the notch's own do. */
+  .shape::before,
+  .shape::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    width: var(--shoulder);
+    height: var(--shoulder);
+    background: radial-gradient(circle at 0 100%, transparent calc(var(--shoulder) - 0.5px), #000 var(--shoulder));
+  }
+  .shape::before {
+    left: calc(-1 * var(--shoulder));
+  }
+  .shape::after {
+    right: calc(-1 * var(--shoulder));
+    transform: scaleX(-1);
   }
 
+  /* The row beside the camera: nothing in its middle. */
   .top {
     display: flex;
     justify-content: space-between;
     height: var(--bar);
+    padding: 0 calc((var(--ear) - var(--bar) + 8px) / 2);
   }
-  .ear {
-    width: var(--ear);
+  .side {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: calc((var(--w) - var(--notch)) / 2 - 12px);
+  }
+  .yoru {
     display: grid;
-    place-items: center;
+    flex: none;
+  }
+  .status {
+    font-weight: 600;
+    font-size: 12.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    animation: fade 0.3s 0.1s ease both;
+  }
+  .status.err {
+    color: #ff6b6b;
   }
 
-  .bars {
+  .bars,
+  .wave {
     display: flex;
-    gap: 2px;
+    gap: 2.5px;
     align-items: center;
     height: 14px;
   }
@@ -232,29 +317,47 @@
     background: #40e080;
     transition: height 0.08s linear;
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--pearl);
-  }
-  .dot.thinking {
-    background: #4aa3ff;
-    animation: pulse 1s ease-in-out infinite;
-  }
-  .dot.speaking {
+  .wave i {
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
     background: #40e080;
+    animation: wave 0.9s ease-in-out infinite;
   }
-  .dot.error {
+  .wave i:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .wave i:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  .spinner {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 2px solid rgba(74, 163, 255, 0.25);
+    border-top-color: #4aa3ff;
+    animation: spin 0.8s linear infinite;
+  }
+  .dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .dot.err {
     background: #ff4d4d;
   }
+  .dot.wait {
+    background: #ff9f43;
+  }
   .count {
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 8px;
-    background: var(--ink-3);
-    font: 600 10px/16px var(--sans);
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.14);
+    font: 600 10.5px/18px var(--sans);
     text-align: center;
   }
   .count.wait {
@@ -262,87 +365,233 @@
     color: #000;
   }
 
-  .panel {
+  /* What opens below: its height eases with the width. */
+  .body {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.42s var(--spring);
+  }
+  .open .body {
+    grid-template-rows: 1fr;
+  }
+  .inner {
+    overflow: hidden;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 6px 18px 18px;
-    max-height: 440px;
-    overflow-y: auto;
-    animation: in 0.25s ease both;
-  }
-  .who {
-    display: flex;
-    align-items: center;
     gap: 14px;
+    padding: 0 20px;
+    opacity: 0;
+    filter: blur(6px);
+    transform: scale(0.97);
+    transform-origin: top center;
+    transition:
+      opacity 0.2s ease,
+      filter 0.2s ease,
+      transform 0.3s ease,
+      padding 0.42s var(--spring);
   }
-  .state {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
+  .open .inner {
+    padding: 10px 20px 18px;
+    opacity: 1;
+    filter: none;
+    transform: none;
+    transition-delay: 0.08s;
   }
-  .state b {
-    font: 600 16px/1.3 var(--display, var(--sans));
+
+  p {
+    margin: 0;
   }
   .exchange {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+    scrollbar-width: none;
   }
-  .exchange p {
-    margin: 0;
-    padding: 8px 12px;
-    border-radius: 14px;
-    max-width: 88%;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
+  .you {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12.5px;
     display: -webkit-box;
-    -webkit-line-clamp: 6;
-    line-clamp: 6;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .you {
-    align-self: flex-end;
-    background: var(--ink-3);
+  .answer {
+    font-size: 15px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
-  .yoru {
-    align-self: flex-start;
-    background: var(--ink-2);
-    border: 1px solid var(--rim);
+  .hint {
+    color: rgba(255, 255, 255, 0.45);
   }
-  .empty {
-    margin: 0;
+  .error {
+    color: #ff6b6b;
+    font-size: 12px;
   }
-  .actions {
+
+  .ask {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #ffb46b;
+  }
+  .tool {
+    font: 400 11.5px var(--mono);
+    color: rgba(255, 255, 255, 0.4);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .what {
+    font-size: 14.5px;
+  }
+  .pills {
     display: flex;
     gap: 8px;
     align-items: center;
   }
-  .talk {
-    flex: 1;
-    user-select: none;
-  }
-  .talk.on {
-    background: #40e080;
-    color: #000;
-  }
-  kbd {
-    margin-left: 6px;
-    font: 500 11px var(--mono);
-    opacity: 0.7;
+  .more {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
   }
 
-  @keyframes pulse {
-    50% {
-      opacity: 0.35;
+  button {
+    font: inherit;
+    color: inherit;
+    border: 0;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.5;
+  }
+  .pill {
+    height: 30px;
+    padding: 0 16px;
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.12);
+    font-weight: 600;
+    transition: background 0.15s ease;
+  }
+  .pill:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .pill.light {
+    background: #fff;
+    color: #000;
+  }
+  .pill.light:hover {
+    background: rgba(255, 255, 255, 0.85);
+  }
+
+  .dock {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .field {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 6px 0 14px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.08);
+    transition: background 0.15s ease;
+  }
+  .field:focus-within {
+    background: rgba(255, 255, 255, 0.13);
+  }
+  .field input {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: 0;
+    outline: 0;
+    color: #fff;
+    font: inherit;
+  }
+  .field input::placeholder {
+    color: rgba(255, 255, 255, 0.38);
+  }
+  kbd {
+    padding: 2px 7px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.45);
+    font: 500 10.5px var(--mono);
+    white-space: nowrap;
+  }
+  .field:focus-within kbd {
+    display: none;
+  }
+  .round {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    transition:
+      background 0.15s ease,
+      transform 0.15s ease;
+  }
+  .round:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+  .round svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .round .solid {
+    fill: currentColor;
+    stroke: none;
+  }
+  .mic {
+    user-select: none;
+  }
+  .mic.on {
+    background: #40e080;
+    color: #000;
+    transform: scale(1.08);
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(1turn);
     }
   }
-  @keyframes in {
+  @keyframes wave {
+    50% {
+      transform: scaleY(0.35);
+    }
+  }
+  @keyframes fade {
     from {
       opacity: 0;
-      transform: translateY(-6px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .shape,
+    .body,
+    .inner {
+      transition-duration: 0.01s;
     }
   }
 </style>
