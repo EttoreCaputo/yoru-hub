@@ -1,5 +1,5 @@
 //! Yoru, the assistant: a brain ([`Brain`]: Claude through
-//! [`crate::cloud::anthropic`], or a model on OpenAI, Groq or Ollama through
+//! [`crate::cloud::anthropic`], or a model on OpenAI, Google, Groq or Ollama through
 //! [`compat`]) with the
 //! user's services (the connectors, [`ExternalTools`]), the board's tools,
 //! the timers, a memory ([`Memory`]) and an inbox ([`Inbox`]).
@@ -19,7 +19,7 @@
 //! event) asks first, on the board's card and in the app, through
 //! [`Host::confirm`] ([`Confirmations`]).
 //!
-//! On OpenAI, Groq and Ollama ([`compat`]) the turn is OpenAI's function
+//! On OpenAI, Google, Groq and Ollama ([`compat`]) the turn is OpenAI's function
 //! calling instead, with web search only through the Tavily connector, and
 //! no connector tool loaded at first: the model finds them with `find_tools`
 //! ([`select`]) and loads the ones it needs with `load_tools`. Groq's free
@@ -70,6 +70,8 @@ pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
 pub const DEFAULT_GROQ_MODEL: &str = "openai/gpt-oss-120b";
 /// OpenAI's, unless the settings say otherwise.
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-luna";
+/// Google's, unless the settings say otherwise: free tier, made for agents.
+pub const DEFAULT_GOOGLE_MODEL: &str = "gemini-4-hydrogen";
 /// Requests to the model in one turn before it has to stop.
 const MAX_ROUNDS: usize = 16;
 const MAX_TOKENS: u32 = 16_000;
@@ -97,6 +99,8 @@ pub enum Brain {
     /// A model on OpenAI: paid by use, no web search.
     #[serde(rename = "openai")]
     OpenAi,
+    /// Gemini on Google AI Studio: free with daily limits or paid, no web search.
+    Google,
     /// A model on Groq: free with daily limits, no web search.
     Groq,
     /// A model on this computer, through Ollama: free and private, no key.
@@ -108,6 +112,7 @@ impl Brain {
         match self {
             Brain::Anthropic => &cloud::ANTHROPIC,
             Brain::OpenAi => &cloud::OPENAI,
+            Brain::Google => &cloud::GOOGLE,
             Brain::Groq => &cloud::GROQ,
             Brain::Ollama => &cloud::OLLAMA,
         }
@@ -124,10 +129,10 @@ impl Brain {
     }
 
     /// The brain when the settings don't choose: the first with a key of
-    /// Claude, OpenAI and Groq. Ollama is only ever chosen: it has no key
+    /// Claude, OpenAI, Google and Groq. Ollama is only ever chosen: it has no key
     /// that says the person wants it.
     pub fn auto() -> Option<Brain> {
-        [Brain::Anthropic, Brain::OpenAi, Brain::Groq].into_iter().find(|b| b.provider().api_key().is_some())
+        [Brain::Anthropic, Brain::OpenAi, Brain::Google, Brain::Groq].into_iter().find(|b| b.provider().api_key().is_some())
     }
 }
 
@@ -145,6 +150,8 @@ pub struct Settings {
     pub groq_model: String,
     /// OpenAI's model: one of the chat models in [`cloud::OPENAI`]'s catalog.
     pub openai_model: String,
+    /// Google's model: one of the chat models in [`cloud::GOOGLE`]'s catalog.
+    pub google_model: String,
     /// Ollama's model, one the person pulled (`qwen3:8b`); empty: none chosen yet.
     pub ollama_model: String,
     /// `low`, `medium`, `high`, `xhigh` or `max`.
@@ -175,6 +182,7 @@ impl Settings {
         match brain {
             Brain::Anthropic => &self.model,
             Brain::OpenAi => &self.openai_model,
+            Brain::Google => &self.google_model,
             Brain::Groq => &self.groq_model,
             Brain::Ollama => &self.ollama_model,
         }
@@ -189,6 +197,7 @@ impl Default for Settings {
             model: DEFAULT_MODEL.into(),
             groq_model: DEFAULT_GROQ_MODEL.into(),
             openai_model: DEFAULT_OPENAI_MODEL.into(),
+            google_model: DEFAULT_GOOGLE_MODEL.into(),
             ollama_model: String::new(),
             effort: "medium".into(),
             task_effort: "low".into(),
@@ -1093,7 +1102,7 @@ impl Assistant {
     }
 }
 
-const NO_BRAIN: &str = "Yoru has no brain yet: add a Groq key (free), an OpenAI or Anthropic key, or pick an Ollama model in Settings";
+const NO_BRAIN: &str = "Yoru has no brain yet: add a Groq or Google key (free), an OpenAI or Anthropic key, or pick an Ollama model in Settings";
 
 /// What Yoru says aloud when its brain hit `limit` ([`Assistant::limited`]),
 /// in `language` (`it`, `en`).

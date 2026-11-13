@@ -70,7 +70,7 @@
   const LOCAL = "local";
   const LANGS = ["it", "en"];
   // The brains' keys are in the brain's page; the others belong here.
-  const BRAINS = ["anthropic", "openai", "groq", "ollama"];
+  const BRAINS = ["anthropic", "openai", "google", "groq", "ollama"];
   const serviceOf = (id: string | undefined) => (!id ? null : id.includes(":") ? id.slice(0, id.indexOf(":")) : LOCAL);
   const keyed = (svc: string) => svc === LOCAL || !!info?.providers.find((p) => p.id === svc)?.key;
   const nameOf = (svc: string) => (svc === LOCAL ? t.local : (info?.providers.find((p) => p.id === svc)?.name ?? svc));

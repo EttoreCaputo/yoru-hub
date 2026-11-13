@@ -1,6 +1,7 @@
 //! The assistant on a brain that speaks OpenAI's chat completions and
 //! function calling ([`cloud::Client::chat`]): OpenAI ([`Brain::OpenAi`]),
-//! Groq ([`Brain::Groq`]: free, with daily limits) and Ollama
+//! Google's Gemini ([`Brain::Google`]: free tier or paid), Groq
+//! ([`Brain::Groq`]: free, with daily limits) and Ollama
 //! ([`Brain::Ollama`]: a model on this computer).
 //!
 //! What differs from Claude, and why:
@@ -16,9 +17,10 @@
 //!   about 8,000 tokens a minute, reserved answer included, and a model on
 //!   this computer reads a short prompt best.
 //! - **Web search only through Tavily.** OpenAI searches only through its
-//!   Responses API, and Groq's models that search (compound) aren't used:
+//!   Responses API, Gemini only through its own API's grounding, and Groq's
+//!   models that search (compound) aren't used:
 //!   without the Tavily connector the model is told it can't.
-//! - **Limits are said plainly.** A 429 on Groq becomes "the free limit for
+//! - **Limits are said plainly.** A 429 on Groq or Google becomes "the free limit for
 //!   the day (or the minute) was reached, try again in…" ([`brain_error`]);
 //!   the model isn't asked again until then ([`cloud::Client::limit`]).
 
@@ -59,11 +61,12 @@ pub struct Budget {
 
 /// Groq's free plan and a model on this computer: every token counts.
 const TIGHT: Budget = Budget { max_tokens: 1024, json_max_tokens: 2048, loaded: 6, found: 8, memory_max: 3000, result_max: 6000, old_result_max: 600, description_max: 300, turns_kept: 4 };
-/// OpenAI: paid by the token, with a long context.
+/// OpenAI and Google: a long context, paid by the token or with a free
+/// tier counted in requests rather than Groq's few tokens a minute.
 const ROOMY: Budget = Budget { max_tokens: 4096, json_max_tokens: 4096, loaded: 16, found: 12, memory_max: 12_000, result_max: 30_000, old_result_max: 2000, description_max: 1000, turns_kept: 10 };
 
 pub fn budget(brain: Brain) -> Budget {
-    if brain == Brain::OpenAi { ROOMY } else { TIGHT }
+    if matches!(brain, Brain::OpenAi | Brain::Google) { ROOMY } else { TIGHT }
 }
 
 /// The settings' model of `brain`, with its key.
@@ -82,10 +85,10 @@ pub fn models(brain: Brain) -> Vec<(&'static str, &'static str)> {
 }
 
 /// Whether `model` follows a JSON schema strictly (structured outputs:
-/// OpenAI's, Groq's GPT-OSS and Qwen, October 2026); the others get JSON mode.
+/// OpenAI's, Gemini's, Groq's GPT-OSS and Qwen, November 2026); the others get JSON mode.
 fn follows_schema(brain: Brain, model: &str) -> bool {
     match brain {
-        Brain::OpenAi => true,
+        Brain::OpenAi | Brain::Google => true,
         Brain::Groq => model.starts_with("openai/gpt-oss") || model == "qwen/qwen3.8-27b",
         Brain::Anthropic | Brain::Ollama => false,
     }
@@ -97,6 +100,12 @@ pub fn brain_error(e: &CloudError) -> String {
         CloudError::RateLimited { provider: "Groq", retry_after, per_day } => {
             let when = retry_after.map(|d| format!(": try again in {}", cloud::wait_text(d))).unwrap_or_else(|| ": try again in a minute".into());
             let what = if *per_day { "Groq's free limit for the day was reached" } else { "Groq's free limit for the minute was reached" };
+            let hint = if *per_day { " (or switch Yoru's brain in Settings)" } else { "" };
+            format!("{what}{when}{hint}")
+        }
+        CloudError::RateLimited { provider: "Google", retry_after, per_day } => {
+            let when = retry_after.map(|d| format!(": try again in {}", cloud::wait_text(d))).unwrap_or_else(|| ": try again in a minute".into());
+            let what = if *per_day { "Google's limit for the day was reached" } else { "Google's limit for the minute was reached" };
             let hint = if *per_day { " (or switch Yoru's brain in Settings)" } else { "" };
             format!("{what}{when}{hint}")
         }

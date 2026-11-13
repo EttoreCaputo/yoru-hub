@@ -34,7 +34,7 @@ export type Routines = {
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
-export type Brain = "anthropic" | "openai" | "groq" | "ollama";
+export type Brain = "anthropic" | "openai" | "google" | "groq" | "ollama";
 
 export type AssistantSettings = {
   name: string;
@@ -43,6 +43,7 @@ export type AssistantSettings = {
   model: string;
   groq_model: string;
   openai_model: string;
+  google_model: string;
   /** A model Ollama has (`qwen3:8b`); empty: none picked yet. */
   ollama_model: string;
   effort: Effort;
@@ -65,6 +66,8 @@ export type AssistantInfo = {
   openai_key: KeySource | null;
   tavily_key: KeySource | null;
   openai_models: { id: string; note: string }[];
+  google_key: KeySource | null;
+  google_models: { id: string; note: string }[];
   /** Groq's free limit, while it is waited out. */
   limited: string | null;
   dir: string | null;

@@ -4,7 +4,7 @@ Decided and built on 2026-11-08 (where it stands: How it works, below). Yoru's m
 
 ## What was wrong with the file
 
-- The whole file goes into every prompt, cut from its head past the brain's budget (12,000 characters for Claude and OpenAI, 3,000 for Groq and Ollama, 1,200 for the board): the Notes go first.
+- The whole file goes into every prompt, cut from its head past the brain's budget (12,000 characters for Claude, OpenAI and Gemini, 3,000 for Groq and Ollama, 1,200 for the board): the Notes go first.
 - Lines have no date and no source; nothing says a fact stopped being true.
 - No search and no limit: a long memory is just cut. Duplicates are caught only when identical.
 - `forget` removes every line that contains the text it is given.
@@ -85,7 +85,7 @@ Bip also rewrites its own code with the owner's approval; Yoru won't: Yoru Hub i
 What was built on 2026-11-08, all of G1 to G5 below, in `core/src/assistant/memory/`.
 
 - **The store** (`mod.rs`): episodes, entities (with aliases, gender, placeholders and the user's node), relations, facts in sections (about you, what matters to you, tell me about, don't tell me about, notes) with `valid_from` / `valid_to`, importance and a private flag. `memory.md` is imported once as the first episode and renamed `memory.md.imported`.
-- **The prompt**: the core (about you, what to tell and not, and every important fact; 12,000 characters for Claude and OpenAI, the brain's budget for Groq and Ollama, always, plus `<memory_found>`, the facts found for the message (30 at most, 4,000 characters). Facts and entities carry ids (`[f12]`, `[e4]`).
+- **The prompt**: the core (about you, what to tell and not, and every important fact; 12,000 characters for Claude, OpenAI and Gemini, the brain's budget for Groq and Ollama, always, plus `<memory_found>`, the facts found for the message (30 at most, 4,000 characters). Facts and entities carry ids (`[f12]`, `[e4]`).
 - **Privacy with a cloud brain** (anything but Ollama): private facts stay home, and the people who have a role for you that no one else has ("your wife"; "your friend" only when there is one) are written by that role in the core, in the facts found and in the turn's notes, unless the message itself calls them by name. Their kin-word aliases ("wife") don't count as names. The tools accept the role too ("your wife" finds her).
 - **The board** (`Memory::board`, sent by `bridge/cloud.rs` in `cloud/set`): the graph in short, 1,200 characters at most and whole lines only: who you are and your core facts, then the people and things around you, most known first, each with its summary and two most important facts, at least a third of the room for them. No ids, no private facts, people with a role by it. The session checks every 30 s and sends it again when it changed, so the board follows the graph.
 - **Search** (`search.rs`): FTS5 words, EmbeddingGemma's vectors (cosine 0.35 or more, when the model is installed) and the facts of the people named, fused with RRF (k = 60, 50 from each list), then weighed by recency (45-day half-life) and importance. Without EmbeddingGemma it is words and people only.

@@ -242,6 +242,36 @@ pub const OPENAI: Provider = Provider {
 /// OpenAI's models call tools through Chat Completions only without reasoning.
 const NO_REASONING: &str = r#"{"reasoning_effort": "none"}"#;
 
+/// [Google AI Studio](https://aistudio.google.com): Gemini, a brain for the
+/// assistant, through its OpenAI-compatible API (November 2026). Most
+/// models have a free tier with daily limits (it lets Google use what is
+/// sent to improve its products); Gemini 4 Argon and Carbon are paid only.
+/// Gemini 3 and 4 always think a little: `low` keeps it short, and the
+/// thinking counts against `max_tokens`, hence the floor. Their tool calls
+/// carry a thought signature that has to go back with them ([`openai`]).
+pub const GOOGLE: Provider = Provider {
+    id: "google",
+    name: "Google",
+    api: Api::OpenAi,
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+    key_env: "GEMINI_API_KEY",
+    keys_url: "https://aistudio.google.com/apikey",
+    note: "Gemini, a brain for Yoru; free with daily limits, or paid by use. What you ask and what Yoru reads for you are sent to Google",
+    models: &[
+        chat("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite: the quickest; free tier, then $0.30 / $2.50 a million tokens", GEMINI_LOW),
+        chat("gemini-3.6-flash", "Gemini 3.6 Flash: quick and capable; free tier, then $0.75 / $3.75", GEMINI_LOW),
+        chat("gemini-3.8-flash", "Gemini 3.8 Flash: smarter, good with tools; free tier, then $0.75 / $3.75", GEMINI_LOW),
+        chat("gemini-4-hydrogen", "Gemini 4 Hydrogen: fast, made for agents; free tier, then $1.50 / $7.50", GEMINI_LOW),
+        chat("gemini-4-argon", "Gemini 4 Argon: frontier reasoning, quicker than Carbon; paid only ($2 / $10, $4 / $20 from December)", GEMINI_LOW),
+        chat("gemini-4-carbon", "Gemini 4 Carbon: Google's strongest; paid only ($2 / $10, $4 / $20 from December)", GEMINI_LOW),
+    ],
+    needs_key: true,
+    any_model: false,
+};
+
+/// Gemini thinks briefly, with room for the thinking and the answer.
+const GEMINI_LOW: &str = r#"{"reasoning_effort": "low", "max_tokens": 4096}"#;
+
 /// [Ollama](https://ollama.com): models on this computer, free and private,
 /// through its OpenAI-compatible API. No key; the models are the ones the
 /// person pulled ([`list_models`]), so any id is one ([`ANY_MODEL`]).
@@ -264,7 +294,7 @@ pub const OLLAMA: Provider = Provider {
 const ANY_MODEL: CloudModel = CloudModel { id: "model", kind: Kind::Llm, model: "", voice: None, language: None, note: "A model you have", params: "", max_chars: 0 };
 
 /// Every service Yoru can use.
-pub const PROVIDERS: &[Provider] = &[ANTHROPIC, OPENAI, GROQ, OLLAMA, ELEVENLABS, TAVILY];
+pub const PROVIDERS: &[Provider] = &[ANTHROPIC, OPENAI, GOOGLE, GROQ, OLLAMA, ELEVENLABS, TAVILY];
 
 impl Provider {
     pub fn by_id(id: &str) -> Option<&'static Provider> {

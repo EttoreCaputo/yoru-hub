@@ -326,6 +326,7 @@ const info: AssistantInfo = {
     model: "claude-opus-5-5",
     groq_model: "openai/gpt-oss-120b",
     openai_model: "gpt-6-luna",
+    google_model: "gemini-4-hydrogen",
     ollama_model: "",
     effort: "medium",
     task_effort: "low",
@@ -339,6 +340,11 @@ const info: AssistantInfo = {
   groq_key: noKey ? null : onGroq ? "saved" : null,
   groq_models: groqModels,
   openai_key: null,
+  google_key: null,
+  google_models: [
+    { id: "gemini-3.6-flash", note: "Gemini 3.6 Flash: quick and capable; free tier, then $0.75 / $3.75" },
+    { id: "gemini-4-hydrogen", note: "Gemini 4 Hydrogen: fast, made for agents; free tier, then $1.50 / $7.50" },
+  ],
   tavily_key: null,
   openai_models: [
     { id: "gpt-6-luna", note: "GPT-6 Luna: fast and cheap ($0.10 / $0.50 a million tokens)" },
@@ -412,6 +418,7 @@ const voice: VoiceInfo = {
   providers: [
     { id: "anthropic", name: "Anthropic", note: "Claude, Yoru's brain; paid by use.", keys_url: "https://platform.claude.com/settings/keys", key_env: "ANTHROPIC_API_KEY", key: info.key },
     { id: "openai", name: "OpenAI", note: "GPT, a brain for Yoru; paid by use.", keys_url: "https://platform.openai.com/api-keys", key_env: "OPENAI_API_KEY", key: info.openai_key },
+    { id: "google", name: "Google", note: "Gemini, a brain for Yoru; free tier or paid by use.", keys_url: "https://aistudio.google.com/apikey", key_env: "GEMINI_API_KEY", key: info.google_key },
     { id: "groq", name: "Groq", note: "Free with daily limits.", keys_url: "https://console.groq.com/keys", key_env: "GROQ_API_KEY", key: info.groq_key },
     { id: "ollama", name: "Ollama", note: "Models on this computer.", keys_url: "https://ollama.com/search?c=tools", key_env: "OLLAMA_API_KEY", key: null },
     { id: "elevenlabs", name: "ElevenLabs", note: "Natural voices.", keys_url: "https://elevenlabs.io/app/settings/api-keys", key_env: "ELEVENLABS_API_KEY", key: null },
@@ -427,8 +434,8 @@ const accountVoices: AccountVoice[] = [
 
 /** The brain as the core picks it: the settings', else the one with a key, Claude first. */
 function resolveBrain() {
-  info.brain = info.settings.provider ?? (info.key ? "anthropic" : info.openai_key ? "openai" : info.groq_key ? "groq" : null);
-  const ready = { anthropic: !!info.key, openai: !!info.openai_key, groq: !!info.groq_key, ollama: !!info.settings.ollama_model };
+  info.brain = info.settings.provider ?? (info.key ? "anthropic" : info.openai_key ? "openai" : info.google_key ? "google" : info.groq_key ? "groq" : null);
+  const ready = { anthropic: !!info.key, openai: !!info.openai_key, google: !!info.google_key, groq: !!info.groq_key, ollama: !!info.settings.ollama_model };
   info.ready = info.brain ? ready[info.brain] : false;
 }
 
@@ -715,6 +722,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     if (a.provider === "anthropic") info.key = a.key ? "saved" : null;
     if (a.provider === "groq") info.groq_key = a.key ? "saved" : null;
     if (a.provider === "openai") info.openai_key = a.key ? "saved" : null;
+    if (a.provider === "google") info.google_key = a.key ? "saved" : null;
     if (a.provider === "tavily") info.tavily_key = a.key ? "saved" : null;
     resolveBrain();
     return voice;

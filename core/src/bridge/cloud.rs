@@ -100,6 +100,7 @@ fn default_model(brain: Brain) -> &'static str {
     match brain {
         Brain::Anthropic => crate::assistant::DEFAULT_MODEL,
         Brain::OpenAi => crate::assistant::DEFAULT_OPENAI_MODEL,
+        Brain::Google => crate::assistant::DEFAULT_GOOGLE_MODEL,
         Brain::Groq | Brain::Ollama => crate::assistant::DEFAULT_GROQ_MODEL,
     }
 }

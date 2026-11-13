@@ -47,22 +47,45 @@ pub(super) fn open(client: &Client, sent: Result<ureq::http::Response<ureq::Body
     }
     let retry_after = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<f64>().ok()).map(Duration::from_secs_f64);
     let body = response.body_mut().with_config().limit(1024 * 1024).read_to_vec().map_err(|e| CloudError::Network { provider, why: e.to_string() })?;
+    let message = error_message(&body);
     match status {
         401 | 403 => Err(CloudError::BadKey { provider }),
+        // Google answers a wrong key with a 400.
+        400 if message.contains("API key not valid") || message.contains("API_KEY_INVALID") => Err(CloudError::BadKey { provider }),
         429 => {
-            let (wait, per_day) = limit_of(&error_message(&body));
+            let (wait, per_day) = google_limit(&body).unwrap_or_else(|| limit_of(&message));
             Err(CloudError::RateLimited { provider, retry_after: retry_after.or(wait), per_day })
         }
-        _ => Err(CloudError::Status { provider, status, message: error_message(&body) }),
+        _ => Err(CloudError::Status { provider, status, message }),
     }
+}
+
+/// The error of an answer: `{"error": …}`, or Google's `[{"error": …}]`.
+fn error_of(body: &[u8]) -> Option<Value> {
+    let v = serde_json::from_slice::<Value>(body).ok()?;
+    let v = if v.is_array() { v.get(0)?.clone() } else { v };
+    v.get("error").cloned()
 }
 
 /// `{"error": {"message": ...}}`, or the start of whatever it is.
 fn error_message(body: &[u8]) -> String {
-    serde_json::from_slice::<Value>(body)
-        .ok()
-        .and_then(|v| v.pointer("/error/message").and_then(Value::as_str).map(str::to_string))
+    error_of(body)
+        .and_then(|e| e["message"].as_str().map(str::to_string))
         .unwrap_or_else(|| String::from_utf8_lossy(body).chars().take(300).collect())
+}
+
+/// What Google's 429 says in its details: `RetryInfo`'s `retryDelay`
+/// (`"34s"`), and whether a per-day quota ran out (`…PerDay…` in a
+/// `QuotaFailure` violation's `quotaId`). `None` when it has no details.
+fn google_limit(body: &[u8]) -> Option<(Option<Duration>, bool)> {
+    let details = error_of(body)?.get("details")?.as_array()?.clone();
+    let wait = details.iter().find_map(|d| d["retryDelay"].as_str()).and_then(parse_wait);
+    let per_day = details
+        .iter()
+        .filter_map(|d| d["violations"].as_array())
+        .flatten()
+        .any(|v| v["quotaId"].as_str().is_some_and(|q| q.contains("PerDay")));
+    Some((wait, per_day))
 }
 
 /// What a 429's message says: when to try again, and whether the day's
@@ -134,6 +157,11 @@ fn chat_request(client: &Client, request: &Value) -> Value {
     if let (Some(asked), Some(floor)) = (asked, body.get("max_tokens").and_then(Value::as_u64)) {
         body.insert("max_tokens".into(), asked.max(floor).into());
     }
+    if client.model.provider.id == super::GOOGLE.id
+        && let Some(Value::Array(messages)) = body.get_mut("messages")
+    {
+        sign_tool_calls(messages);
+    }
     // OpenAI's own models refuse `max_tokens`: they count their reasoning too.
     if client.model.provider.id == "openai"
         && let Some(max) = body.remove("max_tokens")
@@ -141,6 +169,22 @@ fn chat_request(client: &Client, request: &Value) -> Value {
         body.insert("max_completion_tokens".into(), max);
     }
     Value::Object(body)
+}
+
+/// Google's Gemini 3 and 4 refuse a tool call sent back without the thought
+/// signature they gave it (`extra_content.google.thought_signature`, kept
+/// with the call). One that has none (the conversation began with another
+/// brain) gets the stand-in Google allows for calls it didn't make; only
+/// the first call of a turn is checked.
+const NO_SIGNATURE: &str = "skip_thought_signature_validator";
+
+fn sign_tool_calls(messages: &mut [Value]) {
+    for message in messages.iter_mut().filter(|m| m["role"] == "assistant") {
+        let Some(first) = message.get_mut("tool_calls").and_then(Value::as_array_mut).and_then(|c| c.first_mut()) else { continue };
+        if first.pointer("/extra_content/google/thought_signature").is_none() {
+            first["extra_content"] = serde_json::json!({"google": {"thought_signature": NO_SIGNATURE}});
+        }
+    }
 }
 
 pub(super) fn chat(client: &Client, request: &Value) -> Result<Value, CloudError> {
@@ -233,6 +277,44 @@ mod tests {
     #[test]
     fn reads_the_error_message() {
         assert_eq!(error_message(br#"{"error": {"message": "model not found", "type": "invalid_request_error"}}"#), "model not found");
+        assert_eq!(error_message(br#"[{"error": {"code": 400, "message": "API key not valid. Please pass a valid API key."}}]"#), "API key not valid. Please pass a valid API key.");
         assert_eq!(error_message(b"Bad Gateway"), "Bad Gateway");
+    }
+
+    #[test]
+    fn reads_googles_limits() {
+        let day = br#"[{"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "You exceeded your current quota", "details": [
+            {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]},
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "34s"}]}}]"#;
+        assert_eq!(google_limit(day), Some((Some(Duration::from_secs(34)), true)));
+        let minute = br#"{"error": {"details": [{"violations": [{"quotaId": "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}]}]}}"#;
+        assert_eq!(google_limit(minute), Some((None, false)));
+        assert_eq!(google_limit(br#"{"error": {"message": "too many"}}"#), None);
+    }
+
+    #[test]
+    fn gemini_gets_its_params_and_signed_calls() {
+        let client = Client { model: CloudRef::by_id("google:gemini-3.6-flash").unwrap(), key: "k".into(), voice_id: None, name: None };
+        let call = |sig: Option<&str>| {
+            let mut c = json!({"id": "c", "type": "function", "function": {"name": "f", "arguments": "{}"}});
+            if let Some(s) = sig {
+                c["extra_content"] = json!({"google": {"thought_signature": s}});
+            }
+            c
+        };
+        let request = json!({"messages": [
+            {"role": "assistant", "content": null, "tool_calls": [call(Some("real")), call(None)]},
+            {"role": "assistant", "content": null, "tool_calls": [call(None)]},
+            {"role": "assistant", "content": "ok"},
+        ], "max_tokens": 1024});
+        let body = chat_request(&client, &request);
+        assert_eq!((body["model"].as_str(), body["reasoning_effort"].as_str(), body["max_tokens"].as_u64()), (Some("gemini-3.6-flash"), Some("low"), Some(4096)));
+        let sig = |m: usize, c: usize| body["messages"][m]["tool_calls"][c].pointer("/extra_content/google/thought_signature").cloned();
+        assert_eq!(sig(0, 0), Some(json!("real")));
+        assert_eq!(sig(0, 1), None);
+        assert_eq!(sig(1, 0), Some(json!(NO_SIGNATURE)));
+        // Other providers' calls are sent as they are.
+        let groq = Client { model: CloudRef::by_id("groq:openai/gpt-oss-20b").unwrap(), key: "k".into(), voice_id: None, name: None };
+        assert!(chat_request(&groq, &request)["messages"][1]["tool_calls"][0].get("extra_content").is_none());
     }
 }

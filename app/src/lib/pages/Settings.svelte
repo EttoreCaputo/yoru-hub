@@ -1,7 +1,7 @@
 <!--
   Settings as Yoru's wiring: the mirror in the middle, and each part of the
   settings a card wired to it by a trace, with what it says right now. A card
-  opens its own page: Yoru's brain (Groq, OpenAI, Claude or Ollama, their keys
+  opens its own page: Yoru's brain (Groq, OpenAI, Gemini, Claude or Ollama, their keys
   and models, how hard Claude thinks), Yoru's MCP server, Yoru's voice
   with the cloud voices' keys, the app's language, the board (connection,
   firmware, WiFi, its own settings) and the data folder.
@@ -23,9 +23,9 @@
   const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
   const CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
   const brain = $derived(store.info?.brain ?? null);
-  const BRAIN_NAMES: Record<Brain, string> = { anthropic: "Claude", openai: "OpenAI", groq: "Groq", ollama: "Ollama" };
+  const BRAIN_NAMES: Record<Brain, string> = { anthropic: "Claude", openai: "OpenAI", google: "Gemini", groq: "Groq", ollama: "Ollama" };
   /** The brain picker's tiles; null lets the app choose. */
-  const BRAIN_CHOICES: (Brain | null)[] = [null, "anthropic", "openai", "groq", "ollama"];
+  const BRAIN_CHOICES: (Brain | null)[] = [null, "anthropic", "openai", "google", "groq", "ollama"];
   const LANG_CHOICES: (Lang | null)[] = [null, ...LANGUAGES.map((l) => l.id)];
   const langName = (id: Lang) => LANGUAGES.find((l) => l.id === id)?.name ?? id;
 
@@ -44,7 +44,7 @@
   });
 
   // The brains' keys (Groq's and OpenAI's serve speech to text too) are in the brain's page.
-  const BRAINS = ["anthropic", "openai", "groq", "ollama"];
+  const BRAINS = ["anthropic", "openai", "google", "groq", "ollama"];
   const others = $derived(voice?.providers.filter((p) => !BRAINS.includes(p.id)) ?? []);
 
   // Ollama's models are the ones pulled on this computer: asked when it is the brain.
@@ -102,7 +102,7 @@
   }
 
   // What each card says now, and its dot.
-  const brainModel = $derived(!s || !brain ? "" : brain === "anthropic" ? s.model : brain === "openai" ? s.openai_model : brain === "groq" ? s.groq_model : s.ollama_model);
+  const brainModel = $derived(!s || !brain ? "" : brain === "anthropic" ? s.model : brain === "openai" ? s.openai_model : brain === "google" ? s.google_model : brain === "groq" ? s.groq_model : s.ollama_model);
   const keyed = $derived(others.filter((p) => p.key).length);
   const firmware = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   const via = $derived(store.port?.startsWith("wifi:") ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
@@ -268,6 +268,24 @@
         <div class="how">
           <select value={s.openai_model} onchange={(e) => store.saveSettings((x) => (x.openai_model = e.currentTarget.value))} aria-label={t.openaiModel}>
             {#each store.info?.openai_models ?? [] as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
+          </select>
+        </div>
+      </div>
+    {/if}
+  </section>
+
+  <h2 class="section-title">Google AI Studio</h2>
+  <section class="panel" class:active={brain === "google"}>
+    <div class="block">
+      <div class="what"><b>{t.google}</b><span class="dim">{t.googleHint}</span></div>
+      <KeyField provider="google" source={store.info?.google_key ?? null} placeholder="AIza…" onchange={() => (store.refreshInfo(), readAll())} />
+    </div>
+    {#if s}
+      <div class="setting">
+        <div class="what"><b>{t.googleModel}</b>{#if brain === "google"}<span>{t.groqNote}</span>{/if}</div>
+        <div class="how">
+          <select value={s.google_model} onchange={(e) => store.saveSettings((x) => (x.google_model = e.currentTarget.value))} aria-label={t.googleModel}>
+            {#each store.info?.google_models ?? [] as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
           </select>
         </div>
       </div>

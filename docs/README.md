@@ -14,7 +14,7 @@ Platform: **macOS only** for now (Apple Silicon and Intel). Some code still buil
 
 ## What it does
 
-- **Answers**: with a brain you pick: a model on [Groq](https://console.groq.com/keys) (free, with daily limits: a good start), GPT (OpenAI's API, paid, cheap), a model on this computer through [Ollama](https://ollama.com) (free and private) or Claude (Anthropic's API, paid, the best, with web search), with your connectors' tools, the board's tools and the timers. Anything that changes something (sending a mail, creating an issue) asks first, on the board and in the app.
+- **Answers**: with a brain you pick: a model on [Groq](https://console.groq.com/keys) (free, with daily limits: a good start), GPT (OpenAI's API, paid, cheap), Gemini ([Google AI Studio](https://aistudio.google.com/apikey): a free tier with daily limits, or paid), a model on this computer through [Ollama](https://ollama.com) (free and private) or Claude (Anthropic's API, paid, the best, with web search), with your connectors' tools, the board's tools and the timers. Anything that changes something (sending a mail, creating an issue) asks first, on the board and in the app.
 - **Watches**: watchers check a connector's tool or do a task every so often, and only what's new and matters becomes a notification. A morning recap, quiet hours and do-not-disturb.
 - **Does what you give it to do**: tasks you assign Yoru in words, once or on a schedule (every day or some weekdays, every month, every few hours), done on his own when it's time; each one reads and tells only, asks before acting, or acts without asking, as you choose. The board's Tasks app shows them, with "Do it now".
 - **Keeps time**: timers, a pomodoro and reminders, shown and handled in the board's Timers app.

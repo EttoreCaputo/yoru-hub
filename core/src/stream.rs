@@ -93,6 +93,10 @@ impl ChatMessage {
             if let Some(id) = call["id"].as_str().filter(|id| !id.is_empty()) {
                 slot["id"] = id.into();
             }
+            // Google's thought signature, which has to go back with the call.
+            if let Some(extra) = call.get("extra_content").filter(|e| !e.is_null()) {
+                slot["extra_content"] = extra.clone();
+            }
             for field in ["name", "arguments"] {
                 if let Some(piece) = call.pointer(&format!("/function/{field}")).and_then(Value::as_str) {
                     let whole = format!("{}{piece}", slot["function"][field].as_str().unwrap_or_default());
@@ -157,6 +161,16 @@ mod tests {
         assert_eq!(message["tool_calls"][0]["function"]["name"], "set_face");
         assert_eq!(message["tool_calls"][0]["function"]["arguments"], "{\"face\":1}");
         assert_eq!(seen, ["Text(\"Ci\")", "Text(\"ao.\")", "Tools"]);
+    }
+
+    #[test]
+    fn googles_signature_stays_with_its_call() {
+        let stream = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"},",
+            "\"extra_content\":{\"google\":{\"thought_signature\":\"sig\"}}}]}}]}\n\n",
+        );
+        let message = chat_message(stream.as_bytes(), &mut ignore).unwrap();
+        assert_eq!(message["tool_calls"][0]["extra_content"]["google"]["thought_signature"], "sig");
     }
 
     #[test]

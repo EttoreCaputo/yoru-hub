@@ -221,8 +221,8 @@ enum Command {
         action: connectors_cmd::Action,
     },
     /// The assistant's settings: `settings` prints them, `settings KEY VALUE`
-    /// changes one (name, provider: anthropic, openai, groq, ollama or auto;
-    /// model: Claude's; openai_model, groq_model, ollama_model; effort,
+    /// changes one (name, provider: anthropic, openai, google, groq, ollama or auto;
+    /// model: Claude's; openai_model, google_model, groq_model, ollama_model; effort,
     /// task_effort, web_search: Claude only; think: Ollama only; recap,
     /// recap_at, recap_weekdays_only, quiet, quiet_from, quiet_to)
     Settings {
@@ -953,13 +953,14 @@ fn settings_command(key: Option<&str>, value: Option<&str>) -> ExitCode {
         let s = assistant.settings();
         match s.brain() {
             Some(b) => eprintln!("thinking with {} ({}){}", b.name(), s.model_of(b), if b.has_key() { "" } else { ", which has no key yet" }),
-            None => eprintln!("no brain: add a key with yoru cloud key groq (free), anthropic or openai, or use Ollama (yoru settings provider ollama)"),
+            None => eprintln!("no brain: add a key with yoru cloud key groq or google (free), anthropic or openai, or use Ollama (yoru settings provider ollama)"),
         }
         return ExitCode::SUCCESS;
     };
     let catalog = match key {
         "groq_model" => Some(Brain::Groq),
         "openai_model" => Some(Brain::OpenAi),
+        "google_model" => Some(Brain::Google),
         _ => None,
     };
     if let Some(brain) = catalog
