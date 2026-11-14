@@ -554,20 +554,20 @@ impl Board {
         a.running
     }
 
-    /// Turn the engine off, or end the helper too.
+    /// Let go of the Mac's audio by ending the helper; `quit` also ends the
+    /// notch's session. Stopping only the engine isn't enough: with voice
+    /// processing set up, the helper kept Bluetooth headphones in their
+    /// call mode (16 kHz mono) until it exited. The next use starts it again.
     fn audio_off(&self, quit: bool) {
-        let mut audio = self.audio.lock().unwrap();
-        if quit {
-            if let Some(mut a) = audio.take() {
-                let _ = a.child.kill();
-                let _ = a.child.wait();
+        if let Some(mut a) = self.audio.lock().unwrap().take() {
+            let _ = a.child.kill();
+            let _ = a.child.wait();
+            if !quit {
+                crate::hostlog::line(TARGET, "unused: the Mac's audio is let go");
             }
-            BOARD.lock().unwrap().take();
-            return;
         }
-        if let Some(a) = audio.as_mut().filter(|a| a.running) {
-            let _ = writeln!(a.stdin, "{}", json!({"cmd": "stop"}));
-            a.running = false;
+        if quit {
+            BOARD.lock().unwrap().take();
         }
     }
 
