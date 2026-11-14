@@ -200,7 +200,8 @@ export type BoardFirmware =
   | { state: "legacy" }
   | { state: "missing" };
 
-export type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "error";
+/** `starting` only in the notch: the Mac's microphone is still opening. */
+export type VoiceState = "idle" | "starting" | "listening" | "thinking" | "speaking" | "error";
 export type Link = "searching" | "connected" | "offline";
 export type BoardState = "off" | "boot" | "waiting" | "live" | "stale";
 export type Gaze = { x: number; y: number; movedAt: number };

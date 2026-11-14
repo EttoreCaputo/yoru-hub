@@ -12,7 +12,8 @@
 //   {"cmd": "flush"}               drop what is queued and playing
 // Events on stdout: `ready` once the engine runs, `audio` with 32 ms of
 // 16 kHz mono 16-bit PCM (base64) while the microphone is on, `played`
-// for a mark, `error`. Closing stdin ends it.
+// for a mark, `error` (`fatal` when the engine wouldn't start). Closing
+// stdin ends it, after starting again the music it paused (Media.swift).
 
 import AVFoundation
 import Foundation
@@ -33,6 +34,8 @@ final class Talk {
     private var listening = false
     private var pending: [Int16] = []
     private var running = false
+    /// Other apps' media was paused at start, to be started again at the end.
+    private var paused = false
 
     func handle(_ command: [String: Any]) {
         switch command["cmd"] as? String {
@@ -69,6 +72,9 @@ final class Talk {
             return
         }
         askMicrophone()
+        // Before the microphone opens: on Bluetooth headphones it switches
+        // them to their call mode, and the music would go muffled.
+        if !paused { paused = Media.pauseOthers() }
         // The output side has to exist before voice processing goes on, or
         // the output unit fails to initialize when the engine starts
         // (AVAudioEngine error -10875).
@@ -99,12 +105,21 @@ final class Talk {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
-            emit(["event": "error", "message": "the microphone: \(error.localizedDescription)"])
+            emit(["event": "error", "message": "the microphone: \(error.localizedDescription)", "fatal": true])
             return
         }
         player.play()
         running = true
         emit(["event": "ready"])
+    }
+
+    /// Engine off and the paused media playing again: the helper ends.
+    func finish() {
+        stop()
+        if paused {
+            Media.resume()
+            paused = false
+        }
     }
 
     private func stop() {
@@ -177,6 +192,7 @@ func talk() -> Never {
                   let command = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
             queue.async { session.handle(command) }
         }
+        queue.sync { session.finish() }
         exit(0)
     }
     dispatchMain()

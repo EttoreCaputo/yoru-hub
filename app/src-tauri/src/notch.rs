@@ -22,8 +22,9 @@ const WIDTH: f64 = 620.0;
 const HEIGHT: f64 = 520.0;
 /// How often the pointer is looked at.
 const POINTER_EVERY: Duration = Duration::from_millis(40);
-/// How often the microphone is kept ready while the pointer is on the notch.
-const WARM_EVERY: Duration = Duration::from_secs(5);
+/// How often the host hears the user may talk, while the pointer is on the
+/// notch (Gemini Live keeps its session open ahead).
+const POINTER_ON_EVERY: Duration = Duration::from_secs(5);
 /// Room around what the page draws that still counts as on it.
 const SLACK: f64 = 8.0;
 
@@ -111,6 +112,12 @@ pub fn notch_talk(pressed: bool) {
     yoru_core::notch::talk(pressed);
 }
 
+/// The notch closed: let go of the Mac's audio.
+#[tauri::command]
+pub fn notch_release() {
+    yoru_core::notch::release();
+}
+
 /// Stop what Yoru says or hears.
 #[tauri::command]
 pub fn notch_hush() {
@@ -195,7 +202,7 @@ pub fn place(app: &AppHandle, window: &WebviewWindow) {
 fn follow_pointer(app: AppHandle) {
     thread::spawn(move || {
         let mut over = false;
-        let mut last_warm = None;
+        let mut last_on = None;
         let mut screens = mac::screens_signature();
         loop {
             thread::sleep(POINTER_EVERY);
@@ -214,13 +221,13 @@ fn follow_pointer(app: AppHandle) {
                 let _ = window.set_ignore_cursor_events(!on);
                 let _ = window.emit("notch-pointer", on);
             }
-            // The microphone ready for a click, for as long as the pointer
-            // stays: it may have come before the notch's session was up.
-            if on && last_warm.is_none_or(|t: Instant| t.elapsed() >= WARM_EVERY) {
-                last_warm = Some(Instant::now());
-                yoru_core::notch::warm();
+            // Again while the pointer stays: it may have come before the
+            // notch's session was up.
+            if on && last_on.is_none_or(|t: Instant| t.elapsed() >= POINTER_ON_EVERY) {
+                last_on = Some(Instant::now());
+                yoru_core::notch::pointer_on();
             } else if !on {
-                last_warm = None;
+                last_on = None;
             }
         }
     });

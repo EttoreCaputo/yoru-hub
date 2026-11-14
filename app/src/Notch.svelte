@@ -119,6 +119,12 @@
     }
   });
 
+  // Closed, the Mac's audio is let go at once: Bluetooth headphones leave
+  // their call mode and paused music plays again.
+  $effect(() => {
+    if (!open) void call("notch_release").catch(() => {});
+  });
+
   // Say where the drawing is, as it opens and closes.
   $effect(() => {
     if (!shape) return;
@@ -179,6 +185,8 @@
     <div class="side right">
       {#if voice === "listening"}
         <span class="bars" aria-hidden="true">{#each bars as b, i (i)}<i style:--h={b}></i>{/each}</span>
+      {:else if voice === "starting"}
+        <span class="spinner starting" aria-hidden="true"></span>
       {:else if voice === "thinking" || store.asking}
         <span class="spinner" aria-hidden="true"></span>
       {:else if voice === "speaking"}
@@ -385,6 +393,11 @@
     border: 2px solid rgba(74, 163, 255, 0.25);
     border-top-color: #4aa3ff;
     animation: spin 0.8s linear infinite;
+  }
+  /* The microphone opening: not ready to hear yet, so not the thinking blue. */
+  .spinner.starting {
+    border-color: rgba(255, 255, 255, 0.18);
+    border-top-color: rgba(255, 255, 255, 0.85);
   }
   .dot {
     display: inline-block;

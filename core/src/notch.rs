@@ -35,9 +35,13 @@ pub const FIRMWARE: &str = "notch";
 const FRAME: usize = 512;
 /// How often the socket is looked at for the host going away.
 const READ_WAIT: Duration = Duration::from_millis(200);
-/// The microphone and the speaker go off after this long unused, and the
-/// Mac's microphone indicator with them.
+/// The microphone and the speaker go off after this long unused with the
+/// notch open, and the Mac's microphone indicator with them. Closing the
+/// notch lets them go at once ([`release`]).
 const ENGINE_IDLE: Duration = Duration::from_secs(20);
+/// How long the helper may take to put things back (the music it paused)
+/// before it is killed.
+const HELPER_EXIT: Duration = Duration::from_secs(2);
 /// The longest utterance.
 const MAX_UTTERANCE: Duration = Duration::from_secs(30);
 /// A frame this loud (dBFS, after echo cancelling) may be speech...
@@ -105,30 +109,29 @@ pub fn talk(pressed: bool) {
     }
 }
 
-/// The pointer came onto the notch: start the audio engine now, so a click
-/// on the microphone finds it on. Cold, Apple's echo cancelling takes about
-/// a second to start, and the first words were lost. It goes off again
-/// after [`ENGINE_IDLE`] unused. Only with the permission already given,
-/// so hovering never brings up macOS's question.
-/// Called again while the pointer stays there: an engine already on is
-/// only kept on; one that went off (or a notch that wasn't up yet when the
-/// pointer came) starts.
-pub fn warm() {
+/// The pointer is on the notch: the user may be about to talk, so Gemini
+/// Live, if on, opens its session ahead. The Mac's audio isn't touched:
+/// it starts only when the user talks, since holding the microphone puts
+/// Bluetooth headphones in their call mode and pauses the music.
+pub fn pointer_on() {
     let Some(board) = board() else { return };
-    if board.audio.lock().unwrap().as_ref().is_some_and(|a| a.running) {
-        board.state.lock().unwrap().used = Some(Instant::now());
-        return;
+    if board.state.lock().unwrap().utterance.is_none() {
+        board.notify("about_to_talk", json!({}));
     }
-    let _ = thread::Builder::new().name("yoru-notch-warm".into()).spawn(move || {
-        if microphone(false).is_ok_and(|status| status == "granted") && board.audio_on() {
-            board.state.lock().unwrap().used = Some(Instant::now());
-            crate::hostlog::line(TARGET, "pointer on the notch: the microphone's engine is on");
+}
+
+/// The notch closed: let go of the Mac's audio now, unless Yoru is still
+/// hearing or talking.
+pub fn release() {
+    if let Some(board) = board() {
+        let busy = {
+            let state = board.state.lock().unwrap();
+            state.utterance.is_some() || state.playing.is_some()
+        };
+        if !busy {
+            board.audio_off(false);
         }
-        // Gemini Live, if on, opens its session meanwhile.
-        if board.state.lock().unwrap().utterance.is_none() {
-            board.notify("about_to_talk", json!({}));
-        }
-    });
+    }
 }
 
 /// Stop talking: what Yoru is saying, or what he's hearing.
@@ -181,6 +184,9 @@ struct Utterance {
     last_loud: Instant,
     /// A follow-up: how long to wait for speech, and the pause that ends it.
     listen: Option<(Duration, Duration)>,
+    /// The microphone is on and the host was told: false while the helper
+    /// is still starting (about a second, for Apple's echo cancelling).
+    ready: bool,
 }
 
 /// What is being played.
@@ -206,6 +212,8 @@ struct Audio {
     child: Child,
     stdin: ChildStdin,
     running: bool,
+    /// The helper said its engine runs.
+    ready: bool,
 }
 
 struct Board {
@@ -355,7 +363,8 @@ impl Board {
             }
             state.next_id = state.next_id.wrapping_add(1).max(1);
             let now = Instant::now();
-            state.utterance = Some(Utterance { id: state.next_id, trigger: trigger.to_string(), seq: 0, started: now, loud: 0, speech: false, last_loud: now, listen });
+            state.utterance =
+                Some(Utterance { id: state.next_id, trigger: trigger.to_string(), seq: 0, started: now, loud: 0, speech: false, last_loud: now, listen, ready: false });
             state.used = Some(now);
             state.next_id
         };
@@ -364,10 +373,54 @@ impl Board {
             self.state.lock().unwrap().utterance = None;
             return;
         }
+        if self.audio.lock().unwrap().as_ref().is_some_and(|a| a.ready) {
+            self.listen();
+        } else {
+            // Shown only: the host hears of the utterance once it starts.
+            crate::hostlog::line(TARGET, &format!("utterance #{id} waits for the microphone"));
+            tell(Event::State { state: "starting".into() });
+        }
+    }
+
+    /// The microphone is ready: start the utterance for real. Once only,
+    /// whether the helper was ready already or said so later.
+    fn listen(&self) {
+        let (id, trigger) = {
+            let mut state = self.state.lock().unwrap();
+            let Some(u) = state.utterance.as_mut().filter(|u| !u.ready) else { return };
+            let now = Instant::now();
+            u.ready = true;
+            // A follow-up's wait counts from when the microphone hears.
+            u.started = now;
+            u.last_loud = now;
+            let started = (u.id, u.trigger.clone());
+            state.used = Some(now);
+            started
+        };
         crate::hostlog::line(TARGET, &format!("utterance #{id} starts ({trigger})"));
         self.notify("utterance_start", json!({"id": id, "trigger": trigger, "rate": 16000, "format": "s16le"}));
         self.set_voice("listening");
         self.command(json!({"cmd": "mic", "on": true}));
+    }
+
+    /// The helper's engine runs.
+    fn audio_ready(&self) {
+        if let Some(a) = self.audio.lock().unwrap().as_mut() {
+            a.ready = true;
+        }
+        self.listen();
+    }
+
+    /// The helper's engine wouldn't start: an utterance waiting for it ends.
+    fn audio_failed(&self) {
+        if let Some(a) = self.audio.lock().unwrap().as_mut() {
+            a.running = false;
+            a.ready = false;
+        }
+        let waiting = self.state.lock().unwrap().utterance.as_ref().is_some_and(|u| !u.ready);
+        if waiting {
+            self.end("error");
+        }
     }
 
     /// The push-to-talk key let go.
@@ -381,6 +434,12 @@ impl Board {
     /// Stop hearing and tell the host what came of it.
     fn end(&self, reason: &str) {
         let Some(u) = self.state.lock().unwrap().utterance.take() else { return };
+        if !u.ready {
+            // Let go before the microphone was on: the host never heard of it.
+            crate::hostlog::line(TARGET, &format!("utterance #{} ends before the microphone was ready: {reason}", u.id));
+            self.set_voice(if reason == "error" { "error" } else { "idle" });
+            return;
+        }
         self.command(json!({"cmd": "mic", "on": false}));
         // Push-to-talk sends what it has: a short word may be quiet.
         let speech = u.speech || (u.trigger == "button" && u.seq > 8);
@@ -403,7 +462,7 @@ impl Board {
         let db = level_db(samples);
         let (frame, end) = {
             let mut state = self.state.lock().unwrap();
-            let Some(u) = state.utterance.as_mut() else { return };
+            let Some(u) = state.utterance.as_mut().filter(|u| u.ready) else { return };
             let now = Instant::now();
             if db > SPEECH_DB {
                 u.loud += 1;
@@ -558,12 +617,19 @@ impl Board {
     /// notch's session. Stopping only the engine isn't enough: with voice
     /// processing set up, the helper kept Bluetooth headphones in their
     /// call mode (16 kHz mono) until it exited. The next use starts it again.
+    /// Its stdin closed, the helper restarts the music it paused and exits.
     fn audio_off(&self, quit: bool) {
-        if let Some(mut a) = self.audio.lock().unwrap().take() {
-            let _ = a.child.kill();
-            let _ = a.child.wait();
+        let audio = self.audio.lock().unwrap().take();
+        if let Some(Audio { mut child, stdin, .. }) = audio {
+            drop(stdin);
+            let deadline = Instant::now() + HELPER_EXIT;
+            while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(20));
+            }
+            let _ = child.kill();
+            let _ = child.wait();
             if !quit {
-                crate::hostlog::line(TARGET, "unused: the Mac's audio is let go");
+                crate::hostlog::line(TARGET, "the Mac's audio is let go");
             }
         }
         if quit {
@@ -598,12 +664,18 @@ impl Board {
                         }
                     }
                     Some("played") => board.played(event["id"].as_u64().unwrap_or(0) as u8),
-                    Some("error") => tell(Event::Error { message: event["message"].as_str().unwrap_or("yoru-audio failed").to_string() }),
+                    Some("ready") => board.audio_ready(),
+                    Some("error") => {
+                        tell(Event::Error { message: event["message"].as_str().unwrap_or("yoru-audio failed").to_string() });
+                        if event["fatal"].as_bool() == Some(true) {
+                            board.audio_failed();
+                        }
+                    }
                     _ => {}
                 }
             }
         })?;
-        Ok(Audio { child, stdin, running: false })
+        Ok(Audio { child, stdin, running: false, ready: false })
     }
 }
 

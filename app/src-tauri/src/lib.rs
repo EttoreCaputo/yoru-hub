@@ -1995,6 +1995,7 @@ pub fn run() {
             notch::notch_geometry,
             notch::notch_talk,
             notch::notch_hush,
+            notch::notch_release,
             notch::notch_microphone,
             notch::open_microphone_privacy,
             set_notch,
