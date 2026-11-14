@@ -17,7 +17,8 @@ export type Notification = {
   by?: string;
 };
 
-export type Action = { tool: string; ok: boolean; summary: string };
+/** `asked`: what the call was about in a few words (a search's query). */
+export type Action = { tool: string; asked?: string; ok: boolean; summary: string };
 export type Channel = "voice" | "text";
 /** A coding agent's conversation being worked on now, or a run of Yoru's that just ended. */
 export type ActiveAgent = {

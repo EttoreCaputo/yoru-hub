@@ -536,6 +536,16 @@ const en = {
     waiting: (n: number) => (n === 1 ? "1 card waiting" : `${n} cards waiting`),
     unread: (n: number) => `${n} unread`,
     fetching: "Looking it up",
+    /** The tools an answer used, as the notch shows them. */
+    tools: {
+      web: "Web search",
+      memory: "Memory",
+      inbox: "Notice",
+      timers: "Timer",
+      tasks: "Tasks",
+      code: "Code",
+      board: "Yoru",
+    } as Record<string, string>,
     micAsk: "I can't hear you yet: let me use the microphone.",
     micDenied: "I can't hear you: the microphone is off for Yoru in System Settings.",
     micAllow: "Allow the microphone",

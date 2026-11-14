@@ -8,6 +8,7 @@
 //   ?brain=groq Yoru thinks with Groq (its key only)
 
 import type {
+  Action,
   AccountVoice,
   ActiveAgent,
   AssistantInfo,
@@ -483,7 +484,12 @@ async function ask(text: string) {
   emit("bridge", { kind: "voice_state", state: "thinking" });
   await sleep(1400);
   let reply = "Nothing else new since this morning. YOR-142 is still the one due first, on Friday.";
-  const actions = [{ tool: "get_inbox", ok: true, summary: "2 unread" }];
+  const actions: Action[] = [{ tool: "get_inbox", ok: true, summary: "2 unread" }];
+  if (/news|notizie|novit/i.test(text)) {
+    reply = "Today: the EU agreed on the new AI rules, and Rome's metro line C opens two more stations next week.";
+    actions.splice(0, 1, { tool: "tavily__tavily_search", asked: "ultime notizie oggi italia mondo 14 novembre 2026", ok: true, summary: "5 results" });
+    actions.push({ tool: "find_tools", ok: true, summary: "…" }, { tool: "gmail__search_threads", asked: "newsletter", ok: false, summary: "timed out" });
+  }
   if (/creat|crea|send|mand|scriv/i.test(text)) {
     confirmations = [...confirmations, { id: "y1", tool: "linear: create_issue", text: "Create issue \"Board inbox: swipe to dismiss\" in Yoru", detail: '{"team":"YOR","title":"Board inbox: swipe to dismiss"}', asked: now(), expires: now() + 90_000 }];
     emitConfirmations();

@@ -29,6 +29,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
+use super::written_calls;
 use super::{Action, Assistant, BOARD_ESSENTIALS, Brain, ExternalTool, Host, MAX_ROUNDS, Reply, Settings, board_extras, own_tools, schema_or_empty, select, tool_json};
 use crate::cloud::{self, CloudError, Client};
 use crate::models::Kind;
@@ -355,10 +356,46 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
             all.push(json!({"role": "system", "content": reminder}));
         }
         let size = all.iter().map(|m| m.to_string().len()).sum::<usize>() + Value::from(tools.clone()).to_string().len();
-        let message = chat(&client, &request(brain, settings, json!({"messages": all, "tools": tools, "tool_choice": "auto"}), budget.max_tokens), on.as_deref_mut())?;
+        let names: Vec<String> = tools.iter().filter_map(|t| t.pointer("/function/name").and_then(Value::as_str)).map(str::to_string).collect();
+        let body = request(brain, settings, json!({"messages": all, "tools": tools, "tool_choice": "auto"}), budget.max_tokens);
+        let message = match on.as_deref_mut() {
+            // A call written as words mustn't be read out.
+            Some(on) => {
+                let mut holder = written_calls::Holder::default();
+                let message = chat(&client, &body, Some(&mut |d: Delta| match d {
+                    Delta::Text(t) => {
+                        let t = holder.push(t);
+                        if !t.is_empty() {
+                            on(Delta::Text(&t));
+                        }
+                    }
+                    other => on(other),
+                }));
+                let rest = holder.finish();
+                if !rest.is_empty() {
+                    on(Delta::Text(&rest));
+                }
+                message?
+            }
+            None => chat(&client, &body, None)?,
+        };
         times.push(format!("model {} ms ({} KB sent)", asked.elapsed().as_millis(), size / 1024));
-        let calls = message["tool_calls"].as_array().cloned().unwrap_or_default();
-        let text = clean(message["content"].as_str().unwrap_or_default());
+        let mut calls = message["tool_calls"].as_array().cloned().unwrap_or_default();
+        let mut text = clean(message["content"].as_str().unwrap_or_default());
+        if calls.is_empty()
+            && let Some((rest, written)) = written_calls::take(&text, &names)
+        {
+            crate::hostlog::line("assistant", &format!("{model} wrote {} tool call(s) as text: run them", written.len()));
+            calls = written
+                .into_iter()
+                .enumerate()
+                .map(|(i, (name, input))| json!({"id": format!("written_{}_{i}", messages.len()), "type": "function", "function": {"name": name, "arguments": input.to_string()}}))
+                .collect();
+            text = rest;
+            if let Some(on) = on.as_deref_mut() {
+                on(Delta::Tools);
+            }
+        }
         if calls.is_empty() {
             log_times(&times);
             messages.push(json!({"role": "assistant", "content": text}));
@@ -513,6 +550,27 @@ mod tests {
 
     fn answer(message: Value) -> (u16, Value) {
         (200, json!({"choices": [{"index": 0, "message": message, "finish_reason": "stop"}]}))
+    }
+
+    #[test]
+    fn a_call_written_as_words_is_made() {
+        let _env = crate::assistant::tests::ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (url, requests) = fake_server(vec![
+            answer(json!({"role": "assistant", "content": "Ci penso io. [remember(section=\"about\", text=\"Likes espresso\")]"})),
+            answer(json!({"role": "assistant", "content": "Fatto, me lo ricordo."})),
+        ]);
+        point_groq_at(&url);
+        let a = assistant();
+        a.set_settings(groq_settings()).unwrap();
+        let reply = a.respond("Ricordati che amo l'espresso", Some("it"), Channel::Text, &NoBoard).unwrap();
+        assert_eq!(reply.text, "Fatto, me lo ricordo.");
+        assert!(a.memory.text().contains("- Likes espresso"));
+        assert_eq!(reply.actions.len(), 1);
+        let _ = requests.recv().unwrap();
+        let second = requests.recv().unwrap();
+        let said = &second["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "assistant").unwrap();
+        assert_eq!(said["content"], "Ci penso io.");
+        assert_eq!(said["tool_calls"][0]["function"]["name"], "remember");
     }
 
     #[test]

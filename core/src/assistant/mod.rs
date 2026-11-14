@@ -44,6 +44,7 @@ pub mod routines;
 pub mod select;
 pub mod tasks;
 pub mod watchers;
+mod written_calls;
 
 use std::fs;
 use std::path::PathBuf;
@@ -253,6 +254,9 @@ pub enum Channel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Action {
     pub tool: String,
+    /// What it was asked, in a few words (a search's query), for the notch.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub asked: String,
     pub ok: bool,
     /// The start of what it said, or why it failed.
     pub summary: String,
@@ -918,12 +922,13 @@ impl Assistant {
     /// Run one tool the model asked for (`input`: its arguments, or why they
     /// couldn't be read) and log it: what it said, and whether it worked.
     fn run_one(&self, name: &str, input: Result<&Value, String>, board: &[Tool], external: &[ExternalTool], host: &dyn Host, actions: &mut Vec<Action>) -> (String, bool) {
+        let asked = input.as_ref().map(|i| gist(i)).unwrap_or_default();
         let outcome = input.and_then(|input| self.call_tool(name, input, board, external, host));
         let (text, ok) = match outcome {
             Ok(text) => (text, true),
             Err(e) => (e, false),
         };
-        actions.push(Action { tool: name.to_string(), ok, summary: text.chars().take(160).collect() });
+        actions.push(Action { tool: name.to_string(), asked, ok, summary: text.chars().take(160).collect() });
         (text, ok)
     }
 
@@ -1480,6 +1485,16 @@ fn summarize(input: &Value) -> String {
         })
         .collect();
     parts.join("; ")
+}
+
+/// A call's arguments in a few words: what it looks for or is about (a
+/// search's query, a note's title), else its first words.
+fn gist(input: &Value) -> String {
+    const KEYS: [&str; 8] = ["query", "q", "search", "title", "subject", "name", "text", "prompt"];
+    let Some(map) = input.as_object() else { return String::new() };
+    let first = KEYS.iter().find_map(|k| map.get(*k).and_then(Value::as_str)).or_else(|| map.values().find_map(Value::as_str)).unwrap_or_default();
+    let line = first.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.chars().count() > 80 { format!("{}…", line.chars().take(79).collect::<String>()) } else { line }
 }
 
 fn local_time(ms: u64) -> String {

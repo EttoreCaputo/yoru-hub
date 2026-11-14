@@ -164,6 +164,48 @@
     }
   }
 
+  /** What a tool is, in a word: its service's name, or what Yoru's own is for. */
+  const OWN: Record<string, string> = {
+    tavily__tavily_search: "web",
+    web_search: "web",
+    remember: "memory",
+    forget: "memory",
+    recall: "memory",
+    relate: "memory",
+    revise_memory: "memory",
+    this_is: "memory",
+    weekly: "memory",
+    notify: "inbox",
+    get_inbox: "inbox",
+    tasks: "tasks",
+    code_send: "code",
+    code_sessions: "code",
+    code_status: "code",
+    code_control: "code",
+    react: "board",
+    get_state: "board",
+  };
+  /** Finding and loading tools is the brain's own housekeeping: not shown. */
+  const PLUMBING = new Set(["find_tools", "load_tools"]);
+  function toolLabel(tool: string): string {
+    const own = OWN[tool] ?? (/timer|pomodoro|alarm/.test(tool) ? "timers" : null);
+    if (own) return t.tools[own];
+    const [service, name] = tool.includes("__") ? tool.split("__", 2) : ["", tool];
+    const words = name.replaceAll("_", " ");
+    return service ? `${service.charAt(0).toUpperCase()}${service.slice(1)} · ${words}` : words;
+  }
+  /** The answer's tools, the same one asked the same thing once. */
+  const used = $derived.by(() => {
+    const seen = new Set<string>();
+    return (last.yoru?.actions ?? []).filter((a) => {
+      const key = `${a.tool}|${a.asked ?? ""}`;
+      if (PLUMBING.has(a.tool) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  });
+  const USED_SHOWN = 3;
+
   /** A few bars for how loud the microphone is. */
   const bars = $derived([0.5, 0.85, 1, 0.7].map((k) => Math.max(0.2, Math.min(1, level * k * 1.5))));
 </script>
@@ -233,6 +275,18 @@
       {:else if last.you || last.yoru}
         <section class="exchange">
           {#if last.you}<p class="you">{last.you.text}</p>{/if}
+          {#if used.length}
+            <ul class="used">
+              {#each used.slice(0, USED_SHOWN) as a, i (i)}
+                <li class:failed={!a.ok} title={a.summary}>
+                  <span class="mark" aria-hidden="true"></span>
+                  <span class="tool-name">{toolLabel(a.tool)}</span>
+                  {#if a.asked}<span class="asked">{a.asked}</span>{/if}
+                </li>
+              {/each}
+              {#if used.length > USED_SHOWN}<li class="more-tools">+{used.length - USED_SHOWN}</li>{/if}
+            </ul>
+          {/if}
           {#if last.yoru}<p class="answer">{last.yoru.text}</p>{/if}
         </section>
       {:else}
@@ -507,6 +561,52 @@
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+  /* The tools the answer used: one quiet line each, above the words. */
+  .used {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .used li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 2px 9px 2px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+    font-size: 11.5px;
+    line-height: 18px;
+    color: rgba(255, 255, 255, 0.7);
+    min-width: 0;
+  }
+  .used .mark {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: none;
+    background: #40e080;
+  }
+  .used .failed .mark {
+    background: #ff4d4d;
+  }
+  .used .tool-name {
+    flex: none;
+    color: rgba(255, 255, 255, 0.85);
+  }
+  .used .asked {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.45);
+  }
+  .used .more-tools {
+    padding: 2px 8px;
   }
   .hint {
     color: rgba(255, 255, 255, 0.45);

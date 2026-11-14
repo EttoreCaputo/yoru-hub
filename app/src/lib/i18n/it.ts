@@ -534,6 +534,16 @@ const it: Messages = {
     waiting: (n: number) => (n === 1 ? "1 conferma in attesa" : `${n} conferme in attesa`),
     unread: (n: number) => `${n} da leggere`,
     fetching: "Sto cercando",
+    /** The tools an answer used, as the notch shows them. */
+    tools: {
+      web: "Ricerca web",
+      memory: "Memoria",
+      inbox: "Avviso",
+      timers: "Timer",
+      tasks: "Attività",
+      code: "Codice",
+      board: "Yoru",
+    } as Record<string, string>,
     micAsk: "Non ti sento ancora: fammi usare il microfono.",
     micDenied: "Non ti sento: in Impostazioni di Sistema il microfono è spento per Yoru.",
     micAllow: "Consenti il microfono",
