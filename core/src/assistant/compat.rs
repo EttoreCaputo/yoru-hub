@@ -133,7 +133,11 @@ then load the ones you'll call with load_tools; the ones already loaded are in y
     };
     let web = if web {
         "You can search the web, news included, with tavily__tavily_search: it is always loaded, call it directly. \
-For several topics call it once per topic in the same turn: the searches run at the same time."
+For several topics call it once per topic in the same turn: the searches run at the same time. For the news use topic \"news\" and a plain query \
+(\"main news Italy and world\"), with time_range \"day\" for today's. \
+Current facts (news, weather, prices, scores, events) come only from a search made for this question, never from an earlier answer or what you know: asked again, search again. \
+After a search, answer with what the results say: the specific facts (who, what, where, numbers); for the news the three or four main stories, a short line each. \
+Never add anything the results don't say. If they are thin or off the point, say so or search again with a better query."
     } else {
         "You can't search the web: if a question needs it, say so."
     };
@@ -146,7 +150,7 @@ For several topics call it once per topic in the same turn: the searches run at 
 - Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
 - {memory}
 - Always reply in the language the context line names (reply in: ...), even when the user speaks another one; without one, in the user's. Channel voice: one to three plain sentences a text-to-speech voice reads well: no markdown, lists, emoji, URLs, symbols or special characters; units and abbreviations written as they are said. Channel text: short Markdown is fine.
-- Never servile; don't end with offers of help.
+- Never servile; don't end with offers of help or questions to keep the chat going, and no small talk the user didn't start.
 
 # Who you are
 {character}

@@ -1376,12 +1376,26 @@ const BOARD_SERVICE: &str = "Yoru's board";
 /// A web search asked the quick way: Tavily's basic depth answers in about
 /// a second where advanced takes three or four, and a few results without
 /// the pages' full text are all a spoken answer needs.
+/// A question about the news searched as one: Tavily's general search for
+/// "notizie 14 novembre 2026" answered with a news site's tag page, and the
+/// answer had nothing in it. Topic `news` finds articles; today's when the
+/// query says today, else the week's.
 fn lean_search(input: &Value) -> Value {
     let mut lean = input.clone();
     if let Some(o) = lean.as_object_mut() {
         o.insert("search_depth".into(), json!("basic"));
-        let wanted = o.get("max_results").and_then(Value::as_u64).unwrap_or(SEARCH_RESULTS);
-        o.insert("max_results".into(), json!(wanted.min(SEARCH_RESULTS)));
+        let query = o.get("query").and_then(Value::as_str).unwrap_or_default().to_lowercase();
+        let news = o.get("topic").and_then(Value::as_str) == Some("news") || NEWS_WORDS.iter().any(|w| query.contains(w));
+        if news {
+            o.insert("topic".into(), json!("news"));
+            if !o.contains_key("time_range") && !o.contains_key("days") {
+                let today = TODAY_WORDS.iter().any(|w| query.contains(w));
+                o.insert("time_range".into(), json!(if today { "day" } else { "week" }));
+            }
+        }
+        let most = if news { NEWS_RESULTS } else { SEARCH_RESULTS };
+        let wanted = o.get("max_results").and_then(Value::as_u64).unwrap_or(most);
+        o.insert("max_results".into(), json!(wanted.min(most)));
         o.insert("include_raw_content".into(), json!(false));
         o.insert("include_images".into(), json!(false));
     }
@@ -1389,6 +1403,10 @@ fn lean_search(input: &Value) -> Value {
 }
 
 const SEARCH_RESULTS: u64 = 4;
+/// "What's new today" covers several stories, a result each.
+const NEWS_RESULTS: u64 = 6;
+const NEWS_WORDS: [&str; 8] = ["notizie", "news", "novità", "novita", "ultime", "headlines", "titoli", "giornale"];
+const TODAY_WORDS: [&str; 6] = ["oggi", "today", "stamattina", "stasera", "this morning", "tonight"];
 
 /// The board's tools beyond [`BOARD_ESSENTIALS`], shaped as a service's so
 /// tool search, `find_tools` and `load_tools` reach them. They still run on
@@ -1507,6 +1525,21 @@ mod tests {
 
     /// Held by the tests that set the API's environment variables.
     pub(super) static ENV: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn a_news_question_searches_the_news() {
+        let today = lean_search(&json!({"query": "ultime notizie oggi italia", "max_results": 10}));
+        assert_eq!(today["topic"], "news");
+        assert_eq!(today["time_range"], "day");
+        assert_eq!(today["max_results"], NEWS_RESULTS);
+        let dated = lean_search(&json!({"query": "notizie 14 novembre 2026"}));
+        assert_eq!(dated["time_range"], "week");
+        let ranged = lean_search(&json!({"query": "x", "topic": "news", "time_range": "month"}));
+        assert_eq!(ranged["time_range"], "month");
+        let plain = lean_search(&json!({"query": "how tall is the Eiffel tower"}));
+        assert!(plain.get("topic").is_none() && plain.get("time_range").is_none());
+        assert_eq!(plain["max_results"], SEARCH_RESULTS);
+    }
 
     /// The face tag, split across deltas, is taken out and told once.
     #[test]
