@@ -176,7 +176,7 @@ fn deliver_notification(config: &BridgeConfig, stop: &AtomicBool, targets: &Targ
     }
     let args = notification_args(n, urgency);
     for link in &boards {
-        // Firmware before 0.10.0 doesn't have the inbox.
+        // A board that doesn't answer misses it; the app's inbox has it.
         let _ = link.call_tool("show_notification", args.clone(), super::TOOL_TIMEOUT);
     }
     if urgency == Urgency::Urgent {

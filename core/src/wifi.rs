@@ -40,9 +40,7 @@ pub struct Paired {
     pub id: String,
     /// The pairing key, hex.
     pub key: String,
-    /// Which kind of board it is: its service and handshake. Files from
-    /// before there were kinds were taken as the only board this host drives, Yoru.
-    #[serde(default)]
+    /// Which kind of board it is: its service and handshake.
     pub kind: BoardKind,
     /// The network it was set up on, for the app to show.
     #[serde(default)]
@@ -480,14 +478,6 @@ mod tests {
         let err = connect(addr, &[4; 32], None, BoardKind::Yoru.profile()).err().unwrap();
         board.join().unwrap();
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
-    }
-
-    #[test]
-    fn paired_files_without_a_kind_are_yorus() {
-        let old: Paired = serde_json::from_value(json!({"id": "a1b2c3d4e5f6", "key": "00"})).unwrap();
-        assert_eq!(old.kind, BoardKind::Yoru);
-        let yoru: Paired = serde_json::from_value(json!({"id": "a1b2c3d4e5f6", "key": "00", "kind": "yoru"})).unwrap();
-        assert_eq!(yoru.kind, BoardKind::Yoru);
     }
 
     #[test]

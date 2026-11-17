@@ -18,8 +18,6 @@ export type { Messages };
 const DICTS: Record<Lang, Messages> = { en, it };
 /** The last choice, so the first frame is already in it; the app's settings keep the real one. */
 const CACHE_KEY = "yoru.lang";
-/** Where it was kept before the app was Yoru: read once, so the choice carries over. */
-const OLD_CACHE_KEY = "companion.lang";
 
 const isLang = (id: unknown): id is Lang => typeof id === "string" && id in DICTS;
 
@@ -34,7 +32,7 @@ function systemLang(): Lang {
 
 function cached(): Lang | null {
   try {
-    const id = localStorage.getItem(CACHE_KEY) ?? localStorage.getItem(OLD_CACHE_KEY);
+    const id = localStorage.getItem(CACHE_KEY);
     return isLang(id) ? id : null;
   } catch {
     return null;
@@ -67,7 +65,6 @@ class I18n {
     try {
       if (this.choice) localStorage.setItem(CACHE_KEY, this.choice);
       else localStorage.removeItem(CACHE_KEY);
-      localStorage.removeItem(OLD_CACHE_KEY);
     } catch {}
   }
 

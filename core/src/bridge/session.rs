@@ -1,8 +1,7 @@
 //! One board's connection: the link and its reader, the protocol v2
 //! handshake (again after a reboot), the voice pipeline, the pointer for its
 //! eyes, each snapshot the sampler publishes, and the timers and tasks
-//! lists of the menu's apps whenever they change (firmware 0.11.0, tasks
-//! since 0.16.0).
+//! lists of the menu's apps whenever they change.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,8 +26,8 @@ use super::{BridgeConfig, BridgeEvent, EventSink, TOOL_TIMEOUT};
 
 /// How long each `hello` of the handshake waits; the handshake repeats it every interval.
 const HELLO_TIMEOUT: Duration = Duration::from_millis(500);
-/// Unanswered `hello`s before also asking the protocol 1 way.
-const LEGACY_QUERY_AFTER: u32 = 3;
+/// Unanswered `hello`s before asking only every [`HELLO_BACKOFF`].
+const BACKOFF_AFTER: u32 = 6;
 /// Once a board has gone that long without answering, ask only this often.
 const HELLO_BACKOFF: Duration = Duration::from_secs(5);
 /// The longest the loop waits for a snapshot before looking after the link again.
@@ -39,8 +38,8 @@ const WAKE: Duration = Duration::from_millis(200);
 struct Heard {
     /// The board announced a reboot: handshake and push settings again.
     rebooted: AtomicBool,
-    /// What a board that doesn't speak protocol v2 printed about itself.
-    old_firmware: Mutex<Option<BoardFirmware>>,
+    /// The ROM printed that the flash holds no app.
+    missing_app: AtomicBool,
 }
 
 /// Run a session with the board on `port` until it goes away, or `stop` or
@@ -99,10 +98,8 @@ pub(super) fn run(
         Link::open(port, move |event| match event {
             LinkEvent::Log(line) => sink(BridgeEvent::BoardLog { line }),
             LinkEvent::Text(line) => {
-                let old = firmware::parse_version_line(&line)
-                    .or_else(|| firmware::is_missing_app_log(&line).then_some(BoardFirmware::Missing));
-                if old.is_some() {
-                    *heard.old_firmware.lock().unwrap() = old;
+                if firmware::is_missing_app_log(&line) {
+                    heard.missing_app.store(true, Ordering::Relaxed);
                 }
                 sink(BridgeEvent::BoardLog { line });
             }
@@ -255,7 +252,7 @@ pub(super) fn run(
                         hub.attach(link.clone(), hello.clone(), port, say_fn(&link, &speaker, config), hub_changed_settings.clone());
                     }
                     targets.set(info.number, AlertTarget { id: hello.id.clone(), link: Arc::downgrade(&link), kind, speaker: speaker.clone(), voice_state: voice_state.clone() });
-                    report(BoardFirmware::Version { kind, version: hello.firmware.clone(), idf: hello.idf.clone(), protocol: hello.protocol });
+                    report(BoardFirmware::Version { kind, version: hello.firmware.clone(), idf: hello.idf.clone() });
                     // The voice asks the board for its tools while it streams the
                     // audio, too busy to answer in time, and falls back on the
                     // list kept on disk: keep it this firmware's.
@@ -272,16 +269,13 @@ pub(super) fn run(
                 Err(CallError::Closed) => return Err(closed(&link)),
                 Err(_) => {
                     unanswered += 1;
-                    if unanswered == LEGACY_QUERY_AFTER {
-                        link.send_raw(firmware::VERSION_QUERY.as_bytes())?;
-                    }
-                    if unanswered > 2 * LEGACY_QUERY_AFTER {
+                    if unanswered > BACKOFF_AFTER {
                         next_hello = Instant::now() + HELLO_BACKOFF;
                     }
                 }
             }
-            if let Some(old) = heard.old_firmware.lock().unwrap().take().filter(|_| !ready) {
-                report(old);
+            if heard.missing_app.swap(false, Ordering::Relaxed) && !ready {
+                report(BoardFirmware::Missing);
             }
         }
 
@@ -316,7 +310,7 @@ struct Lists {
     /// were last looked at: they're read from the settings and the memory.
     cloud: Option<Sent<String>>,
     cloud_checked: Option<Instant>,
-    /// The meeting's revision (firmware 0.20.15).
+    /// The meeting's revision.
     meeting: Option<Sent<u64>>,
 }
 
@@ -398,13 +392,10 @@ fn resend_inbox(link: &Link, assistant: &crate::Assistant) {
     }
 }
 
-/// The board's `notification_action`: read, dismissed, judged, opened, or one of its buttons.
+/// The board's `notification_action`: read, judged, opened, or one of its buttons.
 fn on_notification_action(assistant: &crate::Assistant, params: &serde_json::Value, sink: &EventSink) {
     let (Some(id), Some(action)) = (params["id"].as_str(), params["action"].as_str()) else { return };
     match action {
-        "dismiss" => {
-            assistant.inbox.dismiss(id);
-        }
         "read" => {
             assistant.inbox.mark_read(id);
         }

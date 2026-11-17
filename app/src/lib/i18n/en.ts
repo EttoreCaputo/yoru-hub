@@ -517,7 +517,6 @@ const en = {
     playAll: "Play all",
     stopAll: "Stop playing all",
     loops: "Loops",
-    oldFirmware: "This board's firmware doesn't list its animations: it needs 0.20.9 or later. Update it in Settings.",
     offline: "Yoru isn't connected",
     offlineHint: "Plug Yoru in or reach it over WiFi: its animations show up here.",
     empty: "No animations",

@@ -278,12 +278,9 @@ pub fn default_dump_dir() -> Option<PathBuf> {
 
 const STATE_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// What the eyes show next. `error` needs firmware 1.0; an older board
-/// just goes back to idle.
+/// What the eyes show next.
 fn set_state(link: &Link, state: &str) {
-    if link.call("voice/state", json!({"state": state}), STATE_TIMEOUT).is_err() && state != "idle" {
-        let _ = link.call("voice/state", json!({"state": "idle"}), STATE_TIMEOUT);
-    }
+    let _ = link.call("voice/state", json!({"state": state}), STATE_TIMEOUT);
 }
 
 /// The board drops a `thinking` nobody renews within 30 s (a host that went
@@ -1206,7 +1203,7 @@ fn visible(raw: &str, done: bool) -> String {
 }
 
 /// How long the board listens after an answer, and how long a pause ends
-/// what's said then (`voice/listen`, firmware 0.11.6).
+/// what's said then (`voice/listen`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Window {
     wait_ms: u32,
@@ -1773,7 +1770,6 @@ pub(crate) fn turns(config: &Mutex<VoiceConfig>, link: &std::sync::OnceLock<Weak
             match job {
             TurnJob::Start(id) => {
                 if let Err(e) = link.call("voice/pause", json!({"id": id, "pause_ms": TURN_FALLBACK_MS}), STATE_TIMEOUT) {
-                    // A board before 0.11.7: its own pause ends the utterance.
                     sink(BridgeEvent::BoardLog { line: format!("host: Smart Turn can't hold the pause: {e}") });
                 }
             }

@@ -8,7 +8,7 @@
 //! or by voice (the `tasks` tool, [`Tasks::call_tool`]). The scheduler
 //! ([`super::watchers::run_scheduler`]) runs the due ones with [`run`], and
 //! the ones the board asked for ("Do it now", `task_run`). The board's Tasks
-//! app shows them ([`Tasks::board_list`], `set_tasks`, firmware 0.16.0).
+//! app shows them ([`Tasks::board_list`], `set_tasks`).
 //!
 //! A time missed while the computer was asleep or off is still done within
 //! [`GRACE`] of it; later than that it is counted as missed and the task

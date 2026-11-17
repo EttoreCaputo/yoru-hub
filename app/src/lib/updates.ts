@@ -6,8 +6,7 @@ import type { BoardFirmware } from "./types";
 
 export type Release = { version: string; notes: string[] };
 export type Update = {
-  /** `null` for firmware from before versioning, or none at all. */
-  from: string | null;
+  from: string;
   to: string;
   /** Newest first: every release after `from`, up to `to`. */
   changes: Release[];
@@ -41,9 +40,6 @@ const CHANGELOG = parseChangelog(BUNDLED_CHANGELOG);
 export function changelog(): Release[] {
   return CHANGELOG;
 }
-/** Firmware that can't report its version predates 0.2.0, the first that could. */
-const LEGACY = "0.1.0";
-
 /** Compare dotted versions numerically; a suffix like `-dirty` is ignored. */
 export function compareVersions(a: string, b: string): number {
   const parts = (v: string) => (/^v?(\d+(?:\.\d+)*)/.exec(v.trim())?.[1] ?? "0").split(".").map(Number);
@@ -57,9 +53,9 @@ export function compareVersions(a: string, b: string): number {
 
 /** The update to offer, if the board runs firmware older than `bundled`, its own kind's. */
 export function updateFor(board: BoardFirmware | null, bundled: string | undefined, changelog: Release[]): Update | null {
-  if (!board || !bundled || board.state === "missing") return null;
-  const from = board.state === "version" ? board.version : null;
-  if (from !== null && compareVersions(from, bundled) >= 0) return null;
-  const changes = changelog.filter((r) => compareVersions(r.version, from ?? LEGACY) > 0 && compareVersions(r.version, bundled) <= 0);
+  if (board?.state !== "version" || !bundled) return null;
+  const from = board.version;
+  if (compareVersions(from, bundled) >= 0) return null;
+  const changes = changelog.filter((r) => compareVersions(r.version, from) > 0 && compareVersions(r.version, bundled) <= 0);
   return { from, to: bundled, changes };
 }

@@ -1,7 +1,7 @@
-//! The person at the computer, for the board (firmware 1.4): the local
+//! The person at the computer, for the board: the local
 //! time, for its day and night (the screen dims at night), and how long
 //! since the last mouse or keyboard input, for "away" and "back". Sent as
-//! the snapshot's `pet` key, a name kept for compatibility with old boards.
+//! the snapshot's `host` key.
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ pub struct Presence {
     pub idle: Option<u32>,
     /// The time zone as POSIX writes it (`CET-1CEST,M3.5.0,M10.5.0/3`), so
     /// the board keeps local time, changes of time included, on its own
-    /// clock (firmware 0.13.0); absent where the system doesn't say.
+    /// clock; absent where the system doesn't say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tz: Option<String>,
 }

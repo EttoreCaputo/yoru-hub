@@ -14,8 +14,7 @@
 //! The prompt gets the core ([`Memory::core`]: who the user is, what to tell
 //! them and not) and, each turn, the facts found for what was said
 //! ([`Memory::recalled`], [`search`]). The model reads and writes it by id
-//! (`[f12]`), so a fact is changed or forgotten exactly. The old
-//! `memory.md` is imported once, as the first episode.
+//! (`[f12]`), so a fact is changed or forgotten exactly.
 
 pub mod kin;
 mod search;
@@ -219,8 +218,8 @@ fn entity_row(r: &rusqlite::Row) -> rusqlite::Result<Entity> {
 const ENTITY_COLS: &str = "id, name, kind, aliases, summary, gender, placeholder, is_user";
 
 impl Memory {
-    /// The memory in `dir` (`memory.db`, importing `memory.md` the first
-    /// time); `None`, or a file that won't open: in memory only.
+    /// The memory in `dir` (`memory.db`); `None`, or a file that won't open:
+    /// in memory only.
     pub fn open(dir: Option<&Path>) -> Self {
         let conn = dir
             .and_then(|d| {
@@ -235,28 +234,7 @@ impl Memory {
         }
         let memory = Self { db: Mutex::new(conn), embedder: Mutex::default() };
         memory.user();
-        if let Some(dir) = dir {
-            memory.import_markdown(&dir.join("memory.md"));
-        }
         memory
-    }
-
-    /// The old memory file, once: each line a fact in its section, from one
-    /// episode. The file is kept beside, renamed.
-    fn import_markdown(&self, file: &Path) {
-        let Ok(text) = fs::read_to_string(file) else { return };
-        let episode = self.add_episode("memory.md", &text);
-        let mut section = "notes";
-        for l in text.lines() {
-            if let Some(title) = l.strip_prefix("## ") {
-                section = SECTIONS.iter().find(|(_, t)| *t == title.trim()).map_or("notes", |(k, _)| *k);
-            } else if let Some(fact) = l.trim_start().strip_prefix("- ") {
-                let importance = if matches!(section, "about" | "tell" | "quiet") { 0.7 } else { 0.5 };
-                let _ = self.insert_fact(None, section, fact, importance, false, Some(episode));
-            }
-        }
-        self.mark_consolidated(episode);
-        let _ = fs::rename(file, file.with_extension("md.imported"));
     }
 
     pub fn set_embedder(&self, embedder: Option<Arc<dyn Embedder>>) {
@@ -1205,21 +1183,6 @@ fn clip(text: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn imports_the_old_file_once() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("memory.md"), "# What Yoru knows about you\n\n## About you\n\n- Lives in Rome\n\n## Notes\n\n- Likes espresso\n").unwrap();
-        let memory = Memory::open(Some(dir.path()));
-        let text = memory.text();
-        assert!(text.contains("- Lives in Rome") && text.contains("- Likes espresso"), "{text}");
-        assert!(!dir.path().join("memory.md").exists() && dir.path().join("memory.md.imported").exists());
-        drop(memory);
-        let again = Memory::open(Some(dir.path()));
-        assert_eq!(again.graph().facts.len(), 2);
-    }
-
-    /// A cloud brain reads people with a role by it, unless the message
-    /// calls them by name; a role two people share hides nothing.
     #[test]
     fn veils_names_for_a_cloud_brain() {
         let memory = Memory::open(None);

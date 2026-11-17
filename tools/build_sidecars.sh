@@ -14,7 +14,7 @@
 #
 #   - macOS Apple silicon: Metal, with its shaders built in.
 #   - macOS Intel, Windows, Linux: the CPU (AVX2). An NVIDIA card needs a CUDA
-#     build of llama.cpp, pointed at with COMPANION_LLAMA_SERVER.
+#     build of llama.cpp, pointed at with YORU_LLAMA_SERVER.
 #
 # Needs git, cmake and a C++ compiler (Xcode, MSVC, gcc).
 

@@ -1,16 +1,12 @@
 //! The snapshot, the payload of a protocol v2 `metrics` frame, parsed by
 //! Yoru's `main/metrics_parser.c`.
 //!
-//! Yoru shows no gauges: it reads only the computer's time and how long since
-//! the last input (`pet`, for the night brightness and the idle screen) and
-//! the timer that ends first (`timer`). Firmware 0.10.0 takes a snapshot
-//! without CPU or GPU readings, as long as it has `pet`. The key's name is
-//! kept for compatibility: old boards need it.
+//! The board reads only the computer's time and how long since the last
+//! input (`host`, for the night brightness and the idle screen).
 
 use serde::{Deserialize, Serialize};
 
 use crate::presence::Presence;
-use crate::timers::BoardTimer;
 
 /// The snapshot format's version, the `v` field.
 pub const SNAPSHOT_VERSION: u32 = 2;
@@ -19,24 +15,21 @@ pub const SNAPSHOT_VERSION: u32 = 2;
 pub struct Snapshot {
     pub v: u32,
     pub ts: u64,
-    /// The timer that ends first, set from the [`crate::Timers`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timer: Option<BoardTimer>,
     /// The time and how long since your last input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pet: Option<Presence>,
+    pub host: Option<Presence>,
 }
 
 impl Snapshot {
     /// An empty snapshot taken now.
     pub fn now() -> Self {
         let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        Self { v: SNAPSHOT_VERSION, ts, timer: None, pet: None }
+        Self { v: SNAPSHOT_VERSION, ts, host: None }
     }
 
     /// The firmware drops snapshots without the computer's time.
     pub fn is_sendable(&self) -> bool {
-        self.pet.is_some()
+        self.host.is_some()
     }
 
     /// The `metrics` frame payload.
@@ -55,8 +48,8 @@ mod tests {
         snap.ts = 5;
         assert!(!snap.is_sendable());
         assert_eq!(String::from_utf8(snap.to_payload()).unwrap(), "{\"v\":2,\"ts\":5}");
-        snap.pet = Some(Presence { min: 600, idle: Some(3), tz: None });
+        snap.host = Some(Presence { min: 600, idle: Some(3), tz: None });
         assert!(snap.is_sendable());
-        assert_eq!(String::from_utf8(snap.to_payload()).unwrap(), "{\"v\":2,\"ts\":5,\"pet\":{\"min\":600,\"idle\":3}}");
+        assert_eq!(String::from_utf8(snap.to_payload()).unwrap(), "{\"v\":2,\"ts\":5,\"host\":{\"min\":600,\"idle\":3}}");
     }
 }

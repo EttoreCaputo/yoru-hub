@@ -64,7 +64,7 @@ const WATCH: Duration = Duration::from_secs(10);
 pub fn serve_stdio(port: Option<String>) -> io::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async {
-        let server = CompanionMcp::new(Board::new(port, &format!("yoru-mcp/{}", env!("CARGO_PKG_VERSION"))), crate::paths::data_dir());
+        let server = YoruMcp::new(Board::new(port, &format!("yoru-mcp/{}", env!("CARGO_PKG_VERSION"))), crate::paths::data_dir());
         // The instructions name the board: learn its kind before the client asks.
         let probe = server.clone();
         let _ = tokio::task::spawn_blocking(move || probe.refresh_kind()).await;
@@ -77,7 +77,7 @@ pub fn serve_stdio(port: Option<String>) -> io::Result<()> {
 }
 
 #[derive(Clone)]
-pub struct CompanionMcp {
+pub struct YoruMcp {
     inner: Arc<Inner>,
 }
 
@@ -94,7 +94,7 @@ struct Inner {
     boards: Mutex<Vec<BoardInfo>>,
 }
 
-impl CompanionMcp {
+impl YoruMcp {
     pub fn new(board: Board, cache_dir: Option<PathBuf>) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -372,7 +372,7 @@ fn text_result(text: &str, is_error: bool) -> CallToolResult {
     if is_error { CallToolResult::error(vec![ContentBlock::text(text)]) } else { CallToolResult::success(vec![ContentBlock::text(text)]) }
 }
 
-impl ServerHandler for CompanionMcp {
+impl ServerHandler for YoruMcp {
     fn get_info(&self) -> ServerConfig {
         let mut info = Implementation::new("yoru", env!("CARGO_PKG_VERSION"));
         info.title = Some("Yoru".into());
@@ -399,7 +399,7 @@ impl ServerHandler for CompanionMcp {
 }
 
 /// Tell the client when the board's tools turn up after it listed them without.
-async fn watch_tools(server: CompanionMcp, peer: Peer<RoleServer>) {
+async fn watch_tools(server: YoruMcp, peer: Peer<RoleServer>) {
     loop {
         tokio::time::sleep(WATCH).await;
         let listed = server.inner.listed.lock().unwrap().clone();
@@ -462,7 +462,7 @@ mod tests {
         fs::write(link::tools_cache_in(dir.path(), BoardKind::Yoru), tools.to_string()).unwrap();
         // A port that isn't there, and no hub: the board can't be reached.
         let board = Board::with_hub_file(Some("/dev/does-not-exist".into()), "test", None);
-        let server = CompanionMcp::new(board, Some(dir.path().to_path_buf()));
+        let server = YoruMcp::new(board, Some(dir.path().to_path_buf()));
         let (listed, live) = server.board_tools();
         assert!(!live);
         assert_eq!(listed[0].name, "react");
@@ -473,7 +473,7 @@ mod tests {
     fn the_newest_kept_tools_name_the_board() {
         let dir = tempfile::tempdir().unwrap();
         let board = Board::with_hub_file(Some("/dev/does-not-exist".into()), "test", None);
-        let server = CompanionMcp::new(board, Some(dir.path().to_path_buf()));
+        let server = YoruMcp::new(board, Some(dir.path().to_path_buf()));
         assert!(server.instructions().starts_with(ABOUT_ANY_BOARD));
         let react = json!([{"name": "react", "description": "React", "inputSchema": {"type": "object"}}]);
         fs::write(link::tools_cache_in(dir.path(), BoardKind::Yoru), react.to_string()).unwrap();
@@ -488,7 +488,7 @@ mod tests {
         let tools = json!([tool("react"), tool("show_approval"), tool("hide_approval")]);
         fs::write(link::tools_cache_in(dir.path(), BoardKind::Yoru), tools.to_string()).unwrap();
         let board = Board::with_hub_file(Some("/dev/does-not-exist".into()), "test", None);
-        let server = CompanionMcp::new(board, Some(dir.path().to_path_buf()));
+        let server = YoruMcp::new(board, Some(dir.path().to_path_buf()));
         let names: Vec<String> = server.all_tools().iter().map(|t| t.name.to_string()).collect();
         assert!(names.contains(&"react".to_string()));
         assert!(!names.iter().any(|n| BoardKind::hub_only(n)), "{names:?}");

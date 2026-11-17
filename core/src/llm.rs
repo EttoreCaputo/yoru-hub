@@ -87,10 +87,10 @@ pub fn local_fallback() -> Option<LocalLlm> {
     Some(LocalLlm { server, model: model.path()?, gpu_layers: None })
 }
 
-/// `llama-server`: `COMPANION_LLAMA_SERVER`, the one the app ships, or one on
+/// `llama-server`: `YORU_LLAMA_SERVER`, the one the app ships, or one on
 /// the PATH (see [`crate::sidecar::find_program`]).
 pub fn find_server() -> Option<PathBuf> {
-    crate::sidecar::find_program("llama-server", "COMPANION_LLAMA_SERVER")
+    crate::sidecar::find_program("llama-server", "YORU_LLAMA_SERVER")
 }
 
 /// The devices `server` can run a model on besides the processor, as it

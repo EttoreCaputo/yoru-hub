@@ -22,11 +22,10 @@ pub struct ExternalTool {
 }
 
 /// A tool call while the model answers: the board shows it as Yoru's errand
-/// (`show_fetch`, firmware 0.11.0). `state` is `start`, `done` or `failed`;
-/// the same `id` starts and ends it. `kind` (firmware 0.20.9) is how Yoru
-/// shows it: `fetch` (through a portal), `send` (a service that acts),
-/// `search` (the web), `remember` / `forget` (its memory) or `note` (a task,
-/// a timer, a notification). An older board shows them all as `fetch`.
+/// (`show_fetch`). `state` is `start`, `done` or `failed`; the same `id`
+/// starts and ends it. `kind` is how Yoru shows it: `fetch` (through a
+/// portal), `send` (a service that acts), `search` (the web), `remember` /
+/// `forget` (its memory) or `note` (a task, a timer, a notification).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Errand {
     pub id: String,

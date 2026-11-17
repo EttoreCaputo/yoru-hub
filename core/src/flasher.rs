@@ -21,7 +21,7 @@ pub const MERGED_OFFSET: &str = "0x0";
 const CHIP: &str = "esp32s3";
 const FLASH_BAUD: &str = "460800";
 /// Written into the virtualenv once esptool is installed in it.
-pub(crate) const READY_MARKER: &str = ".companion-ready";
+pub(crate) const READY_MARKER: &str = ".yoru-ready";
 
 #[cfg(feature = "provision")]
 pub mod setup;

@@ -69,6 +69,6 @@ pub use serial::PortInfo;
 pub use sidecar::keep_warm;
 pub use snapshot::Snapshot;
 pub use stt::{Stt, SttConfig, SttLanguage, Transcript};
-pub use timers::{BoardTimer, ShowOn, TimerInfo, Timers};
+pub use timers::{TimerInfo, Timers};
 pub use tts::{Tts, TtsConfig};
 pub use voice::{Speaker, Spoken, Utterance, VoiceConfig};

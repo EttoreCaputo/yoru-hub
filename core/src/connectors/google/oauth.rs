@@ -55,8 +55,7 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// Read the stored tokens; anything else in the account (rmcp's credentials
-/// from before) counts as none.
+/// Read the stored tokens; anything else in the account counts as none.
 pub(crate) fn load(secrets: &dyn SecretStore, id: &str) -> Result<Option<Tokens>, ConnectorError> {
     Ok(secrets.get(&store::credentials_account(id))?.and_then(|json| serde_json::from_str(&json).ok()))
 }

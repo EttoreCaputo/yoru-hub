@@ -1,7 +1,7 @@
 //! The notifications Yoru gives you: what a watcher found worth telling, the
 //! morning recap, a reminder the assistant set, what an MCP client posted. Kept
 //! in `inbox.json` in the data folder (the newest 200), shown in the app's
-//! Inbox and on the board's inbox (firmware 0.10.0, `show_notification`).
+//! Inbox and on the board's inbox (`show_notification`).
 //!
 //! The inbox only keeps them and says when they change; the bridge delivers
 //! each new one to the board ([`crate::bridge`]), by its [`Urgency`].

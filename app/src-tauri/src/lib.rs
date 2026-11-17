@@ -18,9 +18,6 @@
 //! up by itself on first use (Python + virtualenv in its data folder); the
 //! session on that port is paused meanwhile so esptool can own it.
 //!
-//! At start it takes out of Claude Code's settings the hooks and the status
-//! line older versions installed (`yoru_core::claude::cleanup`).
-//!
 //! Voice (opt-in): what the board hears after its wake word is transcribed
 //! by a whisper.cpp `whisper-server` sidecar (or a cloud model), answered by
 //! the assistant (or, without an Anthropic key, a local language model) and
@@ -46,7 +43,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use yoru_core::intent::IntentModel;
 use yoru_core::turn::SmartTurn;
-use yoru_core::claude::{cleanup, mcpconfig};
+use yoru_core::claude::mcpconfig;
 use yoru_core::flasher::setup;
 use yoru_core::hardware::{self, Hardware, Recommendation};
 use yoru_core::cloud::elevenlabs::{self, AccountVoice};
@@ -58,7 +55,7 @@ use yoru_core::pointer;
 use yoru_core::spoken;
 use yoru_core::stt::{self, Stt, SttConfig, SttEngine, SttLanguage, Transcript};
 use yoru_core::tts::{self, Engine, Tts, TtsConfig};
-use yoru_core::timers::{self, Pomodoro, ShowOn, TimerInfo, Timers};
+use yoru_core::timers::{self, Pomodoro, TimerInfo, Timers};
 use yoru_core::voice::{self, Spoken, VoiceConfig};
 use yoru_core::assistant::watchers::Watchers;
 use yoru_core::assistant::{self as assistant_mod, Assistant, Confirmation, Confirmations};
@@ -107,9 +104,8 @@ struct Settings {
     /// The app's language (`en`, `it`); `None` follows the system's.
     #[serde(default)]
     ui_language: Option<String>,
-    /// The first-run setup is behind us: done, skipped, or not needed. A
-    /// settings file from before it existed is someone upgrading, who skips it.
-    #[serde(default = "yes")]
+    /// The first-run setup is behind us: done, skipped, or not needed.
+    #[serde(default)]
     onboarding_done: bool,
     /// The last version of the tour seen (or declined): a newer one offers its new steps.
     #[serde(default)]
@@ -117,10 +113,6 @@ struct Settings {
     /// Yoru in the Mac's notch too (docs/notch.md).
     #[serde(default)]
     notch: bool,
-}
-
-fn yes() -> bool {
-    true
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -611,8 +603,6 @@ fn tts_config(settings: &VoiceSettings) -> Result<TtsConfig, String> {
     let voices: BTreeMap<String, String> = settings
         .voices
         .iter()
-        // A voice that's no longer offered (Kokoro's): the language's default.
-        .map(|(l, id)| (l, if Model::by_id(id).is_some() || CloudRef::by_id(id).is_some() { id.as_str() } else { models::default_voice(l).unwrap_or(id) }))
         .filter(|(_, id)| Model::by_id(id).is_some_and(|m| m.kind == Kind::Voice && m.is_installed()) || CloudRef::by_id(id).is_some_and(|r| r.model.kind == Kind::Voice))
         .map(|(l, id)| (l.clone(), id.to_string()))
         .collect();
@@ -631,8 +621,7 @@ fn llm_config(settings: &VoiceSettings) -> Result<LlmConfig, String> {
         return cloud::Client::new(&settings.llm_model, Kind::Llm).map(LlmConfig::Cloud);
     }
     let server = llm::find_server().ok_or("llama-server not found: reinstall the app, or install llama.cpp (brew install llama.cpp on macOS)")?;
-    // A model that's no longer offered (qwen3-4b-2507): the default.
-    let model = Model::by_id(&settings.llm_model).or_else(|| Model::by_id(models::DEFAULT_LLM)).filter(|m| m.kind == Kind::Llm).ok_or_else(|| format!("unknown language model {}", settings.llm_model))?;
+    let model = Model::by_id(&settings.llm_model).filter(|m| m.kind == Kind::Llm).ok_or_else(|| format!("unknown language model {}", settings.llm_model))?;
     if !model.is_installed() {
         return Err(format!("the {} model isn't downloaded yet", model.id));
     }
@@ -1049,16 +1038,11 @@ async fn yoru_react(state: State<'_, AppState>, board: Option<String>, name: Str
 /// JSON-RPC rather than MCP tools (Yoru's `docs/protocol.md`).
 const CLIP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Send `method` to `board` and hand back its result. Firmware before 0.20.9
-/// doesn't know the clip hooks: that comes back as `old_firmware`, for the
-/// page to say so in words.
+/// Send `method` to `board` and hand back its result.
 async fn board_rpc(state: State<'_, AppState>, board: Option<String>, method: &'static str, params: serde_json::Value) -> Result<serde_json::Value, String> {
     let board = state.board(board);
     tauri::async_runtime::spawn_blocking(move || {
-        board.session(|call| call(method, params, CLIP_TIMEOUT)).map_err(|e| match e {
-            yoru_core::CallError::Rpc { code: -32601, .. } => "old_firmware".to_string(),
-            e => e.to_string(),
-        })
+        board.session(|call| call(method, params, CLIP_TIMEOUT)).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1617,19 +1601,18 @@ fn confirm(state: State<AppState>, id: String, allow: bool) -> bool {
     state.confirmations.answer(&id, allow)
 }
 
-/// The Timers tab: what's running and where it shows.
+/// The Timers tab: what's running.
 #[derive(Serialize)]
 struct TimersInfo {
     timers: Vec<TimerInfo>,
     pomodoro: Option<Pomodoro>,
-    show_on: ShowOn,
     /// The bridge says what a timer was for when it's up.
     can_speak: bool,
 }
 
 fn timers_info_of(state: &AppState) -> TimersInfo {
     let t = &state.timers;
-    TimersInfo { timers: t.list(), pomodoro: t.pomodoro(), show_on: t.show_on(), can_speak: state.voice.lock().unwrap().tts.is_some() }
+    TimersInfo { timers: t.list(), pomodoro: t.pomodoro(), can_speak: state.voice.lock().unwrap().tts.is_some() }
 }
 
 #[tauri::command]
@@ -1643,12 +1626,6 @@ fn timer_tool(state: State<AppState>, name: String, arguments: serde_json::Value
     let language = app_language(&state);
     state.timers.call_tool(&name, &arguments, &language).ok_or_else(|| format!("unknown timer tool {name}"))??;
     Ok(timers_info_of(&state))
-}
-
-#[tauri::command]
-fn set_timer_screen(state: State<AppState>, show_on: ShowOn) -> TimersInfo {
-    state.timers.set_show_on(show_on);
-    timers_info_of(&state)
 }
 
 /// Silence whatever rings.
@@ -1872,18 +1849,6 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Older versions put a hook and a status line in Claude Code's settings,
-/// with flags this binary no longer has: take them out, once.
-fn remove_claude_code_hooks() {
-    match cleanup::remove_legacy() {
-        Ok(removed) if removed.hooks > 0 || removed.status_line => {
-            eprintln!("Claude Code: removed Yoru's old hooks ({}) and status line ({})", removed.hooks, removed.status_line)
-        }
-        Ok(_) => {}
-        Err(e) => eprintln!("Claude Code: couldn't remove Yoru's old hooks and status line: {e}"),
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     yoru_core::hostlog::log_panics();
@@ -1900,7 +1865,6 @@ pub fn run() {
         .setup(|app| {
             // We hold the single instance now; older copies must let go of the port.
             instances::stop_strays();
-            remove_claude_code_hooks();
             check_hardware();
             if let Some(me) = instances::SelfBinary::capture(app.handle()) {
                 app.manage(me);
@@ -2007,7 +1971,7 @@ pub fn run() {
             meetings::meeting_settings, meetings::set_meeting_settings, meetings::meeting_model, meetings::meeting_model_download, meetings::meeting_import,
             board_voice, set_board_volume, set_board_wake_sound, play_board_sound, test_voice,
             yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu, yoru_clips, yoru_play_clip, yoru_stop_clip,
-            timers_info, timer_tool, set_timer_screen, dismiss_timers,
+            timers_info, timer_tool, dismiss_timers,
             set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze,
             assistant::assistant_info, assistant::coding_active, assistant::coding_stop, assistant::ollama_models, assistant::set_assistant_settings, assistant::set_do_not_disturb, assistant::ask, assistant::chat, assistant::forget_conversation,
             assistant::inbox, assistant::inbox_read, assistant::inbox_read_all, assistant::inbox_dismiss, assistant::inbox_clear, assistant::open_notification, assistant::open_web,
@@ -2104,15 +2068,6 @@ mod tests {
         devices.record(&event(Some("/dev/b"), Some("bb"), gone()));
         assert!(devices.current(None).is_none());
         assert_eq!((devices.host.kind, devices.host.message.as_deref()), ("offline", Some("unplugged")));
-    }
-
-    /// A new install gets the setup; someone upgrading (a settings file without the field) doesn't.
-    #[test]
-    fn only_new_installs_get_the_setup() {
-        assert!(!Settings::default().onboarding_done);
-        let old: Settings = serde_json::from_str(r#"{"port":null}"#).unwrap();
-        assert!(old.onboarding_done);
-        assert_eq!(old.tour_version, 0);
     }
 }
 

@@ -1,5 +1,5 @@
-//! What the board talks to when the computer isn't there (firmware 0.14.0,
-//! the `cloud` capability, `cloud/set` in the firmware's `docs/protocol.md`):
+//! What the board talks to when the computer isn't there (the
+//! `cloud` capability, `cloud/set` in the firmware's `docs/protocol.md`):
 //! the same online services the voice uses here, with their keys, so Yoru
 //! transcribes, thinks and speaks on its own over WiFi.
 //!

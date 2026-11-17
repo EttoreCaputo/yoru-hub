@@ -192,11 +192,10 @@ export type Confirmation = {
 
 export type TimerKind = "timer" | "work" | "break" | "reminder";
 export type TimerInfo = { id: number; kind: TimerKind; label?: string; total_s: number; left_s: number; state: "run" | "pause" | "ring"; ends_at?: string };
-export type TimersInfo = { timers: TimerInfo[]; pomodoro: unknown; show_on: string; can_speak: boolean };
+export type TimersInfo = { timers: TimerInfo[]; pomodoro: unknown; can_speak: boolean };
 
 export type BoardFirmware =
-  | { state: "version"; kind: "yoru"; version: string; idf: string | null; protocol: number }
-  | { state: "legacy" }
+  | { state: "version"; kind: "yoru"; version: string; idf: string | null }
   | { state: "missing" };
 
 /** `starting` only in the notch: the Mac's microphone is still opening. */

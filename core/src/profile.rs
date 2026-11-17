@@ -31,8 +31,6 @@ pub struct BoardProfile {
     pub proof_labels: (&'static str, &'static str),
     /// Labels of the WiFi session keys, host-to-board then board-to-host.
     pub key_labels: (&'static str, &'static str),
-    /// The key of the version line firmware before protocol v2 prints, if it ever had one.
-    pub legacy_version_key: Option<&'static str>,
     /// Its folder under `firmware/` and its file names on this computer.
     pub slug: &'static str,
     /// The ESP-IDF project its firmware is built as: the `project` in a
@@ -60,7 +58,6 @@ const YORU: BoardProfile = BoardProfile {
     mdns_service: "_yoru._tcp.local.",
     proof_labels: ("yoru host", "yoru board"),
     key_labels: ("yoru h2b", "yoru b2h"),
-    legacy_version_key: None,
     slug: "yoru",
     image_project: "yoru",
     scene_tool: "react",

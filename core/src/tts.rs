@@ -43,7 +43,7 @@ use crate::voice::SAMPLE_RATE;
 /// What [`install`] puts in Piper's virtualenv.
 pub const PIPER_REQUIREMENT: &str = "piper-tts[http]==1.8.0";
 /// Written into the virtualenv once the engine is installed in it.
-const READY_MARKER: &str = ".companion-ready";
+const READY_MARKER: &str = ".yoru-ready";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a cloud voice that failed is left to its fallback before it's
@@ -89,10 +89,10 @@ impl Engine {
         crate::paths::data_dir().map(|d| d.join(self.key()))
     }
 
-    /// The virtualenv's interpreter: `COMPANION_PIPER_PYTHON`, or the one
+    /// The virtualenv's interpreter: `YORU_PIPER_PYTHON`, or the one
     /// [`install`] set up.
     pub fn python(self) -> Option<PathBuf> {
-        if let Some(p) = std::env::var_os(format!("COMPANION_{}_PYTHON", self.key().to_uppercase())).map(PathBuf::from) {
+        if let Some(p) = std::env::var_os(format!("YORU_{}_PYTHON", self.key().to_uppercase())).map(PathBuf::from) {
             return p.is_file().then_some(p);
         }
         let venv = self.dir()?.join("venv");

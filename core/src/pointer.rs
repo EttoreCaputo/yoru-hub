@@ -1,4 +1,4 @@
-//! Where the mouse pointer is, for the eyes face (firmware 1.3): the board's
+//! Where the mouse pointer is, for the eyes face: the board's
 //! eyes look at it. [`gaze`] puts it on the board's scale, -1..1 across all
 //! the screens each way; the bridge sends it as `eyes/gaze` while it moves.
 //!

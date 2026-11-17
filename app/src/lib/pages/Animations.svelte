@@ -45,14 +45,12 @@
     try {
       clips = await call<BoardClip[]>("yoru_clips", { board: null });
     } catch (e) {
-      error = explain(e);
+      error = why(e);
     } finally {
       loaded = true;
     }
   }
 
-  /** Words for a failure: old firmware doesn't know the clip hooks at all. */
-  const explain = (e: unknown) => (why(e) === "old_firmware" ? t.oldFirmware : why(e));
 
   /** "wake_stretch" → "Wake stretch". */
   const readable = (name: string) => {
@@ -68,7 +66,7 @@
       await call("yoru_play_clip", { board: null, name: c.name, mirror, source: source || null });
     } catch (e) {
       current = null;
-      error = explain(e);
+      error = why(e);
       return false;
     }
     // A looping clip stays current until Stop; the others end on their own.
@@ -106,7 +104,7 @@
     try {
       await call("yoru_stop_clip", { board: null });
     } catch (e) {
-      error = explain(e);
+      error = why(e);
     }
   }
 </script>

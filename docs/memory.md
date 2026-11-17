@@ -26,7 +26,7 @@ Decided and built on 2026-11-08 (where it stands: How it works, below). Yoru's m
 - **One brain.** Everything the memory asks a language model (extracting facts, merging, consolidating) goes to Yoru's brain, the one model the user picked. No second model for the memory, no fallback model.
 - **One SQLite file**, `memory.db` in the data folder, with FTS5, written by our own small module on `rusqlite` (`core/src/assistant/memory/`). Vectors are kept as blobs and compared one by one, not with sqlite-vec: a personal memory is a few thousand facts, read in milliseconds. The Rust crates that do this (`sqlite-graphrag`, `grit-core`) are young; their ideas are taken, not their code.
 - **Embeddings with EmbeddingGemma**, the model Yoru Hub already runs on this computer for `intent.rs`.
-- **`memory.md` is imported**, as the first episode, so nothing is lost; afterwards it is no longer the memory.
+- **`memory.md` was imported** as the first episode when the graph came, so nothing was lost.
 
 ## The graph
 

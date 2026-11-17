@@ -12,7 +12,7 @@
 //!
 //! | Method | Result |
 //! |--------|--------|
-//! | `hello` `{"token","client"}` | `{"bridge", "boards": [BoardInfo], "board": Hello or null, "port"}` (`board` and `port` for older clients: the board a call without `board` would reach) |
+//! | `hello` `{"token","client"}` | `{"bridge", "boards": [BoardInfo]}` |
 //! | `host/boards` | `[BoardInfo]`: the boards attached |
 //! | `host/hello` | The `hello` of the board the request reaches |
 //! | `tools/list`, `tools/call`, `media/...`, `wifi/...`, `ota/...`, `debug/...` | Passed to the board as they are (`ota/...`: an update, see [`crate::ota`]; `debug/...`: the board's test hooks) |
@@ -97,7 +97,7 @@ pub struct HubStatus {
 /// What a client is told about an attached board.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BoardInfo {
-    /// From its `hello`; `None` before firmware that says it.
+    /// From its `hello`.
     pub id: Option<String>,
     pub kind: BoardKind,
     /// The serial port, or where it is on WiFi.
@@ -398,12 +398,7 @@ fn serve_client(stream: TcpStream, shared: &Shared) -> io::Result<()> {
 }
 
 fn hello(shared: &Shared) -> Value {
-    // Older clients know one board: the one a call without `board` reaches.
-    let (hello, port) = match shared.pick(None, None) {
-        Ok(a) => (serde_json::to_value(&a.hello).unwrap_or(Value::Null), Some(a.port.clone())),
-        Err(_) => (Value::Null, None),
-    };
-    json!({"bridge": env!("CARGO_PKG_VERSION"), "boards": shared.infos(), "board": hello, "port": port})
+    json!({"bridge": env!("CARGO_PKG_VERSION"), "boards": shared.infos()})
 }
 
 impl Shared {
@@ -474,8 +469,8 @@ fn handle(shared: &Shared, method: &str, mut params: Value) -> Result<Value, (i6
     match method {
         "tools/list" => return list_tools(shared, wanted),
         "tools/call" => {}
-        // Image uploads (firmware 1.1), writes taking a moment when the flash
-        // erases; the WiFi set-up (firmware 1.4.3), a scan taking seconds;
+        // Image uploads, writes taking a moment when the flash erases; the
+        // WiFi set-up, a scan taking seconds;
         // updates; the board's test hooks (`debug/life`, `debug/clips`...).
         m if ["media/", "wifi/", "ota/", "debug/"].iter().any(|p| m.starts_with(p)) => {}
         "host/say" => {
@@ -573,10 +568,7 @@ fn rpc_error(e: CallError) -> (i64, String) {
 #[derive(Debug, Clone, Deserialize)]
 pub struct HubHello {
     pub bridge: String,
-    pub board: Option<Hello>,
-    pub port: Option<String>,
-    /// Every board attached; empty from a hub before several boards.
-    #[serde(default)]
+    /// Every board attached.
     pub boards: Vec<BoardInfo>,
 }
 
@@ -706,22 +698,12 @@ impl Board {
     /// over the port. It says which kind of board this is.
     pub fn hello(&self) -> Result<Hello, CallError> {
         if let Some(file) = &self.file
-            && let Ok(Some((hub, hello))) = HubClient::connect(file, &self.client)
+            && let Ok(Some((mut hub, _))) = HubClient::connect(file, &self.client)
         {
-            *self.hub.lock().unwrap() = Some(hub);
             *self.route.lock().unwrap() = Some(Route::Hub);
-            if let Some(wanted) = &self.selector {
-                // The hub's `board` is its own pick: ask for the one named.
-                let found = hello.boards.iter().any(|b| b.is(wanted));
-                if !found {
-                    return Err(CallError::Unavailable(format!("no board `{wanted}` is connected")));
-                }
-                let mut slot = self.hub.lock().unwrap();
-                let hub = self.hub_client(&mut slot).ok_or(CallError::Closed)?;
-                let reply = hub.request("host/hello", self.aimed(json!({}), None));
-                return reply.and_then(|v| serde_json::from_value(v).map_err(|e| CallError::Invalid(e.to_string())));
-            }
-            return hello.board.ok_or_else(|| CallError::Unavailable("the bridge has no board right now".into()));
+            let reply = hub.request("host/hello", self.aimed(json!({}), None));
+            *self.hub.lock().unwrap() = Some(hub);
+            return reply.and_then(|v| serde_json::from_value(v).map_err(|e| CallError::Invalid(e.to_string())));
         }
         *self.route.lock().unwrap() = Some(Route::Direct);
         self.open_direct().map(|(_, hello)| hello)
@@ -738,22 +720,13 @@ impl Board {
         if let Some(boards) = self.attached() {
             return Ok(boards);
         }
-        // A hub from before several boards, or the port.
-        let hub = self.file.as_deref().and_then(|f| HubClient::connect(f, &self.client).ok().flatten());
-        let (hello, port) = match hub {
-            Some((_, hub)) => (hub.board.ok_or_else(|| CallError::Unavailable("the bridge has no board right now".into()))?, hub.port.unwrap_or_default()),
-            None => {
-                *self.route.lock().unwrap() = Some(Route::Direct);
-                let (_, hello) = self.open_direct()?;
-                (hello, self.direct_port().unwrap_or_default())
-            }
-        };
+        *self.route.lock().unwrap() = Some(Route::Direct);
+        let (_, hello) = self.open_direct()?;
         let kind = BoardKind::from_hello(&hello);
-        Ok(vec![BoardInfo { id: hello.id, kind, port, firmware: hello.firmware, primary: false }])
+        Ok(vec![BoardInfo { id: hello.id, kind, port: self.direct_port().unwrap_or_default(), firmware: hello.firmware, primary: false }])
     }
 
-    /// The boards attached to the running bridge; `None` without one, or
-    /// with a hub from before several boards. Never opens the port.
+    /// The boards attached to the running bridge; `None` without one. Never opens the port.
     pub fn attached(&self) -> Option<Vec<BoardInfo>> {
         let mut slot = self.hub.lock().unwrap();
         let hub = self.hub_client(&mut slot)?;
@@ -850,8 +823,8 @@ impl Board {
                         let text = reply["text"].as_str().unwrap_or_default().to_string();
                         return if reply["is_error"].as_bool() == Some(true) { Err(text) } else { Ok(text) };
                     }
-                    // An older hub, or one whose bridge stopped: the file then.
-                    Err(CallError::Rpc { code: METHOD_NOT_FOUND, .. } | CallError::Unavailable(_)) => {}
+                    // A hub whose bridge stopped: the file then.
+                    Err(CallError::Unavailable(_)) => {}
                     Err(CallError::Rpc { message, .. }) => return Err(message),
                     Err(_) => *slot = None,
                 }
@@ -926,7 +899,7 @@ impl Board {
         let port = self.direct_port().ok_or_else(|| CallError::Unavailable("board not found on USB".into()))?;
         let link = Link::open(&port, |_| {}).map_err(|e| CallError::Unavailable(format!("{port}: {e}")))?;
         let hello = link.handshake(Duration::from_secs(3)).map_err(|e| match e {
-            CallError::Timeout => CallError::Unavailable(format!("{port}: the board does not answer (firmware 0.4 or later needed)")),
+            CallError::Timeout => CallError::Unavailable(format!("{port}: the board does not answer")),
             other => other,
         })?;
         if let Some(wanted) = &self.selector {

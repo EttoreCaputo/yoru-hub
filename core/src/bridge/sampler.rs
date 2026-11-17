@@ -104,8 +104,7 @@ impl Sampler {
         for fired in config.timers.tick() {
             let _ = alert_tx.send(AlertInput::Timer(fired));
         }
-        snapshot.timer = config.timers.board_view();
-        snapshot.pet = Some(crate::presence::sample());
+        snapshot.host = Some(crate::presence::sample());
         if let Some(hub) = &config.hub {
             hub.set_snapshot(&snapshot);
         }

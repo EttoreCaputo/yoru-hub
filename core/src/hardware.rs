@@ -7,7 +7,7 @@
 //! CUDA); anywhere else on the CPU, where a 4B model takes several seconds to
 //! answer. Whether the GPU is of use is llama-server's to say: the one the
 //! app ships for Windows and Linux runs on the CPU, so an NVIDIA card needs
-//! a CUDA build (`COMPANION_LLAMA_SERVER`). The figures behind the thresholds
+//! a CUDA build (`YORU_LLAMA_SERVER`). The figures behind the thresholds
 //! are in the README's voice section.
 
 use serde::Serialize;

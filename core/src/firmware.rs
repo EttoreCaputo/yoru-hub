@@ -2,19 +2,12 @@
 //! running on the board.
 //!
 //! ESP-IDF stamps `version.txt` into the app descriptor (`esp_app_desc_t`) of
-//! every image. Firmware 0.4 and later reports it in the protocol v2 `hello`
-//! handshake (see [`crate::link`]). DualEye firmware 0.2 and 0.3 print it as
-//! `{"dualeye":"0.3.0","idf":"v6.1"}` when they boot and whenever they read
-//! [`VERSION_QUERY`], which is enough to tell the app it needs an update;
-//! the key is the board's [`BoardProfile::legacy_version_key`](crate::BoardProfile).
+//! every image; the board reports it in the `hello` handshake (see
+//! [`crate::link`]).
 
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::profile::BoardKind;
-
-/// Sent to a protocol 1 board, which answers with its version line.
-pub const VERSION_QUERY: &str = "?version\n";
 
 const PARTITION_TABLE: usize = 0x8000;
 const PARTITION_MAGIC: [u8; 2] = [0xAA, 0x50];
@@ -36,23 +29,17 @@ pub struct ImageInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum BoardFirmware {
-    /// Firmware that reported its version. `protocol` is 2 from DualEye
-    /// firmware 0.4.0 (and every Yoru); a board on 1 needs a firmware update
-    /// to work with this host. `kind` is the board's, from its `hello`.
-    Version { kind: BoardKind, version: String, idf: Option<String>, protocol: u32 },
-    /// DualEye firmware from before versioning: it shows snapshots but can't say which it is.
-    Legacy,
+    /// The version its `hello` reported. `kind` is the board's, from the same `hello`.
+    Version { kind: BoardKind, version: String, idf: Option<String> },
     /// The ROM finds no bootable app in flash.
     Missing,
 }
 
 impl BoardFirmware {
-    /// Which kind of board runs it, when that is known: firmware from before
-    /// versioning was DualEye's, which this host doesn't drive.
+    /// Which kind of board runs it, when there is firmware.
     pub fn kind(&self) -> Option<BoardKind> {
         match self {
             BoardFirmware::Version { kind, .. } => Some(*kind),
-            BoardFirmware::Legacy => None,
             BoardFirmware::Missing => None,
         }
     }
@@ -101,17 +88,6 @@ pub fn image_info(image: &[u8]) -> Option<ImageInfo> {
     })
 }
 
-/// A protocol 1 firmware's answer to [`VERSION_QUERY`], wherever it sits in a console line.
-pub fn parse_version_line(line: &str) -> Option<BoardFirmware> {
-    BoardKind::ALL.into_iter().filter_map(|kind| Some((kind, kind.profile().legacy_version_key?))).find_map(|(kind, key)| {
-        let start = line.find(&format!(r#"{{"{key}":"#))?;
-        let end = start + line[start..].find('}')? + 1;
-        let reply: Value = serde_json::from_str(&line[start..end]).ok()?;
-        let version = reply[key].as_str()?.to_string();
-        Some(BoardFirmware::Version { kind, version, idf: reply["idf"].as_str().map(str::to_string), protocol: 1 })
-    })
-}
-
 /// `invalid header: 0xffffffff`: the ROM, looping over an erased flash.
 pub(crate) fn is_missing_app_log(line: &str) -> bool {
     line.contains("invalid header")
@@ -154,13 +130,6 @@ mod tests {
         assert_eq!(info.idf, "v6.1");
         assert_eq!(info.built, "Sep 26 2026 16:05:04");
         assert_eq!(image_info(&[0; 100]), None);
-    }
-
-    #[test]
-    fn finds_the_version_reply_in_a_console_line() {
-        // Only DualEye printed a version line; Yoru always spoke protocol v2.
-        assert_eq!(parse_version_line(r#"{"dualeye":"0.2.0","idf":"v6.1"}"#), None);
-        assert_eq!(parse_version_line(r#"{"v":1,"cpu":{}}"#), None);
     }
 
     #[test]

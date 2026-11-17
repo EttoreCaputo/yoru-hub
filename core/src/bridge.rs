@@ -56,7 +56,7 @@ pub use manager::{Manager, ManagerEvent, ManagerSink, run as run_manager};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
-    /// USB when the board is plugged in, otherwise WiFi (firmware 1.4.3), and
+    /// USB when the board is plugged in, otherwise WiFi, and
     /// back to USB as soon as it's plugged in again.
     #[default]
     Auto,

@@ -98,15 +98,7 @@ impl Connectors {
         secrets: Arc<dyn SecretStore>,
         events: impl Fn(ConnectorEvent) + Send + Sync + 'static,
     ) -> Result<Self, ConnectorError> {
-        let mut file = ConnectorsFile::load(&data_dir)?;
-        let migrated = google::migrate(&mut file);
-        if !migrated.is_empty() {
-            for id in &migrated {
-                secrets.delete(&store::credentials_account(id))?;
-                secrets.delete(&store::state_account(id))?;
-            }
-            file.save(&data_dir)?;
-        }
+        let file = ConnectorsFile::load(&data_dir)?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("yoru-connectors")

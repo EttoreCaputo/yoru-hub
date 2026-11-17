@@ -515,7 +515,6 @@ const it: Messages = {
     playAll: "Avvia tutte",
     stopAll: "Ferma la sequenza",
     loops: "In loop",
-    oldFirmware: "Il firmware di questa scheda non elenca le sue animazioni: serve la 0.20.9 o successiva. Aggiornalo in Impostazioni.",
     offline: "Yoru non è collegato",
     offlineHint: "Collega Yoru via USB o WiFi: le sue animazioni compaiono qui.",
     empty: "Nessuna animazione",

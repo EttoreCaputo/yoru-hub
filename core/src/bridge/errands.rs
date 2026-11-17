@@ -1,6 +1,6 @@
 //! Yoru's errands: while the assistant calls one of the user's services, every
-//! board shows Yoru going through a portal to fetch it (`show_fetch`,
-//! firmware 0.11.0), and coming back when the call is over. The board decides
+//! board shows Yoru going through a portal to fetch it (`show_fetch`),
+//! and coming back when the call is over. The board decides
 //! whether it can show one now and joins calls that overlap.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,11 +37,11 @@ pub(super) fn errand_loop(stop: &AtomicBool, targets: &Targets, errands: Receive
         };
         let args = json!({"state": errand.state, "id": errand.id, "source": clip(&errand.source, 24), "kind": errand.kind});
         for link in targets.all().into_iter().filter(|t| t.kind.profile().approvals).filter_map(|t| t.link.upgrade()) {
-            // The service's icon on Yoru's card, first (firmware 0.20.15).
+            // The service's icon on Yoru's card, first.
             if errand.state == "start" {
                 crate::icons::send(&link, &errand.source);
             }
-            // Firmware before 0.11.0 doesn't have the tool; nothing to do then.
+            // Only shown: a board that doesn't answer misses it.
             let _ = link.call_tool("show_fetch", args.clone(), TOOL_TIMEOUT);
         }
     }

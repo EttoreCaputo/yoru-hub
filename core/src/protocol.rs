@@ -32,8 +32,7 @@ pub struct Frame {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Chunk {
     Frame(Frame),
-    /// Plain text from outside the framing: ROM, bootloader, panic handler,
-    /// or firmware that predates protocol v2.
+    /// Plain text from outside the framing: ROM, bootloader, panic handler.
     Text(String),
     /// Neither: a damaged frame or line noise.
     Bad,
@@ -275,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_text_comes_out_when_the_line_goes_quiet() {
+    fn plain_text_comes_out_when_the_line_goes_quiet() {
         let mut decoder = Decoder::new();
         assert!(chunks(&mut decoder, b"{\"dualeye\":\"0.3.0\",\"idf\":\"v6.1\"}\n").is_empty());
         let mut got = Vec::new();

@@ -27,7 +27,7 @@ pub enum LinkEvent {
     /// A line from the board's log.
     Log(String),
     /// A line of plain console text from outside the framing: ROM,
-    /// bootloader, a crash, or firmware before protocol v2.
+    /// bootloader or a crash.
     Text(String),
     /// A JSON-RPC notification, such as `ready` after a reboot.
     Notification { method: String, params: Value },
@@ -40,7 +40,7 @@ pub enum LinkEvent {
 #[derive(Debug)]
 pub enum CallError {
     Io(io::Error),
-    /// No response in time: the board is busy, rebooting, or doesn't speak protocol v2.
+    /// No response in time: the board is busy, or rebooting.
     Timeout,
     /// The link went down while waiting.
     Closed,
@@ -89,10 +89,10 @@ pub struct Hello {
     pub channels: Vec<String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
-    /// The board's id, its WiFi MAC (firmware 1.4.3).
+    /// The board's id, its WiFi MAC.
     #[serde(default)]
     pub id: Option<String>,
-    /// How this host reaches it: `usb` or `wifi` (firmware 1.4.3).
+    /// How this host reaches it: `usb` or `wifi`.
     #[serde(default)]
     pub transport: Option<String>,
 }
@@ -141,8 +141,6 @@ struct Shared {
 struct Tx {
     out: Box<dyn Write + Send>,
     seal: Option<Cipher>,
-    /// Whether bytes outside the framing reach anything: only a real port.
-    raw: bool,
 }
 
 /// How the reader thread gets its bytes.
@@ -181,7 +179,7 @@ impl Link {
 
     pub fn new(port: Box<dyn SerialPort>, on_event: impl Fn(LinkEvent) + Send + 'static) -> io::Result<Self> {
         let rx = Rx { input: port.try_clone()?, eof_closes: false, decoder: Decoder::new(), pending: Vec::new(), open: None };
-        Self::start(Tx { out: Box::new(port), seal: None, raw: true }, rx, None, on_event)
+        Self::start(Tx { out: Box::new(port), seal: None }, rx, None, on_event)
     }
 
     /// A WiFi session that passed the handshake.
@@ -191,14 +189,14 @@ impl Link {
         let input = stream.try_clone()?;
         let hangup = stream.try_clone()?;
         let rx = Rx { input: Box::new(input), eof_closes: true, decoder, pending, open: Some(rx) };
-        Self::start(Tx { out: Box::new(stream), seal: Some(tx), raw: false }, rx, Some((addr, hangup)), on_event)
+        Self::start(Tx { out: Box::new(stream), seal: Some(tx) }, rx, Some((addr, hangup)), on_event)
     }
 
     /// A board in this process: the Yoru in the notch ([`crate::notch`]).
     pub fn local(stream: UnixStream, on_event: impl Fn(LinkEvent) + Send + 'static) -> io::Result<Self> {
         stream.set_read_timeout(Some(Duration::from_millis(200)))?;
         let rx = Rx { input: Box::new(stream.try_clone()?), eof_closes: true, decoder: Decoder::new(), pending: Vec::new(), open: None };
-        Self::start(Tx { out: Box::new(stream), seal: None, raw: false }, rx, None, on_event)
+        Self::start(Tx { out: Box::new(stream), seal: None }, rx, None, on_event)
     }
 
     fn start(tx: Tx, rx: Rx, peer: Option<(SocketAddr, TcpStream)>, on_event: impl Fn(LinkEvent) + Send + 'static) -> io::Result<Self> {
@@ -240,17 +238,6 @@ impl Link {
             None => protocol::encode(channel, payload),
         };
         tx.out.write_all(&bytes)?;
-        tx.out.flush()
-    }
-
-    /// Bytes as they are, outside the framing (the protocol 1 version query).
-    /// Not on WiFi, where there is no firmware that old.
-    pub fn send_raw(&self, bytes: &[u8]) -> io::Result<()> {
-        let mut tx = self.tx.lock().unwrap();
-        if !tx.raw {
-            return Ok(());
-        }
-        tx.out.write_all(bytes)?;
         tx.out.flush()
     }
 
@@ -303,7 +290,7 @@ impl Link {
     }
 
     /// All the board's tools: a frame holds only so many (4 KB), so the
-    /// board hands them out in pages (firmware 1.3.1), each `timeout` long.
+    /// board hands them out in pages, each `timeout` long.
     pub fn list_tools(&self, timeout: Duration) -> Result<Vec<Tool>, CallError> {
         #[derive(Deserialize)]
         struct List {

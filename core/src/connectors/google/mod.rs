@@ -27,7 +27,7 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{Map, Value, json};
 
-use super::config::{ConnectorConfig, ConnectorsFile, GoogleService, OAuthConfig, TransportConfig};
+use super::config::GoogleService;
 use oauth::{TokenError, TokenSource};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -261,36 +261,6 @@ pub(crate) fn segment(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>().replace('+', "%20")
 }
 
-/// Connectors made before Yoru spoke to Google itself pointed at Google's
-/// MCP servers: point them at the REST APIs, keeping the user's client.
-/// Their tokens and tool policies were for those servers, so they go: the
-/// user signs in again. Returns the ids changed, whose keychain entries the
-/// caller clears.
-pub(crate) fn migrate(file: &mut ConnectorsFile) -> Vec<String> {
-    let mut changed = Vec::new();
-    for c in &mut file.connectors {
-        let TransportConfig::Http { url } = &c.transport else { continue };
-        let service = if url.contains("gmailmcp.googleapis.com") {
-            GoogleService::Gmail
-        } else if url.contains("calendarmcp.googleapis.com") {
-            GoogleService::Calendar
-        } else {
-            continue;
-        };
-        migrate_one(c, service);
-        changed.push(c.id.clone());
-    }
-    changed
-}
-
-fn migrate_one(c: &mut ConnectorConfig, service: GoogleService) {
-    c.transport = TransportConfig::Google { service };
-    let old = c.oauth.take().unwrap_or_default();
-    // A "Web application" client only takes the port it was registered with.
-    c.oauth = Some(OAuthConfig { client_id: old.client_id, redirect_port: old.redirect_port, ..Default::default() });
-    c.tools.clear();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,25 +279,6 @@ mod tests {
                 assert!(!(t.read_only && t.destructive), "{}", t.name);
             }
         }
-    }
-
-    #[test]
-    fn old_mcp_connectors_move_to_the_rest_apis() {
-        let mut file: ConnectorsFile = serde_json::from_value(json!({"connectors": [
-            {"id": "gmail", "name": "Gmail", "transport": {"type": "http", "url": "https://gmailmcp.googleapis.com/mcp/v1"},
-             "oauth": {"client_id": "cid", "auth_params": {"access_type": "offline"}, "redirect_port": 8765},
-             "tools": {"trash_thread": {"enabled": false, "acts": true}}},
-            {"id": "notion", "name": "Notion", "transport": {"type": "http", "url": "https://mcp.notion.com/mcp"}}
-        ]}))
-        .unwrap();
-        assert_eq!(migrate(&mut file), vec!["gmail".to_string()]);
-        let gmail = &file.connectors[0];
-        assert_eq!(gmail.transport, TransportConfig::Google { service: GoogleService::Gmail });
-        let oauth = gmail.oauth.as_ref().unwrap();
-        assert_eq!((oauth.client_id.as_deref(), oauth.redirect_port), (Some("cid"), Some(8765)));
-        assert!(oauth.auth_params.is_empty() && gmail.tools.is_empty());
-        gmail.validate().unwrap();
-        assert!(migrate(&mut file).is_empty());
     }
 
     #[test]

@@ -370,7 +370,6 @@ let agents: ActiveAgent[] = [
 const timers: TimersInfo = {
   timers: [{ id: 1, kind: "timer", label: "Tea", total_s: 300, left_s: 184, state: "run", ends_at: "10:42" }],
   pomodoro: null,
-  show_on: "left",
   can_speak: true,
 };
 
@@ -452,9 +451,9 @@ const offline = params.get("board") === "off";
 const boards: DeviceInfo[] = offline
   ? []
   : [
-      { target: "/dev/cu.usbmodem101", id: "7c0c5f4233e4", name: null, kind: "yoru", link: "connected", port: "/dev/cu.usbmodem101", firmware: { state: "version", kind: "yoru", version: "0.18.0", idf: "v6.1", protocol: 2 }, primary: false, current: true },
+      { target: "/dev/cu.usbmodem101", id: "7c0c5f4233e4", name: null, kind: "yoru", link: "connected", port: "/dev/cu.usbmodem101", firmware: { state: "version", kind: "yoru", version: "0.18.0", idf: "v6.1" }, primary: false, current: true },
       ...(params.get("boards") === "2"
-        ? [{ target: "wifi:7c0c5f424b6c", id: "7c0c5f424b6c", name: "Camera", kind: "yoru" as const, link: "connected" as const, port: "wifi:7c0c5f424b6c", firmware: { state: "version" as const, kind: "yoru" as const, version: "0.17.0", idf: "v6.1", protocol: 2 }, primary: false, current: false }]
+        ? [{ target: "wifi:7c0c5f424b6c", id: "7c0c5f424b6c", name: "Camera", kind: "yoru" as const, link: "connected" as const, port: "wifi:7c0c5f424b6c", firmware: { state: "version" as const, kind: "yoru" as const, version: "0.17.0", idf: "v6.1" }, primary: false, current: false }]
         : []),
     ];
 const shownBoard = () => boards.find((b) => b.current) ?? null;

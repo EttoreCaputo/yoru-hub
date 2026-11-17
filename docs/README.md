@@ -43,7 +43,7 @@ docs/            this README, the plans, the app's code, OAuth clients, licenses
 
 ## Firmware
 
-The app carries Yoru's firmware and offers to flash it when the board runs an older one: with esptool when the board is on USB, over its link when it's on WiFi (`core/src/ota.rs`; firmware 0.19.0 and later, once flashed over USB). Only the app's part of the merged image goes over WiFi, about a minute for 3 MB, and the board goes back to its firmware before if the new one doesn't get back on the WiFi. `cargo run -p yoru-core --example ota -- ../yoru/build/yoru.bin [BOARD_ID]` does the same from the terminal. The image comes from the firmware repository, expected next to this one (`../yoru`). Build it there (`idf.py build merge-bin`), then:
+The app carries Yoru's firmware and offers to flash it when the board runs an older one: with esptool when the board is on USB, over its link when it's on WiFi (`core/src/ota.rs`). Only the app's part of the merged image goes over WiFi, about a minute for 3 MB, and the board goes back to its firmware before if the new one doesn't get back on the WiFi. `cargo run -p yoru-core --example ota -- ../yoru/build/yoru.bin [BOARD_ID]` does the same from the terminal. The image comes from the firmware repository, expected next to this one (`../yoru`). Build it there (`idf.py build merge-bin`), then:
 
 ```bash
 tools/fetch_firmware.sh     # fills firmware/yoru/; YORU_REPO points elsewhere

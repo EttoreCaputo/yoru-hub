@@ -1,4 +1,4 @@
-//! The apps' icons Yoru shows on the board (`set_icon`, firmware 0.20.15):
+//! The apps' icons Yoru shows on the board (`set_icon`):
 //! on the clips' card when it uses a service, in the errand's portal, and
 //! on the recording mark of a meeting. Found once and kept in the data
 //! folder (`icons/`):
@@ -218,7 +218,7 @@ pub fn send(link: &Link, source: &str) -> bool {
                 return true;
             }
         }
-        // Firmware before 0.20.15, or the board's busy: no icon then.
+        // The board's busy: no icon then.
         _ => return false,
     }
     let b64 = base64::engine::general_purpose::STANDARD;

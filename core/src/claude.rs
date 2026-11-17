@@ -1,24 +1,13 @@
 //! Yoru in Claude Code's config files: [`mcpconfig`] adds Yoru's MCP server
-//! to Claude Code, and [`cleanup`] takes out the hooks and the status line
-//! older versions of the app installed, when Yoru Hub still followed Claude
-//! Code's sessions.
+//! to Claude Code.
 
-pub mod cleanup;
 pub mod mcpconfig;
 
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Map, Value};
-
-/// Where Claude Code keeps its settings.
-fn config_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
-        return Some(PathBuf::from(dir));
-    }
-    crate::paths::home_dir().map(|h| h.join(".claude"))
-}
 
 fn read_settings(path: &Path) -> Option<Map<String, Value>> {
     parse_object(&fs::read_to_string(path).ok()?).ok()

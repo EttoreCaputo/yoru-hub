@@ -470,7 +470,7 @@ mod tests {
     }
 }
 
-/// What the board shows of the meetings (`set_meeting`, firmware 0.20.15):
+/// What the board shows of the meetings (`set_meeting`):
 /// the recording, the transcript and the summary being made, and how it
 /// ended. The app sets it; every bridge sends it when it changes.
 #[derive(Debug, Default)]

@@ -4,14 +4,13 @@
 //! data folder, so they outlive the app and a reminder set for 17:00 still
 //! comes. Whoever has one (the bridge, the app, the voice agent, the hub for
 //! `yoru timer` and MCP) starts, pauses and cancels them; the bridge calls
-//! [`Timers::tick`] once a second and puts [`Timers::board_view`], the timer
-//! that ends first, in each snapshot: the board's `timer` face counts it
-//! down, takes over the screen [`ShowOn`] picks while it runs and rings when
-//! the host says it's up. The host then says why out loud ([`Fired::spoken`]).
+//! [`Timers::tick`] once a second, and when one is up the host says why out
+//! loud ([`Fired::spoken`]).
 //!
-//! Firmware 0.11.0 and later also get the whole list ([`Timers::board_list`],
-//! `set_timers`) whenever it changes ([`Timers::revision`]), for the menu's
-//! Timers app, and send back what was tapped there ([`Timers::act`]).
+//! The board gets the whole list ([`Timers::board_list`], `set_timers`)
+//! whenever it changes ([`Timers::revision`]), for the menu's Timers app,
+//! counts down by itself, and sends back what was tapped there
+//! ([`Timers::act`]).
 //!
 //! A timer rings for ten seconds, or until someone says the wake word or
 //! dismisses it ([`Timers::dismiss`]). A pomodoro is work and break timers
@@ -40,8 +39,6 @@ const MAX_TIMERS: usize = 12;
 /// A timer that rang this long ago can still be brought back ("5 more minutes").
 const SNOOZE_MS: i64 = 60_000;
 const MAX_SECS: u64 = 24 * 3600;
-/// The board's bold font: ASCII capitals, digits and punctuation.
-const BOARD_LABEL_MAX: usize = 27;
 /// The board's Timers app holds this many (`TIMERS_MAX` in its `timers.h`).
 const BOARD_LIST_MAX: usize = 8;
 
@@ -69,17 +66,6 @@ impl Kind {
     fn is_pomodoro(self) -> bool {
         matches!(self, Kind::Work | Kind::Break)
     }
-}
-
-/// The screen a running timer takes over; `none` leaves the faces alone
-/// (the `timer` face still shows it).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ShowOn {
-    Left,
-    #[default]
-    Right,
-    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -171,32 +157,6 @@ pub struct TimerInfo {
     /// Local time it ends at, "HH:MM", while it runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ends_at: Option<String>,
-}
-
-/// The `timer` of a snapshot: what the board's timer face shows.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BoardTimer {
-    pub kind: Kind,
-    /// `run`, `pause` or `ring`.
-    pub state: String,
-    pub left_s: f32,
-    pub total_s: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    /// Other timers running besides it.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub more: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub round: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rounds: Option<u32>,
-    /// `left` or `right`: the screen it takes over.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub screen: Option<String>,
-}
-
-fn is_zero(n: &u32) -> bool {
-    *n == 0
 }
 
 /// A timer that just ended, for what to say about it.
@@ -302,8 +262,6 @@ pub enum Action {
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct State {
     #[serde(default)]
-    show_on: ShowOn,
-    #[serde(default)]
     timers: Vec<Timer>,
     #[serde(default)]
     pomodoro: Option<Pomodoro>,
@@ -355,25 +313,6 @@ pub fn now_ms() -> i64 {
     Local::now().timestamp_millis()
 }
 
-/// ASCII capitals for the board's font: accents dropped, the rest kept if the font has it.
-pub fn board_label(text: &str) -> String {
-    let plain: String = text
-        .chars()
-        .map(|c| match c {
-            'à' | 'á' | 'â' | 'ä' | 'À' | 'Á' => 'A',
-            'è' | 'é' | 'ê' | 'ë' | 'È' | 'É' => 'E',
-            'ì' | 'í' | 'î' | 'ï' => 'I',
-            'ò' | 'ó' | 'ô' | 'ö' => 'O',
-            'ù' | 'ú' | 'û' | 'ü' => 'U',
-            '’' => '\'',
-            c => c.to_ascii_uppercase(),
-        })
-        .filter(|c| (' '..='Z').contains(c))
-        .collect();
-    let words = plain.split_whitespace().collect::<Vec<_>>().join(" ");
-    words.chars().take(BOARD_LABEL_MAX).collect()
-}
-
 fn clean_label(label: Option<&str>) -> Option<String> {
     let l = label?.trim().trim_end_matches(['.', '!', '?']).trim();
     (!l.is_empty()).then(|| l.chars().take(80).collect())
@@ -413,14 +352,6 @@ impl Timers {
         let out = f(&mut state);
         self.save(&state);
         out
-    }
-
-    pub fn show_on(&self) -> ShowOn {
-        self.state.lock().unwrap().show_on
-    }
-
-    pub fn set_show_on(&self, show_on: ShowOn) {
-        self.change(|s| s.show_on = show_on);
     }
 
     /// A countdown of `secs`, called `label`.
@@ -742,7 +673,7 @@ impl Timers {
         json!({"timers": list})
     }
 
-    /// A timer the board started on its own (`timer_new`, firmware 0.13.0),
+    /// A timer the board started on its own (`timer_new`),
     /// taken over as it stands: `{id, kind, state, left_s, total_s, label?,
     /// language?, pomodoro?: {work_s, break_s, round, rounds}}`. A work or
     /// break phase brings its pomodoro, replacing the one running. Offered
@@ -883,39 +814,6 @@ impl Timers {
             self.save(&state);
         }
         fired
-    }
-
-    /// What the board shows: the timer ringing, else the one ending first
-    /// (running before paused).
-    pub fn board_view(&self) -> Option<BoardTimer> {
-        self.board_view_at(now_ms())
-    }
-
-    fn board_view_at(&self, now: i64) -> Option<BoardTimer> {
-        let state = self.state.lock().unwrap();
-        let shown = state.timers.iter().min_by_key(|t| (!t.is_ringing(), t.is_paused(), t.left_ms(now)))?;
-        let more = state.timers.iter().filter(|t| t.id != shown.id && !t.is_ringing()).count() as u32;
-        let pomodoro = state.pomodoro.filter(|_| shown.kind.is_pomodoro());
-        let round = pomodoro.map(|p| match shown.kind {
-            // Ringing at the end of a break, the next round has begun.
-            Kind::Break if shown.is_ringing() => p.round.saturating_sub(1).max(1),
-            _ => p.round,
-        });
-        Some(BoardTimer {
-            kind: shown.kind,
-            state: shown.state().into(),
-            left_s: (shown.left_ms(now) as f32 / 100.0).round() / 10.0,
-            total_s: shown.total_s,
-            label: shown.label.as_deref().map(board_label).filter(|l| !l.is_empty()),
-            more,
-            round,
-            rounds: pomodoro.map(|p| p.rounds),
-            screen: match state.show_on {
-                ShowOn::Left => Some("left".into()),
-                ShowOn::Right => Some("right".into()),
-                ShowOn::None => None,
-            },
-        })
     }
 
     /// The tools the voice agent and MCP clients get.
@@ -1142,23 +1040,27 @@ mod tests {
         assert!(timers.dismissed_within(Duration::from_secs(5)));
     }
 
+    /// The timer the board's list shows first: the one ringing, else the one ending first.
+    fn shown(timers: &Timers, now: i64) -> Option<Value> {
+        timers.board_list_at(now)["timers"].get(0).cloned()
+    }
+
     #[test]
     fn a_timer_rings_then_stops() {
         let timers = Timers::default();
         let t = timers.start_at(T0, 600, Some("pasta"), "it").unwrap();
-        assert_eq!(timers.board_view_at(T0 + 1000).unwrap().left_s, 599.0);
+        assert_eq!(shown(&timers, T0 + 1000).unwrap()["left_s"], 599.0);
         assert!(timers.tick_at(T0 + 599_000).is_empty());
         let fired = timers.tick_at(T0 + 600_200);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].timer.id, t.id);
         assert_eq!(fired[0].spoken(), "Il timer pasta è finito.");
-        let view = timers.board_view_at(T0 + 601_000).unwrap();
-        assert_eq!((view.state.as_str(), view.left_s, view.label.as_deref()), ("ring", 0.0, Some("PASTA")));
-        assert_eq!(view.screen.as_deref(), Some("right"));
+        let view = shown(&timers, T0 + 601_000).unwrap();
+        assert_eq!((&view["state"], &view["left_s"], &view["label"]), (&json!("ring"), &json!(0.0), &json!("pasta")));
         // Not again; gone after ten seconds of ringing.
         assert!(timers.tick_at(T0 + 602_000).is_empty());
         timers.tick_at(T0 + 600_200 + RING_MS);
-        assert!(timers.board_view_at(T0 + 700_000).is_none());
+        assert!(shown(&timers, T0 + 700_000).is_none());
     }
 
     #[test]
@@ -1167,12 +1069,12 @@ mod tests {
         timers.start_at(T0, 60, None, "en").unwrap();
         timers.start_at(T0, 300, Some("tea"), "en").unwrap();
         timers.tick_at(T0 + 61_000);
-        assert_eq!(timers.board_view_at(T0 + 61_000).unwrap().more, 1);
+        assert_eq!(timers.board_list_at(T0 + 61_000)["timers"].as_array().unwrap().len(), 2);
         assert_eq!(timers.dismiss(), 1);
-        assert_eq!(timers.board_view_at(T0 + 61_000).unwrap().label.as_deref(), Some("TEA"));
+        assert_eq!(shown(&timers, T0 + 61_000).unwrap()["label"], "tea");
         let paused = timers.control_at(T0 + 100_000, Action::Pause, None).unwrap();
         assert_eq!(paused[0].paused_left_ms, 200_000);
-        assert_eq!(timers.board_view_at(T0 + 500_000).unwrap().state, "pause");
+        assert_eq!(shown(&timers, T0 + 500_000).unwrap()["state"], "pause");
         timers.control_at(T0 + 500_000, Action::Resume, Some("tea")).unwrap();
         assert_eq!(timers.list_at(T0 + 500_000)[0].left_s, 200);
         assert!(timers.control_at(T0, Action::Cancel, Some("coffee")).is_err());
@@ -1204,18 +1106,19 @@ mod tests {
         let fired = timers.tick_at(T0 + 25 * 60_000);
         assert_eq!(fired[0].spoken(), "Pomodoro 1 done. Break for 5 minutes.");
         // The break runs while the end of the work rings.
-        let view = timers.board_view_at(T0 + 25 * 60_000 + 1000).unwrap();
-        assert_eq!((view.kind, view.state.as_str()), (Kind::Work, "ring"));
+        let view = shown(&timers, T0 + 25 * 60_000 + 1000).unwrap();
+        assert_eq!((&view["kind"], &view["state"]), (&json!("work"), &json!("ring")));
         let later = T0 + 25 * 60_000 + PHASE_RING_MS;
         timers.tick_at(later);
-        let view = timers.board_view_at(later).unwrap();
-        assert_eq!((view.kind, view.round, view.rounds, view.more), (Kind::Break, Some(1), Some(2), 0));
+        let list = timers.board_list_at(later)["timers"].as_array().unwrap().clone();
+        assert_eq!((list.len(), &list[0]["kind"]), (1, &json!("break")));
+        assert_eq!(timers.pomodoro().map(|p| (p.round, p.rounds)), Some((1, 2)));
         let fired = timers.tick_at(T0 + 30 * 60_000);
         assert_eq!(fired[0].spoken(), "Break's over: pomodoro 2 of 2.");
         let fired = timers.tick_at(T0 + 55 * 60_000);
         assert_eq!(fired[0].spoken(), "That's your pomodoro done, nice work!");
         timers.tick_at(T0 + 56 * 60_000);
-        assert!(timers.board_view_at(T0 + 56 * 60_000).is_none());
+        assert!(shown(&timers, T0 + 56 * 60_000).is_none());
         assert!(timers.pomodoro().is_none());
     }
 
@@ -1226,7 +1129,7 @@ mod tests {
         assert_eq!(r.label.as_deref(), Some("chiamare Marco"));
         let fired = timers.tick_at(T0 + 1_200_000);
         assert_eq!(fired[0].spoken(), "Promemoria: chiamare Marco.");
-        assert_eq!(timers.board_view_at(T0 + 1_200_000).unwrap().label.as_deref(), Some("CHIAMARE MARCO"));
+        assert_eq!(shown(&timers, T0 + 1_200_000).unwrap()["label"], "chiamare Marco");
 
         let out = timers.call_tool("set_timer", &json!({"minutes": 1.5}), "en").unwrap().unwrap();
         assert!(out.ends_with("set for 1 minute and 30 seconds"), "{out}");
@@ -1315,7 +1218,6 @@ mod tests {
         assert_eq!(span_words(600, true), "10 minuti");
         assert_eq!(span_words(5400, true), "1 ora e 30 minuti");
         assert_eq!(span_words(3661, false), "1 hour, 1 minute and 1 second");
-        assert_eq!(board_label("Più tè, per favore!"), "PIU TE, PER FAVORE!");
         assert_eq!(parse_clock("17.30"), NaiveTime::from_hms_opt(17, 30, 0));
         assert_eq!(parse_clock("25:00"), None);
         let now = Local.with_ymd_and_hms(2026, 10, 2, 16, 0, 0).unwrap().timestamp_millis();
@@ -1329,9 +1231,7 @@ mod tests {
         let file = dir.path().join("timers.json");
         let timers = Timers::open(Some(file.clone()));
         timers.start(600, Some("bread"), "en").unwrap();
-        timers.set_show_on(ShowOn::Left);
         let again = Timers::open(Some(file));
         assert_eq!(again.list()[0].label.as_deref(), Some("bread"));
-        assert_eq!(again.show_on(), ShowOn::Left);
     }
 }

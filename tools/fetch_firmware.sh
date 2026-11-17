@@ -21,8 +21,5 @@ fi
 mkdir -p "$out"
 cp "$repo/build/merged-binary.bin" "$out/merged-binary.bin"
 cp "$repo/version.txt" "$out/version.txt"
-# The changelog moved into docs/ after 0.11.9; an older checkout has it at the root.
-changelog="$repo/docs/FIRMWARE_CHANGELOG.md"
-[[ -f "$changelog" ]] || changelog="$repo/FIRMWARE_CHANGELOG.md"
-cp "$changelog" "$out/FIRMWARE_CHANGELOG.md"
+cp "$repo/docs/FIRMWARE_CHANGELOG.md" "$out/FIRMWARE_CHANGELOG.md"
 echo "yoru: firmware $(tr -d '[:space:]' < "$out/version.txt") from $repo"

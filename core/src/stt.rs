@@ -124,10 +124,10 @@ pub fn local_fallback() -> Option<SttEngine> {
     Some(SttEngine::Local { server, model: model.path()? })
 }
 
-/// `whisper-server`: `COMPANION_WHISPER_SERVER`, the one the app ships, or
+/// `whisper-server`: `YORU_WHISPER_SERVER`, the one the app ships, or
 /// one on the PATH (see [`crate::sidecar::find_program`]).
 pub fn find_server() -> Option<PathBuf> {
-    crate::sidecar::find_program("whisper-server", "COMPANION_WHISPER_SERVER")
+    crate::sidecar::find_program("whisper-server", "YORU_WHISPER_SERVER")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -1,16 +1,16 @@
 //! `connectors`: Yoru's MCP connectors to your services, from the command line.
 //!
-//!   companion connectors presets                      # services offered with one click
-//!   companion connectors add --preset linear          # ...add one
-//!   companion connectors add --id notion --name Notion --url https://mcp.notion.com/mcp
-//!   companion connectors add --id gh --name GitHub --command npx --args -y,@modelcontextprotocol/server-github --env GITHUB_PERSONAL_ACCESS_TOKEN=secret:GITHUB_TOKEN
-//!   companion connectors secret GITHUB_TOKEN          # its token, read from stdin, into the keychain
-//!   companion connectors login linear                 # sign in in the browser
-//!   companion connectors list
-//!   companion connectors tools [linear]
-//!   companion connectors call linear__list_issues '{"limit":5}'
-//!   companion connectors logout linear
-//!   companion connectors remove linear
+//!   yoru connectors presets                      # services offered with one click
+//!   yoru connectors add --preset linear          # ...add one
+//!   yoru connectors add --id notion --name Notion --url https://mcp.notion.com/mcp
+//!   yoru connectors add --id gh --name GitHub --command npx --args -y,@modelcontextprotocol/server-github --env GITHUB_PERSONAL_ACCESS_TOKEN=secret:GITHUB_TOKEN
+//!   yoru connectors secret GITHUB_TOKEN          # its token, read from stdin, into the keychain
+//!   yoru connectors login linear                 # sign in in the browser
+//!   yoru connectors list
+//!   yoru connectors tools [linear]
+//!   yoru connectors call linear__list_issues '{"limit":5}'
+//!   yoru connectors logout linear
+//!   yoru connectors remove linear
 
 use std::collections::BTreeMap;
 use std::io::BufRead;

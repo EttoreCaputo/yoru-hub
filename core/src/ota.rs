@@ -1,8 +1,6 @@
 //! Updating a board over its link, WiFi included: the app's image goes in
 //! chunks with `ota/begin`, `ota/write` and `ota/end` (Yoru's
-//! `docs/protocol.md`, OTA), and the board boots it. Firmware 0.19.0 and
-//! later say they can with the `ota` capability in their `hello`; a board
-//! flashed before has one app slot and needs one flash over USB first.
+//! `docs/protocol.md`, OTA), and the board boots it.
 //!
 //! The board checks the image is Yoru's and its SHA-256, and goes back to
 //! the firmware before if the new one doesn't reach a host within minutes.
@@ -16,7 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::firmware;
 use crate::link::CallError;
 
-/// What the board takes in one `ota/write` when it doesn't say.
+/// The most one `ota/write` carries; the board says its own size in `ota/begin`'s reply.
 const CHUNK: usize = 2048;
 /// `ota/begin` may wait for the first flash sector's erase.
 const BEGIN_TIMEOUT: Duration = Duration::from_secs(20);
@@ -75,10 +73,8 @@ pub fn update(
     mut progress: impl FnMut(Progress),
 ) -> Result<(), String> {
     let sha: String = Sha256::digest(app).iter().map(|b| format!("{b:02x}")).collect();
-    let begun = call("ota/begin", json!({"size": app.len(), "sha256": sha, "version": version}), BEGIN_TIMEOUT).map_err(|e| match e {
-        CallError::Rpc { code: -32601, .. } => "this board's firmware can't update over WiFi: flash it over USB once".to_string(),
-        other => format!("starting the update: {other}"),
-    })?;
+    let begun = call("ota/begin", json!({"size": app.len(), "sha256": sha, "version": version}), BEGIN_TIMEOUT)
+        .map_err(|e| format!("starting the update: {e}"))?;
     let chunk = begun["chunk"].as_u64().map_or(CHUNK, |c| c as usize).clamp(256, CHUNK);
     let b64 = base64::engine::general_purpose::STANDARD;
     let mut offset = 0;

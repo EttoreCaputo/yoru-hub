@@ -525,11 +525,7 @@ fn main() -> ExitCode {
                     }
                 }
                 BridgeEvent::Firmware { firmware } => match firmware {
-                    BoardFirmware::Version { kind, version, protocol: 1, .. } => {
-                        println!("{tag}board runs {kind} firmware {version}, which this version can't drive: reflash it from the app")
-                    }
                     BoardFirmware::Version { kind, version, .. } => println!("{tag}board runs {kind} firmware {version}"),
-                    BoardFirmware::Legacy => println!("{tag}this board runs Yoru firmware: Yoru's host doesn't drive it"),
                     BoardFirmware::Missing => eprintln!("{tag}board has no firmware: flash it from the app"),
                 },
                 BridgeEvent::Disconnected { port, reason, permission_denied } => {
@@ -1313,11 +1309,11 @@ fn print_wifi(status: &Value) {
 }
 
 fn board(port: Option<String>) -> Board {
-    Board::new(port, &format!("companion-cli/{}", env!("CARGO_PKG_VERSION"))).on(BOARD.get().cloned().flatten())
+    Board::new(port, &format!("yoru-cli/{}", env!("CARGO_PKG_VERSION"))).on(BOARD.get().cloned().flatten())
 }
 
 fn boards(port: Option<String>, json: bool) -> ExitCode {
-    match Board::new(port, &format!("companion-cli/{}", env!("CARGO_PKG_VERSION"))).boards() {
+    match Board::new(port, &format!("yoru-cli/{}", env!("CARGO_PKG_VERSION"))).boards() {
         Ok(boards) if json => println!("{}", serde_json::to_string_pretty(&boards).unwrap()),
         Ok(boards) => {
             for b in boards {
@@ -1426,8 +1422,7 @@ fn parse_tool_args(raw: &[String]) -> Result<Value, String> {
 }
 
 fn summary(s: &Snapshot) -> String {
-    let timer = s.timer.as_ref().map(|_| ", a timer running").unwrap_or_default();
-    format!("snapshot {}{timer}", s.ts)
+    format!("snapshot {}", s.ts)
 }
 
 fn permission_hint(port: &str) -> String {
