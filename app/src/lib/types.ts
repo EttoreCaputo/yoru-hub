@@ -303,6 +303,8 @@ export type VoiceInfo = {
   /** Gemini Live's voices: the name, and how Google describes it. */
   /** Name, Google's description, "male" or "female". */
   live_voices: [string, string, string][];
+  /** The local models that suit this computer. */
+  recommendation?: { whisper: string; llm: string | null; why: string };
 };
 export type AccountVoice = { voice_id: string; name: string; category: string; description: string | null };
 export type KeyCheck = { state: "valid" | "invalid" | "unknown"; error: string | null };

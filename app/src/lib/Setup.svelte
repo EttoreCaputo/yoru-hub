@@ -1,22 +1,18 @@
 <!--
-  The first run, in four steps: Yoru on the desk, its brain (Groq, free, or
-  Claude, and its key) with its voice as an optional part (an ElevenLabs
-  key and voice), a first service, and a few lines about you (the first
-  memory). Every step can be skipped; Settings can run it again.
+  The first run, in four steps: Yoru on the desk, a setup (how he thinks,
+  hears and speaks, with the key it needs: ui/Profiles.svelte), a first
+  service, and a few lines about you (the first memory). Every step can be skipped; Settings can run it again.
 -->
 <script lang="ts">
   import { call, why } from "./api";
   import { i18n } from "./i18n/index.svelte";
   import { store } from "./store.svelte";
-  import type { AccountVoice, Brain, VoiceInfo } from "./types";
-  import KeyField from "./ui/KeyField.svelte";
+  import Profiles from "./ui/Profiles.svelte";
   import ServiceIcon from "./ui/ServiceIcon.svelte";
   import YoruBoard from "./YoruBoard.svelte";
 
   const t = $derived(i18n.t.setup);
   let step = $state(0);
-  /** The optional part of the brain step: Yoru's voice. */
-  let voicePart = $state(false);
   let about = $state("");
   let busy = $state<string | null>(null);
   let error = $state("");
@@ -39,76 +35,8 @@
     }
   }
 
-  // The brain: the settings' choice, else the one with a key, else Groq (free, to start).
-  // Ollama needs no key: it is set up in Settings, so here it counts as Groq.
-  const chosen = $derived<Brain>(store.info?.settings.provider ?? store.info?.brain ?? "groq");
-  const brain = $derived<Brain>(chosen === "ollama" ? "groq" : chosen);
-  const brainKey = $derived(brain === "groq" ? (store.info?.groq_key ?? null) : brain === "openai" ? (store.info?.openai_key ?? null) : brain === "google" ? (store.info?.google_key ?? null) : (store.info?.key ?? null));
-  const KEY_HINTS: Record<string, string> = { groq: "gsk_…", openai: "sk-proj-…", google: "AIza…", anthropic: "sk-ant-…" };
-  const pick = (b: Brain) => store.saveSettings((s) => (s.provider = b));
-
-  // The voice: an ElevenLabs key, then one of the account's voices.
-  let voice = $state<VoiceInfo | null>(null);
-  let voices = $state<AccountVoice[] | null>(null);
-  let chosenVoice = $state("");
-  let voiceBusy = $state(false);
-  let voiceError = $state("");
-  const elevenKey = $derived(voice?.providers.find((p) => p.id === "elevenlabs")?.key ?? null);
-  const usedVoice = $derived(voices?.find((v) => voice?.settings.voices.it === `elevenlabs:voice/${v.voice_id}`) ?? null);
-
-  async function readVoice() {
-    voice = await call<VoiceInfo>("voice_info").catch(() => voice);
-    if (!voice?.providers.find((p) => p.id === "elevenlabs")?.key) return;
-    voices = null;
-    try {
-      voices = await call<AccountVoice[]>("elevenlabs_voices");
-      chosenVoice = usedVoice?.voice_id ?? voices[0]?.voice_id ?? "";
-    } catch (e) {
-      voiceError = why(e);
-      voices = [];
-    }
-  }
-  $effect(() => {
-    if (voicePart) void readVoice();
-  });
-
-  /** The same voice for both languages: ElevenLabs' speak either. */
-  async function useVoice() {
-    if (!voice || !chosenVoice) return;
-    voiceBusy = true;
-    voiceError = "";
-    try {
-      const id = `elevenlabs:voice/${chosenVoice}`;
-      voice = await call<VoiceInfo>("set_voice", { settings: { ...$state.snapshot(voice.settings), speak: true, voices: { ...voice.settings.voices, it: id, en: id } } });
-    } catch (e) {
-      voiceError = why(e);
-    } finally {
-      voiceBusy = false;
-    }
-  }
-
-  async function testVoice() {
-    voiceBusy = true;
-    voiceError = "";
-    try {
-      await call("test_voice", { board: null, language: i18n.lang });
-    } catch (e) {
-      voiceError = why(e);
-    } finally {
-      voiceBusy = false;
-    }
-  }
-
-  function next() {
-    if (step === 1 && !voicePart) voicePart = true;
-    else (voicePart = false), step++;
-  }
-
-  function back() {
-    if (voicePart) voicePart = false;
-    else if (step === 2) (step = 1), (voicePart = true);
-    else step--;
-  }
+  const next = () => step++;
+  const back = () => step--;
 
   /** The lines go under "About you" in memory.md: Yoru reads them every turn. */
   async function finish() {
@@ -140,44 +68,11 @@
         <p class="dim">{t.board.text}</p>
         <p class="status"><span class="dot {store.boardState === 'live' ? 'done' : 'think'}"></span>{store.boardState === "live" ? t.board.found : t.board.waiting}</p>
         {#if store.update}<p class="faint">{t.board.update(store.update.to)}</p>{/if}
-      {:else if step === 1 && !voicePart}
+      {:else if step === 1}
         <h1 id="setup-title">{t.brain.title}</h1>
         <p class="dim">{t.brain.text}</p>
-        <div class="services" role="radiogroup" aria-label={t.brain.title}>
-          {#each [["groq", t.brain.groq, t.brain.groqWhat], ["google", t.brain.google, t.brain.googleWhat], ["openai", t.brain.openai, t.brain.openaiWhat], ["anthropic", t.brain.anthropic, t.brain.anthropicWhat]] as [id, name, what] (id)}
-            <button class="service" class:done={brain === id} role="radio" aria-checked={brain === id} onclick={() => pick(id as Brain)}>
-              <b>{name}</b>
-              <span>{what}</span>
-            </button>
-          {/each}
-        </div>
-        <p class="faint">{brain === "groq" ? t.brain.groqKey : brain === "openai" ? t.brain.openaiKey : brain === "google" ? t.brain.googleKey : t.brain.anthropicKey}</p>
-        {#key brain}
-          <div class="field"><KeyField provider={brain} source={brainKey} placeholder={KEY_HINTS[brain]} onchange={() => store.refreshInfo()} /></div>
-        {/key}
-        {#if store.info?.ready && brainKey}<p class="status"><span class="dot done"></span>{t.brain.ok}</p>{/if}
-      {:else if step === 1}
-        <h1 id="setup-title">{t.voice.title} <span class="chip">{t.optional}</span></h1>
-        <p class="dim">{t.voice.text}</p>
-        <div class="field"><KeyField provider="elevenlabs" source={elevenKey} onchange={readVoice} /></div>
-        {#if elevenKey}
-          {#if voices === null}
-            <p class="faint">{t.voice.loading}</p>
-          {:else if voices.length}
-            <div class="row">
-              <select bind:value={chosenVoice} aria-label={t.voice.pick}>
-                {#each voices as v (v.voice_id)}<option value={v.voice_id}>{v.name}{v.category ? ` · ${v.category}` : ""}</option>{/each}
-              </select>
-              <button class="btn" disabled={voiceBusy || !chosenVoice || usedVoice?.voice_id === chosenVoice} onclick={useVoice}>{t.voice.use}</button>
-              <button class="btn quiet" disabled={voiceBusy || !usedVoice || store.boardState !== "live"} onclick={testVoice}>{t.voice.test}</button>
-            </div>
-            {#if usedVoice}<p class="status"><span class="dot done"></span>{t.voice.using(usedVoice.name)}</p>{/if}
-            {#if usedVoice && store.boardState !== "live"}<p class="faint">{t.voice.noBoard}</p>{/if}
-          {:else}
-            <p class="faint">{t.voice.none}</p>
-          {/if}
-        {/if}
-        {#if voiceError}<p class="error-text">{voiceError}</p>{/if}
+        <Profiles compact />
+        {#if store.info?.ready}<p class="status"><span class="dot done"></span>{t.brain.ok}</p>{/if}
       {:else if step === 2}
         <h1 id="setup-title">{t.service.title}</h1>
         <p class="dim">{t.service.text}</p>
@@ -204,7 +99,7 @@
       <span class="spacer"></span>
       {#if step > 0}<button class="btn" onclick={back}>{t.back}</button>{/if}
       {#if step < 3}
-        <button class="btn primary" onclick={next}>{step === 2 && !connected.size ? t.service.later : voicePart && !usedVoice ? t.voice.skip : t.next}</button>
+        <button class="btn primary" onclick={next}>{step === 2 && !connected.size ? t.service.later : t.next}</button>
       {:else}
         <button class="btn primary" onclick={finish}>{t.done}</button>
       {/if}
@@ -292,9 +187,6 @@
     gap: 8px;
     margin-top: 6px;
   }
-  .field {
-    margin-top: 6px;
-  }
   .services {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -331,25 +223,6 @@
   }
   .service.done {
     border-color: color-mix(in srgb, var(--done) 40%, transparent);
-  }
-  .service[aria-checked="true"] {
-    border-color: var(--pearl-mid);
-    background: color-mix(in srgb, var(--pearl) 6%, var(--ink-2));
-  }
-  .chip {
-    display: inline-block;
-    vertical-align: middle;
-    margin-left: 8px;
-    padding: 3px 9px;
-    border-radius: 999px;
-    border: 1px solid var(--rim-2);
-    color: var(--haze);
-    font: 500 11px/1.2 var(--sans);
-    letter-spacing: 0;
-  }
-  .row select {
-    flex: 1;
-    min-width: 0;
   }
   footer {
     display: flex;

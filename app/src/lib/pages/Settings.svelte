@@ -17,16 +17,21 @@
   import KeyField from "../ui/KeyField.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import Voice from "../ui/Voice.svelte";
+  import Profiles from "../ui/Profiles.svelte";
+  import { currentProfile } from "../profiles";
 
   const t = $derived(i18n.t.settings);
   const s = $derived(store.info?.settings);
   const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
-  const CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+  /** Claude's models, by what they're like; the ids are in the option's value. */
+  const CLAUDE_MODELS = $derived([
+    ["claude-opus-5-5", t.claudeModels.opus],
+    ["claude-sonnet-5-5", t.claudeModels.sonnet],
+    ["claude-haiku-5-5", t.claudeModels.haiku],
+  ] as const);
   const brain = $derived(store.info?.brain ?? null);
   const BRAIN_NAMES: Record<Brain, string> = { anthropic: "Claude", openai: "OpenAI", google: "Gemini", groq: "Groq", ollama: "Ollama" };
   const BRAINS: Brain[] = ["anthropic", "openai", "google", "groq", "ollama"];
-  /** The brain picker's tiles; null lets the app choose. */
-  const BRAIN_CHOICES: (Brain | null)[] = [null, ...BRAINS];
   const LANG_CHOICES: (Lang | null)[] = [null, ...LANGUAGES.map((l) => l.id)];
   const langName = (id: Lang) => LANGUAGES.find((l) => l.id === id)?.name ?? id;
 
@@ -130,6 +135,7 @@
     (e.currentTarget as HTMLElement).closest("main")?.scrollTo({ top: 0 });
   }
 
+  const profile = $derived(currentProfile(brain, voice));
   // What each card says now, and its dot.
   const brainModel = $derived(brain ? modelOf(brain) : "");
   const keyed = $derived(keys.filter((k) => k.source).length);
@@ -139,7 +145,7 @@
   const summary = $derived<Record<Part, { text: string; dot: string; warn?: boolean }>>({
     brain: !store.info?.ready
       ? { text: brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain, dot: "wrong", warn: true }
-      : { text: `${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
+      : { text: profile ? i18n.t.profiles.names[profile] : `${t.customShort} · ${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
     character: { text: store.info ? t.characters[character][0] : "—", dot: "" },
     voice: {
       text: !vs ? "—" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "),
@@ -259,70 +265,57 @@
   {/if}
 </div>
 
-<!-- Pick a brain; its key and model follow. How hard it thinks, and the other brains' models, are advanced. -->
+<!-- A setup first (Profiles); its parts, the brain and its model, under "Custom". How hard Claude thinks and whether it searches the web are advanced. -->
 {#snippet brainPage()}
   {#if s}
-    <section class="tiles" aria-label={t.provider}>
-      {#each BRAIN_CHOICES as b (b ?? "auto")}
-        <button class="tile" class:on={(s.provider ?? null) === b} onclick={() => store.saveSettings((x) => (x.provider = b))}>
-          <b>{b ? BRAIN_NAMES[b] : t.autoBrain}</b>
-          <span>{t.brainNotes[b ?? "auto"]}</span>
-          {#if b && brain === b && store.info?.ready}<span class="tag">{t.inUse}</span>{/if}
-        </button>
-      {/each}
-    </section>
-    {#if !store.info?.ready}
-      <p class="error-text note">{brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain}</p>
-    {:else if store.info?.limited}
-      <p class="error-text note">{store.info.limited}</p>
-    {/if}
-
-    {#if brain}
-      <h2 class="section-title">{BRAIN_NAMES[brain]}</h2>
-      <section class="panel active">
-        {#if brain !== "ollama"}
-          {@const k = keyOf(brain)}
-          {#if k}
-            <div class="block">
-              <div class="what"><b>{t.keyOf(k.name)}</b><span class="dim">{k.hint}</span></div>
-              <KeyField provider={k.id} source={k.source} placeholder={k.placeholder} onchange={() => (store.refreshInfo(), readAll())} />
-            </div>
+    <Profiles onchange={readAll} />
+    <details class="more" open={!profile}>
+      <summary class="section-title">{t.customize}</summary>
+      <p class="dim small">{t.customizeHint}</p>
+      <section class="tiles" aria-label={t.provider}>
+        {#each BRAINS as b (b)}
+          <button class="tile" class:on={brain === b} onclick={() => store.saveSettings((x) => (x.provider = b))}>
+            <b>{BRAIN_NAMES[b]}</b>
+            <span>{t.brainNotes[b]}</span>
+            {#if brain === b && store.info?.ready}<span class="tag">{t.inUse}</span>{/if}
+          </button>
+        {/each}
+      </section>
+      {#if !store.info?.ready}
+        <p class="error-text note">{brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain}</p>
+      {:else if store.info?.limited}
+        <p class="error-text note">{store.info.limited}</p>
+      {/if}
+      {#if brain}
+        <section class="panel active">
+          {#if brain !== "ollama"}
+            {@const k = keyOf(brain)}
+            {#if k}
+              <div class="block">
+                <div class="what"><b>{t.keyOf(k.name)}</b><span class="dim">{k.hint}</span></div>
+                <KeyField provider={k.id} source={k.source} placeholder={k.placeholder} onchange={() => (store.refreshInfo(), readAll())} />
+              </div>
+            {/if}
           {/if}
-        {/if}
-        {@render modelRow(brain)}
-        {#if brain !== "anthropic"}<p class="dim small">{t.groqNote}</p>{/if}
-      </section>
-    {/if}
-
-    <details class="more">
-      <summary class="section-title">{t.advanced}</summary>
-      <section class="panel">
-        <div class="setting">
-          <div class="what"><b>{t.effort}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
-          <div class="how">
-            <select value={s.effort} onchange={(e) => store.saveSettings((x) => (x.effort = e.currentTarget.value as Effort))} aria-label={t.effort}>
-              {#each EFFORTS as e (e)}<option value={e}>{t.efforts[e]}</option>{/each}
-            </select>
-          </div>
-        </div>
-        <div class="setting">
-          <div class="what"><b>{t.taskEffort}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
-          <div class="how">
-            <select value={s.task_effort} onchange={(e) => store.saveSettings((x) => (x.task_effort = e.currentTarget.value as Effort))} aria-label={t.taskEffort}>
-              {#each EFFORTS as e (e)}<option value={e}>{t.efforts[e]}</option>{/each}
-            </select>
-          </div>
-        </div>
-        <div class="setting">
-          <div class="what"><b>{t.webSearch}</b>{#if brain !== "anthropic"}<span>{t.claudeOnly}</span>{/if}</div>
-          <div class="how"><Toggle checked={s.web_search} label={t.webSearch} onchange={(on) => store.saveSettings((x) => (x.web_search = on))} /></div>
-        </div>
-      </section>
-      <h3 class="section-title">{t.otherModels}</h3>
-      <p class="dim small">{t.otherModelsHint}</p>
-      <section class="panel">
-        {#each BRAINS.filter((b) => b !== brain) as b (b)}{@render modelRow(b, BRAIN_NAMES[b])}{/each}
-      </section>
+          {@render modelRow(brain)}
+          {#if brain === "anthropic"}
+            <div class="setting">
+              <div class="what"><b>{t.effort}</b><span class="dim">{t.effortHint}</span></div>
+              <div class="how">
+                <select value={s.effort} onchange={(e) => store.saveSettings((x) => (x.effort = e.currentTarget.value as Effort))} aria-label={t.effort}>
+                  {#each EFFORTS as e (e)}<option value={e}>{t.efforts[e]}</option>{/each}
+                </select>
+              </div>
+            </div>
+            <div class="setting">
+              <div class="what"><b>{t.webSearch}</b></div>
+              <div class="how"><Toggle checked={s.web_search} label={t.webSearch} onchange={(on) => store.saveSettings((x) => (x.web_search = on))} /></div>
+            </div>
+          {:else}
+            <p class="dim small">{t.groqNote}</p>
+          {/if}
+        </section>
+      {/if}
     </details>
   {/if}
 {/snippet}
@@ -352,8 +345,10 @@
         <div class="what"><b>{name}</b></div>
         <div class="how">
           {#if b === "anthropic"}
-            <input class="model mono" type="text" list="claude-models" value={s.model} spellcheck="false" onchange={(e) => setModel("anthropic", e.currentTarget.value.trim() || s.model)} aria-label={name} />
-            <datalist id="claude-models">{#each CLAUDE_MODELS as m (m)}<option value={m}></option>{/each}</datalist>
+            <select value={s.model} onchange={(e) => setModel("anthropic", e.currentTarget.value)} aria-label={name}>
+              {#each CLAUDE_MODELS as [m, label] (m)}<option value={m}>{label}</option>{/each}
+              {#if !CLAUDE_MODELS.some(([m]) => m === s.model)}<option value={s.model}>{s.model}</option>{/if}
+            </select>
           {:else}
             <select value={modelOf(b)} onchange={(e) => setModel(b, e.currentTarget.value)} aria-label={name}>
               {#each catalog(b) as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}

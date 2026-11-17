@@ -127,6 +127,14 @@
 {#if info}
   {@const s = info.settings}
   {@const sttModel = model(s.model)}
+  {#if s.live}
+    <section class="panel active live-on">
+      <div class="setting">
+        <div class="what"><b>{t.liveOnTitle(s.live)}</b><span class="dim">{t.liveOnHint}</span></div>
+        <div class="how"><button class="btn small" onclick={() => set({ live: "" })}>{t.liveTurnOff}</button></div>
+      </div>
+    </section>
+  {/if}
   <h2 class="section-title first">{t.listenWith}</h2>
   <section class="tiles" aria-label={t.listenWith}>
     {@render tile(null, heard === null, t.offListen, info.stt, hearWith)}
@@ -204,27 +212,6 @@
       {/if}
     </section>
   {/if}
-
-  <h2 class="section-title">{t.live}</h2>
-  <section class="panel" class:active={!!s.live}>
-    <div class="setting">
-      <div class="what">
-        <b>{t.liveVoice}</b>
-        <span class="dim">{t.liveHint}</span>
-        {#if !keyed("google")}<span class="dim">{t.liveNeedsKey}</span>{:else if s.live && !s.enabled}<span class="error-text">{t.liveNeedsListening}</span>{/if}
-      </div>
-      <div class="how">
-        <select value={s.live} disabled={!keyed("google") && !s.live} onchange={(e) => set({ live: e.currentTarget.value })} aria-label={t.liveVoice}>
-          <option value="">{t.off}</option>
-          {#each ["male", "female"] as kind (kind)}
-            <optgroup label={t.liveKinds[kind]}>
-              {#each info.live_voices.filter((v) => v[2] === kind) as [name, style] (name)}<option value={name}>{name} · {t.liveStyles[style] ?? style}</option>{/each}
-            </optgroup>
-          {/each}
-        </select>
-      </div>
-    </div>
-  </section>
 
   {#if s.enabled}
     <details class="more">

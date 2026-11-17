@@ -225,6 +225,11 @@ pub trait Host: Send + Sync {
     fn call_board(&self, name: &str, _arguments: &Value) -> Result<String, String> {
         Err(format!("{name}: Yoru's board isn't connected"))
     }
+    /// The request came through the Yoru in the Mac's notch, not the board
+    /// on the desk: the context line says so, since the two bodies differ.
+    fn in_notch(&self) -> bool {
+        false
+    }
     /// Ask the user to allow `title` (`text` on the board's card, `detail` in
     /// the app). `None`: nobody answered.
     fn confirm(&self, title: &str, text: &str, detail: &str) -> Option<bool>;
@@ -609,7 +614,7 @@ impl Assistant {
         }
         *self.speaking.lock().unwrap() = heard.clone();
         let notes = self.turn_notes(text, speaker, heard.as_ref().is_some_and(|h| h.print.is_some()), &mood, &settings);
-        let prompt = with_context(text, language, channel, follow_up);
+        let prompt = with_context(text, language, channel, follow_up, host.in_notch());
         let prompt = if notes.is_empty() { prompt } else { format!("{notes}\n\n{prompt}") };
         // The face the reply starts with goes to the board as soon as it is
         // written, and out of what is said.
@@ -1159,6 +1164,8 @@ fn system_prompt(name: &str, character: &str) -> String {
     format!(
         "You are {name}, the user's personal assistant. You live on their computer, and your body is a small round screen on their desk \
 where you appear as a matte sphere with two eyes and two floating hands, with a microphone and a speaker. \
+You may also be in the Mac's notch, a small you beside the camera: there the user talks by holding a key (no wake word), you answer \
+through the Mac's speakers, and the board's screen, menu, settings and Tasks app aren't there; the context line says via: the notch then. \
 You are connected to the user's services (mail, calendar, documents, tasks and whatever else they connected): \
 find their tools with tool search when a request needs them. \
 Your board's settings (brightness, volume, wake word, its menu, the other settings) are found the same way.
@@ -1170,7 +1177,7 @@ Your board's settings (brightness, volume, wake word, its menu, the other settin
 - Tools that change something (send, create, delete, reply) ask the user first; if they say no, accept it.
 - When something is too long to say aloud (a list, a summary, details), say the gist and put the details in the inbox with notify.
 - {MEMORY_RULE}
-- Timers and reminders run on this computer and ring on your board.
+- Timers and reminders run on this computer and ring on your board (said in the notch when there is no board).
 - The user can give you tasks to do on your own, once or on a schedule (the tasks tool): when they ask you to do something later or \
 regularly (\"every Monday at 9 sum up my issues\", \"tomorrow at 6 pm check whether Marco answered\"), add it as a task, with the job \
 in their words. A reminder that only rings is a timer; a task is work you do. Your board's Tasks app shows them.
@@ -1187,10 +1194,10 @@ notifications and inbox lines are in it too. Without one, reply in the user's la
 - When the request was spoken (channel: voice), your reply is said aloud: plain sentences a text-to-speech voice reads well: \
 no markdown, no lists, no emoji, no URLs, no symbols or special characters (* # / & @ | < > [ ] {{ }} ° or arrows); \
 write units and abbreviations as they are said (20 gradi, not 20°C); one to three sentences.
-- After a spoken answer you keep listening for a few seconds; what you hear then is marked as heard without the wake word and may not be \
+- After a spoken answer you keep listening for a few seconds; what you hear then is marked as heard without being called and may not be \
 meant for you: someone else in the room, the TV, the user thinking aloud. When it clearly isn't for you, reply with just … and nothing \
 else, and you stay silent. When it is (an answer to your question, a follow-up, a new request), answer as usual. \
-When you need something from the user to go on, end with the question: the board then waits longer for the answer.
+When you need something from the user to go on, end with the question: you then wait longer for the answer.
 - When it was typed (channel: text), you may be longer and use short Markdown.
 - Never servile, and don't end with offers of help.
 
@@ -1429,10 +1436,13 @@ fn schema_or_empty(schema: &Value) -> Value {
 }
 
 /// The request with what the model can't know: the time, the channel, the language to reply in.
-fn with_context(text: &str, language: Option<&str>, channel: Channel, follow_up: bool) -> String {
+fn with_context(text: &str, language: Option<&str>, channel: Channel, follow_up: bool, notch: bool) -> String {
     let mut line = context_line(language, channel);
+    if notch {
+        line.insert_str(line.len() - 1, ", via: the notch");
+    }
     if follow_up {
-        line.insert_str(line.len() - 1, ", heard without the wake word");
+        line.insert_str(line.len() - 1, ", heard without being called");
     }
     format!("{line}\n\n{text}")
 }
@@ -1723,7 +1733,7 @@ mod tests {
     fn helpers() {
         assert_eq!(summarize(&json!({"to": "a@b.c", "subject": "Hi", "n": 2, "deep": {"x": 1}})), "to: a@b.c; subject: Hi; n: 2");
         assert_eq!(text_of(&json!([{"type": "thinking", "thinking": ""}, {"type": "text", "text": "Ciao "}, {"type": "text", "text": "Ettore"}])), "Ciao Ettore");
-        assert!(with_context("ciao", Some("it"), Channel::Voice, false).contains("channel: voice, reply in: Italian"));
+        assert!(with_context("ciao", Some("it"), Channel::Voice, false, false).contains("channel: voice, reply in: Italian"));
         assert_eq!(schema_or_empty(&Value::Null)["type"], "object");
     }
 

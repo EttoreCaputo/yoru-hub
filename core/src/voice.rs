@@ -1380,7 +1380,11 @@ impl Toolbox for BoardToolbox<'_> {
         }
         match self.link.list_tools(TOOL_TIMEOUT) {
             Ok(board) => {
-                crate::link::save_tools_cache(self.kind(), &board);
+                // The notch's three tools would stand in for the board's own.
+                let notch = self.session.board.lock().unwrap().as_deref() == Some(crate::notch::ID);
+                if !notch {
+                    crate::link::save_tools_cache(self.kind(), &board);
+                }
                 tools.insert(voice_tools(board)).clone()
             }
             // The board didn't answer in time (busy with the audio): its
@@ -1421,6 +1425,10 @@ struct VoiceHost<'a> {
 }
 
 impl crate::assistant::Host for VoiceHost<'_> {
+    fn in_notch(&self) -> bool {
+        self.session.board.lock().unwrap().as_deref() == Some(crate::notch::ID)
+    }
+
     fn board_tools(&self) -> Vec<Tool> {
         // The assistant has the timers itself.
         let board = match self.link.list_tools(TOOL_TIMEOUT) {

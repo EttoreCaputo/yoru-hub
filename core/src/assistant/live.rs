@@ -13,9 +13,14 @@ use crate::cloud::live::Setup;
 
 /// Who Yoru is, for a voice that speaks as it thinks: no face tags or audio
 /// tags, which it would read out.
-fn live_prompt(name: &str, character: &str) -> String {
+fn live_prompt(name: &str, character: &str, notch: bool) -> String {
+    let body = if notch {
+        "Your body here is a small you in the Mac's notch, beside the camera: the user talks by holding a key, and you answer through the Mac's speakers."
+    } else {
+        "Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker."
+    };
     format!(
-        "You are {name}, the user's personal assistant. Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker. \
+        "You are {name}, the user's personal assistant. {body} \
 You talk with the user out loud.
 - Use the tools instead of guessing; never invent facts about the user's data. You can search the web with Google Search.
 - Never say you did something (sent, started, added, saved) unless the tool that does it answered that it did: if you haven't called it, call it.
@@ -44,7 +49,7 @@ impl Assistant {
         let mut tools = own_tools();
         tools.extend(Timers::tools().iter().map(tool_json));
         tools.extend(board.iter().filter(|t| BOARD_ESSENTIALS.contains(&t.name.as_str())).map(tool_json));
-        let mut system = format!("{}\n\n<memory>\n{}\n</memory>", live_prompt(&settings.name, &settings.character), self.memory.core(CORE_CHARS, true));
+        let mut system = format!("{}\n\n<memory>\n{}\n</memory>", live_prompt(&settings.name, &settings.character, host.in_notch()), self.memory.core(CORE_CHARS, true));
         if let Some(l) = self.reply_language(None) {
             system.push_str(&format!("\n\nAlways reply in {}.", language_name(&l)));
         }

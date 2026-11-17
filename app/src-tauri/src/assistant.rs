@@ -61,17 +61,29 @@ impl Services {
 pub struct AppHost {
     pub board: Board,
     pub confirmations: Arc<Confirmations>,
+    /// Typed in the notch's field: its tools are the notch's, not the board's.
+    pub notch: bool,
 }
 
 impl Host for AppHost {
     fn board_tools(&self) -> Vec<Tool> {
+        if self.notch {
+            return yoru_core::notch::typed_tools();
+        }
         // `set_mic` is the user's: the assistant mustn't turn the microphone off.
         self.board.list_tools().unwrap_or_default().into_iter().filter(|t| !BoardKind::hub_only(&t.name) && t.name != "set_mic").collect()
     }
 
     fn call_board(&self, name: &str, arguments: &Value) -> Result<String, String> {
+        if self.notch {
+            return yoru_core::notch::call_typed(name, arguments);
+        }
         let result = self.board.call_tool(name, arguments.clone()).map_err(|e| e.to_string())?;
         if result.is_error { Err(result.text()) } else { Ok(result.text()) }
+    }
+
+    fn in_notch(&self) -> bool {
+        self.notch
     }
 
     fn confirm(&self, title: &str, text: &str, detail: &str) -> Option<bool> {
@@ -158,7 +170,7 @@ fn start_scheduler(app: &AppHandle) {
 }
 
 fn host(state: &AppState) -> AppHost {
-    AppHost { board: state.board(None), confirmations: state.confirmations.clone() }
+    AppHost { board: state.board(None), confirmations: state.confirmations.clone(), notch: false }
 }
 
 async fn blocking<T: Send + 'static>(app: AppHandle, job: impl FnOnce(&AppState) -> Result<T, String> + Send + 'static) -> Result<T, String> {
@@ -285,10 +297,11 @@ pub async fn coding_stop(app: AppHandle, run: u64) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn ask(app: AppHandle, text: String) -> Result<Reply, String> {
+pub async fn ask(app: AppHandle, text: String, notch: Option<bool>) -> Result<Reply, String> {
     blocking(app, move |state| {
         let language = state.settings.lock().unwrap().ui_language.clone();
-        state.assistant.respond(&text, language.as_deref(), Channel::Text, &host(state))
+        let host = AppHost { notch: notch.unwrap_or(false) && yoru_core::notch::enabled(), ..host(state) };
+        state.assistant.respond(&text, language.as_deref(), Channel::Text, &host)
     })
     .await
 }

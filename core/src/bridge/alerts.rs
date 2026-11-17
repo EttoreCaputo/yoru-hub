@@ -73,22 +73,22 @@ impl Targets {
 
     /// The board that speaks: the one `origin` names (where a timer was
     /// set), else the `primary` board, else the one of the latest
-    /// conversation, else the one connected first (a real one before the
-    /// notch).
+    /// conversation, else the one connected first. A real board always
+    /// comes before the notch (docs/notch.md): it rings, chimes and shows
+    /// the timer, where the notch could only say it.
     pub fn speaker(&self, origin: Option<&str>, primary: Option<&str>) -> Option<AlertTarget> {
         choose(&self.boards.lock().unwrap(), origin, primary, self.floor.last()).cloned()
     }
 }
 
 fn choose<'a>(boards: &'a [(u64, AlertTarget)], origin: Option<&str>, primary: Option<&str>, last: Option<u64>) -> Option<&'a AlertTarget> {
-    let by_id = |id: Option<&str>| id.and_then(|id| boards.iter().find(|(_, t)| t.id.as_deref() == Some(id)));
-    by_id(origin)
-        .or_else(|| by_id(primary))
-        .or_else(|| last.and_then(|n| boards.iter().find(|(s, _)| *s == n)))
-        // A real board before the notch, which is only on the Mac.
-        .or_else(|| boards.iter().find(|(_, t)| t.id.as_deref() != Some(crate::notch::ID)))
-        .or_else(|| boards.first())
-        .map(|(_, t)| t)
+    let real = |t: &AlertTarget| t.id.as_deref() != Some(crate::notch::ID);
+    let pick = |real_only: bool| {
+        let ok = |t: &AlertTarget| !real_only || real(t);
+        let by_id = |id: Option<&str>| id.and_then(|id| boards.iter().find(|(_, t)| t.id.as_deref() == Some(id) && ok(t)));
+        by_id(origin).or_else(|| by_id(primary)).or_else(|| last.and_then(|n| boards.iter().find(|(s, t)| *s == n && ok(t)))).or_else(|| boards.iter().find(|(_, t)| ok(t)))
+    };
+    pick(true).or_else(|| pick(false)).map(|(_, t)| t)
 }
 
 /// The board that says something now, with what it takes to say it.
@@ -230,5 +230,16 @@ mod tests {
         assert_eq!(id(choose(&boards, Some("gone"), Some("gone"), Some(3))).as_deref(), Some("talked"));
         assert_eq!(id(choose(&boards, None, None, Some(9))).as_deref(), Some("first"));
         assert!(choose(&[], Some("timer"), None, None).is_none());
+    }
+
+    #[test]
+    fn a_real_board_comes_before_the_notch() {
+        let notch = crate::notch::ID;
+        let boards = vec![(1, board(notch)), (2, board("desk"))];
+        let id = |t: Option<&AlertTarget>| t.and_then(|t| t.id.clone());
+        // A timer set on the notch, and the notch's conversation the latest: the board still rings.
+        assert_eq!(id(choose(&boards, Some(notch), None, Some(1))).as_deref(), Some("desk"));
+        // The notch alone says it.
+        assert_eq!(id(choose(&boards[..1], Some(notch), None, Some(1))).as_deref(), Some(notch));
     }
 }

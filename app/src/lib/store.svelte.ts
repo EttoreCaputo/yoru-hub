@@ -299,13 +299,14 @@ class Store {
 
   // The assistant.
 
-  async ask(text: string) {
+  /** `notch`: typed in the notch, whose tools it then uses instead of the board's. */
+  async ask(text: string, notch = false) {
     text = text.trim();
     if (!text || this.asking) return;
     this.asking = text;
     this.askError = "";
     try {
-      await call("ask", { text });
+      await call("ask", { text, notch });
     } catch (e) {
       this.askError = why(e);
     } finally {

@@ -150,7 +150,7 @@
     const text = typed.trim();
     if (!text || store.asking) return;
     typed = "";
-    await store.ask(text);
+    await store.ask(text, true);
     lingerUntil = Date.now() + LINGER_MS;
   }
 

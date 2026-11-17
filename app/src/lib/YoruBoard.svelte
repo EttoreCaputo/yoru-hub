@@ -63,8 +63,13 @@
     thinking: "think",
     dance: "sway",
     love: "hold",
+    giggle: "cover",
   };
-  const HAPPY_EYES = new Set(["happy", "excited", "proud", "love", "relieved", "charged", "plugged", "dance", "clap", "wink"]);
+  const HAPPY_EYES = new Set(["happy", "excited", "proud", "love", "relieved", "charged", "plugged", "dance", "clap", "wink", "giggle"]);
+  // The rest of the board's reactions, so none plays as nothing: low eyes, narrowed ones, eyes that look about.
+  const LOW_EYES = new Set(["sad", "bored", "hot"]);
+  const NARROW_EYES = new Set(["angry", "annoyed", "focus"]);
+  const GLANCING = new Set(["look_around", "dizzy"]);
   const CLOSED_EYES = new Set(["sleepy", "yawn", "tired", "drowsy", "sigh", "blink"]);
   const WIDE_EYES = new Set(["surprised", "scared", "falling", "lifted"]);
 
@@ -78,15 +83,15 @@
   });
   const gesture = $derived(playing ? (GESTURES[playing] ?? null) : dancing ? "sway" : null);
   const eyes = $derived(
-    asleep ? "closed" : !playing ? (listening ? "wide" : "open") : HAPPY_EYES.has(playing) ? "happy" : CLOSED_EYES.has(playing) ? "closed" : WIDE_EYES.has(playing) ? "wide" : "open",
+    asleep ? "closed" : !playing ? (listening ? "wide" : "open") : HAPPY_EYES.has(playing) ? "happy" : CLOSED_EYES.has(playing) ? "closed" : WIDE_EYES.has(playing) ? "wide" : LOW_EYES.has(playing) ? "low" : NARROW_EYES.has(playing) ? "narrow" : "open",
   );
 
   // The eyes slide over the surface towards the pointer, and narrow near the edge.
   const look = $derived(gaze && !asleep && gesture !== "cover" ? { x: Math.max(-1, Math.min(1, gaze.x)), y: Math.max(-1, Math.min(1, gaze.y)) } : { x: 0, y: 0 });
   const eyeX = $derived(look.x * R * 0.38);
-  const eyeY = $derived(R * 0.12 + look.y * R * 0.22 + (gesture === "think" ? -R * 0.18 : 0));
+  const eyeY = $derived(R * 0.12 + look.y * R * 0.22 + (gesture === "think" ? -R * 0.18 : 0) + (eyes === "low" ? R * 0.1 : 0));
   const narrow = $derived(1 - Math.abs(look.x) * 0.3);
-  const eyeH = $derived(eyes === "closed" ? 4 : eyes === "wide" ? 40 : 32);
+  const eyeH = $derived(eyes === "closed" ? 4 : eyes === "wide" ? 40 : eyes === "low" ? 18 : eyes === "narrow" ? 14 : 32);
 </script>
 
 <div class="yoru" class:asleep class:dancing={gesture === "sway"} style:width="{size * 1.15}px" style:height="{size * 1.15}px">
@@ -129,6 +134,7 @@
           <!-- A soft shadow towards the bottom edge, never a gloss. -->
           <circle cx={C} cy={C + R * 0.55} r={R * 0.9} fill="#000" opacity="0.12" clip-path="url(#{uid}-sphere)" />
           <g class="eyes" style:transform="translate({eyeX}px, {eyeY}px) scaleX({narrow})">
+            <g class:glance={!!playing && GLANCING.has(playing)}>
             {#each [-1, 1] as side (side)}
               {#if eyes === "happy"}
                 <path class="arc" d="M {C + side * 22 - 9} {C + 4} q 9 -14 18 0" fill="none" stroke="#17151f" stroke-width="7" stroke-linecap="round" />
@@ -136,6 +142,7 @@
                 <rect class="eye" class:still={eyes === "closed"} x={C + side * 22 - 7} y={C - eyeH / 2} width="14" height={eyeH} rx="7" fill="#17151f" />
               {/if}
             {/each}
+            </g>
           </g>
         </g>
 
@@ -215,6 +222,17 @@
       height 200ms,
       y 200ms;
     animation: blink 4.2s infinite;
+  }
+  .glance {
+    animation: glance 900ms ease-in-out 2;
+  }
+  @keyframes glance {
+    25% {
+      transform: translateX(-26px);
+    }
+    75% {
+      transform: translateX(26px);
+    }
   }
   .eye.still,
   .asleep .eye {

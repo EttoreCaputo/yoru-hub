@@ -121,6 +121,11 @@ pub(super) fn run(
             LinkEvent::Notification { method, params } if method == "utterance_start" => {
                 receiving.lock().unwrap().start(&params);
                 let (id, trigger) = (params["id"].as_u64().unwrap_or(0) as u8, params["trigger"].as_str().unwrap_or("wake").to_string());
+                // Pressing to talk has heard the alarm too, as the wake word
+                // (the notch's ⌥ Space has no wake word to say it with).
+                if trigger == "button" {
+                    timers.dismiss();
+                }
                 // Push-to-talk ends when PWR is let go, not at a pause.
                 if trigger != "button" && smart_turn() {
                     let _ = turn_jobs.send(TurnJob::Start(id));

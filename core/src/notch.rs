@@ -42,8 +42,12 @@ const ENGINE_IDLE: Duration = Duration::from_secs(20);
 /// How long the helper may take to put things back (the music it paused)
 /// before it is killed.
 const HELPER_EXIT: Duration = Duration::from_secs(2);
-/// The longest utterance.
-const MAX_UTTERANCE: Duration = Duration::from_secs(30);
+/// The longest utterance, as the board's `max_length`.
+const MAX_UTTERANCE: Duration = Duration::from_secs(60);
+/// After the last loud frame, this long still counts as speech before a
+/// pause starts, as the board's VAD hangover: without it a follow-up ended
+/// half a second sooner than on the board.
+const HANGOVER: Duration = Duration::from_millis(500);
 /// A frame this loud (dBFS, after echo cancelling) may be speech...
 const SPEECH_DB: f32 = -42.0;
 /// ...and this many in a row are.
@@ -182,8 +186,11 @@ struct Utterance {
     speech: bool,
     /// The last loud frame, for the pause that ends a follow-up.
     last_loud: Instant,
-    /// A follow-up: how long to wait for speech, and the pause that ends it.
+    /// A follow-up: how long to wait for speech, and the pause that ends it
+    /// (after the [`HANGOVER`]; `voice/pause` changes it, for Smart Turn).
     listen: Option<(Duration, Duration)>,
+    /// `utterance_pause` was sent for the pause going on: once per pause.
+    paused: bool,
     /// The microphone is on and the host was told: false while the helper
     /// is still starting (about a second, for Apple's echo cancelling).
     ready: bool,
@@ -292,10 +299,10 @@ impl Board {
                 self.reply(id, result);
             }
             "voice/state" => {
-                let state = params["state"].as_str().unwrap_or("idle").to_string();
-                self.state.lock().unwrap().voice = state.clone();
-                tell(Event::State { state });
+                // Said back, as the board does: the host's idea of the state
+                // (alerts wait for "idle") follows what it set.
                 self.reply(id, json!({}));
+                self.set_voice(params["state"].as_str().unwrap_or("idle"));
             }
             "voice/listen" => {
                 self.reply(id, json!({}));
@@ -307,7 +314,18 @@ impl Board {
                 self.reply(id, json!({}));
                 self.end("host");
             }
-            "voice/pause" => self.reply(id, json!({})),
+            "voice/pause" => {
+                // Smart Turn holds the pause long and stops the utterance
+                // itself when the sentence sounds finished.
+                let pause = Duration::from_millis(params["pause_ms"].as_u64().unwrap_or(700).clamp(200, 3000));
+                if let Some(u) = self.state.lock().unwrap().utterance.as_mut().filter(|u| params["id"].as_u64() == Some(u.id as u64)) {
+                    let wait = u.listen.map_or(Duration::from_secs(8), |(w, _)| w);
+                    if u.trigger != "button" {
+                        u.listen = Some((wait, pause));
+                    }
+                }
+                self.reply(id, json!({}));
+            }
             other => self.refuse(id, &format!("the notch has no {other}")),
         }
     }
@@ -318,8 +336,13 @@ impl Board {
         let ok = |text: &str| json!({"content": [{"type": "text", "text": text}], "isError": false});
         match name {
             "react" => {
-                tell(Event::React { name: args["name"].as_str().unwrap_or_default().to_string() });
-                ok("ok")
+                // As the board: no reaction over a conversation.
+                if self.state.lock().unwrap().voice != "idle" {
+                    return json!({"content": [{"type": "text", "text": "not now: a conversation is on"}], "isError": true});
+                }
+                let name = args["name"].as_str().unwrap_or_default().to_string();
+                tell(Event::React { name: name.clone() });
+                ok(&format!("reacting: {name}"))
             }
             "get_state" => {
                 let state = self.state.lock().unwrap();
@@ -364,7 +387,7 @@ impl Board {
             state.next_id = state.next_id.wrapping_add(1).max(1);
             let now = Instant::now();
             state.utterance =
-                Some(Utterance { id: state.next_id, trigger: trigger.to_string(), seq: 0, started: now, loud: 0, speech: false, last_loud: now, listen, ready: false });
+                Some(Utterance { id: state.next_id, trigger: trigger.to_string(), seq: 0, started: now, loud: 0, speech: false, last_loud: now, listen, paused: false, ready: false });
             state.used = Some(now);
             state.next_id
         };
@@ -460,13 +483,14 @@ impl Board {
     /// 32 ms the microphone heard, while listening.
     fn heard(&self, samples: &[i16]) {
         let db = level_db(samples);
-        let (frame, end) = {
+        let (frame, end, pause) = {
             let mut state = self.state.lock().unwrap();
             let Some(u) = state.utterance.as_mut().filter(|u| u.ready) else { return };
             let now = Instant::now();
             if db > SPEECH_DB {
                 u.loud += 1;
                 u.last_loud = now;
+                u.paused = false;
                 if u.loud >= SPEECH_FRAMES {
                     u.speech = true;
                 }
@@ -475,16 +499,25 @@ impl Board {
             }
             let frame = crate::voice::audio_frame(u.id, u.seq, samples);
             u.seq = u.seq.wrapping_add(1);
+            let quiet = u.last_loud.elapsed();
+            // A pause has begun: the host may judge the sentence (Smart Turn).
+            let pause = (u.speech && u.listen.is_some() && !u.paused && quiet > HANGOVER).then(|| {
+                u.paused = true;
+                json!({"id": u.id, "ms": u.seq as u64 * 32})
+            });
             let end = match u.listen {
                 _ if u.started.elapsed() > MAX_UTTERANCE => Some("too_long"),
                 Some((wait, _)) if !u.speech && u.started.elapsed() > wait => Some("no_speech"),
-                Some((_, pause)) if u.speech && u.last_loud.elapsed() > pause => Some("pause"),
+                Some((_, pause)) if u.speech && quiet > HANGOVER + pause => Some("pause"),
                 _ => None,
             };
             state.used = Some(now);
-            (frame, end)
+            (frame, end, pause)
         };
         self.send(Channel::AudioUp, &frame);
+        if let Some(params) = pause {
+            self.notify("utterance_pause", params);
+        }
         tell(Event::Level { level: ((db + 60.0) / 50.0).clamp(0.0, 1.0) });
         if let Some(reason) = end {
             self.end(reason);
@@ -695,6 +728,20 @@ fn hello() -> Value {
 
 /// The tools it offers: the real board's `react` when its list is known
 /// (its names are the ones the notch plays too), and a few of its own.
+/// The notch's tools, for a request typed in its field: it acts on the
+/// notch, as one said to it does, not on the board on the desk.
+pub fn typed_tools() -> Vec<crate::link::Tool> {
+    tools().into_iter().filter_map(|t| serde_json::from_value(t).ok()).collect()
+}
+
+/// Run one of [`typed_tools`].
+pub fn call_typed(name: &str, arguments: &Value) -> Result<String, String> {
+    let board = board().ok_or("the notch isn't on")?;
+    let result = board.tool(name, arguments);
+    let text = result["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    if result["isError"].as_bool().unwrap_or(false) { Err(text) } else { Ok(text) }
+}
+
 fn tools() -> Vec<Value> {
     let known = crate::link::load_tools_cache(crate::profile::BoardKind::Yoru).unwrap_or_default();
     let react = known
