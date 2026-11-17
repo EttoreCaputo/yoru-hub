@@ -65,8 +65,6 @@ export type AssistantSettings = {
   /** Ollama: let a model that can think do it, as long as it likes. */
   think: boolean;
   routines: Routines;
-  /** Who Yoru is, for every brain: a level of core/src/character.rs. */
-  character: string;
 };
 
 export type KeySource = "env" | "saved";

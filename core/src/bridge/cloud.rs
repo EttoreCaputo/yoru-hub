@@ -23,10 +23,6 @@ use crate::tts::Tts;
 /// What the board reads of the memory: its prompt has room for little.
 const MEMORY_CHARS: usize = 1200;
 
-/// How Yoru talks, the assistant's own words for it.
-const CHARACTER: &str = "You are friendly and to the point, with a light touch of warmth and a little playful; \
-never chatty, never servile.";
-
 /// `cloud/set`'s arguments, or `{"clear": true}` when something is missing.
 pub(super) fn services(config: &BridgeConfig) -> Value {
     let voice = config.voice.lock().unwrap();
@@ -39,7 +35,7 @@ pub(super) fn services(config: &BridgeConfig) -> Value {
     let (Some(stt), Some(llm), Some(tts)) = (stt, llm, tts) else {
         return json!({"clear": true});
     };
-    let mut out = json!({"name": "Yoru", "character": CHARACTER, "stt": stt, "llm": llm, "tts": tts});
+    let mut out = json!({"name": "Yoru", "stt": stt, "llm": llm, "tts": tts});
     // Optional: with a Tavily key the board looks things up on the web too.
     if let Some(key) = TAVILY.api_key() {
         out["search"] = json!({"url": format!("{}/search", TAVILY.url()), "key": key});

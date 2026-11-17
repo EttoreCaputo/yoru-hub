@@ -227,6 +227,16 @@ label.stack {
 .panel + .panel {
   margin-top: 14px;
 }
+/* Blocks stacked on a page always keep room between them, whatever comes
+   first: a card after a grid of tiles, a note or an error, and a note after
+   a card. One class's weight: stronger than the reset, weaker than any
+   margin a page sets itself. */
+:where(.panel, .tiles, p, ol, details, .test) + :is(.panel, .tiles) {
+  margin-top: 14px;
+}
+:where(.panel, .tiles) + :is(p, ol, .test) {
+  margin-top: 12px;
+}
 .panel h2 {
   font: 600 15px/1.3 var(--sans);
 }

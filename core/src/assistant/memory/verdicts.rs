@@ -68,11 +68,6 @@ impl Memory {
     pub fn verdict_lines(&self, by: Option<&str>, source: &str) -> String {
         self.verdicts(by, source).iter().map(|v| format!("- {}: {}", if v.useful { "useful" } else { "enough" }, v.title)).collect::<Vec<_>>().join("\n")
     }
-
-    /// How many notifications the user ever called useful.
-    pub fn useful_count(&self) -> u32 {
-        self.with_db(|db| db.query_row("SELECT COUNT(*) FROM verdicts WHERE useful = 1", [], |r| r.get(0)).unwrap_or(0))
-    }
 }
 
 #[cfg(test)]
@@ -107,7 +102,6 @@ mod tests {
             m.judge(&note("Calendar", None, title), true);
         }
         assert_eq!(m.braked(None, "Calendar", Urgency::Normal), Urgency::Normal);
-        assert_eq!(m.useful_count(), 2);
         assert!(m.verdict_lines(None, "Calendar").starts_with("- useful: d\n- useful: c\n- enough: b"));
     }
 }

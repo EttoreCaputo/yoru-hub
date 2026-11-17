@@ -318,16 +318,10 @@ struct Lists {
     cloud_checked: Option<Instant>,
     /// The meeting's revision (firmware 0.20.15).
     meeting: Option<Sent<u64>>,
-    /// What Yoru has grown into, counted from the memory, and when it was
-    /// last counted (firmware 0.20.20).
-    growth: Option<Sent<crate::assistant::memory::growth::Growth>>,
-    growth_checked: Option<Instant>,
 }
 
 /// How often the services sent to the board are looked at again.
 const CLOUD_EVERY: Duration = Duration::from_secs(30);
-/// How often the memory is counted for the board's growth.
-const GROWTH_EVERY: Duration = Duration::from_secs(60);
 
 /// One list: whether the board takes it, and what it got last.
 #[derive(Default)]
@@ -345,8 +339,6 @@ impl Lists {
             cloud: has("cloud").then(Sent::default),
             cloud_checked: None,
             meeting: has("meetings").then(Sent::default),
-            growth: has("growth").then(Sent::default),
-            growth_checked: None,
         }
     }
 
@@ -377,21 +369,6 @@ impl Lists {
                     crate::icons::send(link, &source);
                 }
                 let _ = link.call_tool("set_meeting", json!({"state": state, "source": source}), TOOL_TIMEOUT);
-            }
-        }
-        if let (Some(sent), Some(assistant)) = (&mut self.growth, &config.assistant)
-            && self.growth_checked.is_none_or(|t| t.elapsed() >= GROWTH_EVERY)
-        {
-            self.growth_checked = Some(Instant::now());
-            let growth = assistant.memory.growth();
-            if sent.last != Some(growth)
-                && let Ok(result) = link.call_tool("set_growth", json!(growth), TOOL_TIMEOUT)
-                && !result.is_error
-            {
-                sent.last = Some(growth);
-                if let Some(new) = result.structured_content.as_ref().and_then(|s| s["new"].as_array()).filter(|n| !n.is_empty()) {
-                    eprintln!("growth: the board unlocked {new:?}");
-                }
             }
         }
         if let Some(sent) = &mut self.cloud
@@ -498,7 +475,7 @@ fn say_fn(link: &Arc<Link>, speaker: &Arc<Speaker>, config: &BridgeConfig) -> cr
         let spoken = if recorded {
             speaker.speak_recorded(&link, text, language)?
         } else {
-            let tts = voice.lock().unwrap().tts.clone().ok_or("the bridge isn't speaking: turn on spoken replies in the app, or run companion --tts")?;
+            let tts = voice.lock().unwrap().tts.clone().ok_or("the bridge isn't speaking: turn on spoken replies in the app, or run yoru --tts")?;
             speaker.speak(&link, &tts, text, language)?
         };
         Ok(serde_json::to_value(spoken).unwrap_or_default())

@@ -2,8 +2,7 @@
 //! person, kept on their node: the mean of the WeSpeaker embeddings
 //! (256 numbers, from FluidAudio through `yoru-audio voiceprint`, see
 //! [`crate::voiceprint`]) of what they said. An utterance is theirs when its
-//! print is near enough to it. Alongside, how they usually talk (loudness,
-//! pitch, pace), for telling how they feel now ([`super::feelings`]).
+//! print is near enough to it.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,19 +12,11 @@ use super::{Memory, from_blob, search::cosine, to_blob};
 /// (WeSpeaker on 3 s or more); between, nobody is named.
 pub const SAME_SPEAKER: f32 = 0.6;
 
-/// How a person usually talks, learnt slowly from what they say.
+/// What is kept with a person's voice print (the `voice` column).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
 pub struct Usual {
     /// Prints averaged into their voice print.
     pub prints: u32,
-    /// Utterances the rest was learnt from.
-    pub heard: u32,
-    /// dBFS.
-    pub loudness: f32,
-    /// Hz.
-    pub pitch: f32,
-    /// Words a second.
-    pub pace: f32,
 }
 
 pub fn unit(mut v: Vec<f32>) -> Vec<f32> {
@@ -80,27 +71,6 @@ impl Memory {
     /// Whether anyone's voice is known.
     pub fn knows_voices(&self) -> bool {
         self.with_db(|db| db.query_row("SELECT count(*) FROM entities WHERE voiceprint IS NOT NULL", [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0)
-    }
-
-    pub fn usual(&self, person: i64) -> Usual {
-        self.json(person, "voice")
-    }
-
-    /// Learn a little more of how `person` usually talks.
-    pub fn learn_usual(&self, person: i64, loudness: f32, pitch: Option<f32>, pace: Option<f32>) {
-        let mut u = self.usual(person);
-        // The first few set it, then it moves slowly.
-        let k = 1.0 / (u.heard.min(29) as f32 + 1.0);
-        let mix = |old: f32, new: f32| if old == 0.0 { new } else { old + (new - old) * k };
-        u.loudness = mix(u.loudness, loudness);
-        if let Some(p) = pitch {
-            u.pitch = mix(u.pitch, p);
-        }
-        if let Some(p) = pace {
-            u.pace = mix(u.pace, p);
-        }
-        u.heard += 1;
-        self.set_json(person, "voice", &u);
     }
 }
 

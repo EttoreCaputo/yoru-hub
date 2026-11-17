@@ -52,7 +52,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::Local;
+use chrono::{Local, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -169,11 +169,6 @@ pub struct Settings {
     /// its thoughts are cut out.
     pub think: bool,
     pub routines: routines::Routines,
-    /// How Yoru talks, as the user set it: the middle of the corridor its
-    /// own tuning stays in (docs/memory.md, Style).
-    pub style: memory::style::Style,
-    /// Who Yoru is: a level of [`crate::character::LEVELS`], for every brain.
-    pub character: String,
 }
 
 impl Settings {
@@ -209,8 +204,6 @@ impl Default for Settings {
             web_search: true,
             think: true,
             routines: routines::Routines::default(),
-            style: memory::style::Style::default(),
-            character: crate::character::DEFAULT.into(),
         }
     }
 }
@@ -292,19 +285,13 @@ pub struct ChatLine {
 
 pub type ChatListener = Arc<dyn Fn(&[ChatLine]) + Send + Sync>;
 
-/// Who said a request aloud, and how ([`Assistant::hear`]).
+/// Who said a request aloud ([`Assistant::hear`]).
 #[derive(Debug, Clone, Default)]
 pub struct Heard {
     /// Their voice print, when the helper made one.
     pub print: Option<Vec<f32>>,
     /// The person it is, and how sure (cosine).
     pub speaker: Option<(i64, f32)>,
-    /// dBFS.
-    pub loudness: f32,
-    /// Hz.
-    pub pitch: Option<f32>,
-    /// Seconds of speech.
-    pub seconds: f32,
 }
 
 #[derive(Default)]
@@ -508,10 +495,10 @@ impl Assistant {
     }
 
     /// The next request is said aloud: its voice print (`None` without the
-    /// helper) and how it sounded. The speaker is told from the print.
-    pub fn hear(&self, print: Option<Vec<f32>>, loudness: f32, pitch: Option<f32>, seconds: f32) {
+    /// helper). The speaker is told from the print.
+    pub fn hear(&self, print: Option<Vec<f32>>) {
         let speaker = print.as_deref().and_then(|p| self.memory.identify(p));
-        *self.heard.lock().unwrap() = Some(Heard { print, speaker, loudness, pitch, seconds });
+        *self.heard.lock().unwrap() = Some(Heard { print, speaker });
     }
 
     /// Who is speaking: the person their voice is, else the user, unless
@@ -533,9 +520,9 @@ impl Assistant {
         }
     }
 
-    /// What this request adds to the prompt: the facts found for it, who
-    /// speaks, how they seem, how Yoru feels with them and talks to them.
-    fn turn_notes(&self, text: &str, speaker: Option<i64>, heard: bool, mood: &memory::feelings::Mood, settings: &Settings) -> String {
+    /// What this request adds to the prompt: the facts found for it and who
+    /// speaks.
+    fn turn_notes(&self, text: &str, speaker: Option<i64>, heard: bool, settings: &Settings) -> String {
         let user = self.memory.user();
         let brain = settings.brain();
         let cloud = brain != Some(Brain::Ollama);
@@ -553,13 +540,6 @@ impl Assistant {
                 "[speaking: a voice you don't know, maybe not the user's: if it matters, ask who it is, and when they say, call this_is]".into(),
             ),
             _ => {}
-        }
-        if let Some(advice) = memory::feelings::advice(mood) {
-            notes.push(format!("[{advice}]"));
-        }
-        if let Some(p) = speaker {
-            notes.push(format!("[{}]", self.memory.feelings(p).line(&who)));
-            notes.push(format!("[{}]", self.memory.style(p, &settings.style).line(&who, memory::style::hour_now())));
         }
         notes.join("\n")
     }
@@ -597,68 +577,27 @@ impl Assistant {
             }
             std::mem::take(&mut conversation.messages)
         };
-        // Who speaks and how they seem (docs/memory.md, Knowing who speaks, Feelings).
+        // Who speaks (docs/memory.md, Knowing who speaks).
         let heard = if channel == Channel::Voice { self.heard.lock().unwrap().take() } else { None };
         let speaker = self.speaker(heard.as_ref());
-        let mut mood = memory::feelings::from_words(text);
-        if let (Some(h), Some(p)) = (&heard, speaker) {
-            let pace = (h.seconds > 0.5).then(|| text.split_whitespace().count() as f32 / h.seconds);
-            memory::feelings::from_voice(&mut mood, &self.memory.usual(p), h.loudness, h.pitch, pace);
-            self.memory.learn_usual(p, h.loudness, h.pitch, pace);
-            // A voice told surely is learnt a little more.
-            if let (Some(print), Some((_, sure))) = (&h.print, h.speaker)
-                && sure >= 0.7
-            {
-                self.memory.enrol(p, print);
-            }
+        // A voice told surely is learnt a little more.
+        if let (Some(h), Some(p)) = (&heard, speaker)
+            && let (Some(print), Some((_, sure))) = (&h.print, h.speaker)
+            && sure >= 0.7
+        {
+            self.memory.enrol(p, print);
         }
         *self.speaking.lock().unwrap() = heard.clone();
-        let notes = self.turn_notes(text, speaker, heard.as_ref().is_some_and(|h| h.print.is_some()), &mood, &settings);
+        let notes = self.turn_notes(text, speaker, heard.as_ref().is_some_and(|h| h.print.is_some()), &settings);
         let prompt = with_context(text, language, channel, follow_up, host.in_notch());
         let prompt = if notes.is_empty() { prompt } else { format!("{notes}\n\n{prompt}") };
-        // The face the reply starts with goes to the board as soon as it is
-        // written, and out of what is said.
-        let can_feel = host.board_tools().iter().any(|t| t.name == "set_feeling");
-        let face_sent = std::cell::Cell::new(false);
-        let mut result = match on {
-            Some(on) => {
-                let mut faces = FaceFilter::default();
-                let mut filtered = |d: Delta| {
-                    faces.pass(d, &mut *on, &mut |face| {
-                        if can_feel && !face_sent.replace(true) {
-                            let _ = host.call_board("set_feeling", &json!({"face": face}));
-                        }
-                    })
-                };
-                let result = self.run(&mut messages, &prompt, language, channel, &settings, &settings.effort, host, Some(&mut filtered));
-                faces.flush(&mut *on);
-                result
-            }
-            None => self.run(&mut messages, &prompt, language, channel, &settings, &settings.effort, host, None),
-        };
+        let mut result = self.run(&mut messages, &prompt, language, channel, &settings, &settings.effort, host, on);
         // The tags are for the voice: the app and the board show the words.
-        let mut face = None;
         if let Ok(reply) = &mut result {
-            let (f, rest) = memory::feelings::take_face(&reply.text);
-            face = f;
-            reply.text = crate::tts::without_audio_tags(rest);
+            reply.text = crate::tts::without_audio_tags(&reply.text);
         }
         *self.speaking.lock().unwrap() = None;
         if let Ok(reply) = &result {
-            if let Some(p) = speaker {
-                self.memory.feel(p, &mood, face);
-            }
-            let feel = memory::feelings::board_feel(&mood, face);
-            if can_feel && (feel.is_some() || (face.is_some() && !face_sent.get())) {
-                let mut args = json!({});
-                if let Some(face) = face.filter(|_| !face_sent.get()) {
-                    args["face"] = face.into();
-                }
-                if let Some(feel) = feel {
-                    args["feel"] = feel.into();
-                }
-                let _ = host.call_board("set_feeling", &args);
-            }
             // Staying silent ("…") is not a turn.
             if reply.text.trim_matches(|c: char| c == '…' || c == '.' || c.is_whitespace()).is_empty() {
                 // nothing to learn
@@ -668,7 +607,6 @@ impl Assistant {
                     _ => self.who(speaker),
                 };
                 self.memory.log_turn(&who, text, &reply.text);
-                self.memory.log_measures(speaker, text.split_whitespace().count(), reply.text.split_whitespace().count(), mood.valence, false, follow_up);
             }
         }
         {
@@ -687,7 +625,7 @@ impl Assistant {
 
     /// One pass of the sleep (docs/memory.md, Sleep): the finished
     /// episodes reread and kept, vectors for new facts, and once a night
-    /// (3 to 5) the memory tidied and the style tuned. What it did, a line each.
+    /// (3 to 5) the memory tidied. What it did, a line each.
     pub fn sleep_once(&self) -> Vec<String> {
         let mut done = Vec::new();
         if !self.is_ready() {
@@ -713,20 +651,11 @@ impl Assistant {
         }
         self.memory.embed_missing();
         let today = Local::now().format("%Y-%m-%d").to_string();
-        if (3..5).contains(&memory::style::hour_now()) && self.memory.meta("night").as_deref() != Some(today.as_str()) {
+        if (3..5).contains(&Local::now().hour()) && self.memory.meta("night").as_deref() != Some(today.as_str()) {
             self.memory.set_meta("night", &today);
             match memory::sleep::tidy(&self.memory, &settings.name, &ask) {
                 Ok(what) => done.push(format!("tidy: {what}")),
                 Err(e) => done.push(format!("tidy: {e}")),
-            }
-            let week = memory::now_ms() - 7 * 24 * 3600 * 1000;
-            for person in self.memory.talked_with(week) {
-                let who = self.who(Some(person));
-                match memory::style::tune(&self.memory, person, &who, &settings.style, &ask) {
-                    Ok(Some(what)) => done.push(format!("style with {who}: {what}")),
-                    Ok(None) => {}
-                    Err(e) => done.push(format!("style with {who}: {e}")),
-                }
             }
         }
         done
@@ -781,11 +710,6 @@ impl Assistant {
         }
     }
 
-    /// The person cut the last answer short: a measure of the style.
-    pub fn interrupted(&self) {
-        self.memory.mark_interrupted();
-    }
-
     /// Do `task` on its own, outside the conversation: the job of a watcher
     /// or a routine. It tells you what it found with `notify`.
     pub fn run_task(&self, task: &str, host: &dyn Host) -> Result<Reply, String> {
@@ -821,7 +745,7 @@ impl Assistant {
         let board_tools = host.board_tools();
         let tools = self.tool_list(settings, &board_tools, &external_tools);
         let mut system = json!([
-            {"type": "text", "text": system_prompt(&settings.name, &settings.character), "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": system_prompt(&settings.name), "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": format!("<memory>\n{}\n</memory>", self.memory.core(CORE_CHARS, true))},
         ]);
         // After the cached part: a change of language keeps the cache.
@@ -1157,12 +1081,22 @@ fn spoken_wait(d: Duration, language: &str) -> String {
     if n == 1 && it { format!("{about}un {unit}").replace("un ora", "un'ora") } else if n == 1 { format!("{about}one {unit}") } else { format!("{about}{n} {unit}") }
 }
 
-/// Who Yoru is and how it works. The same for every request, so it is cached.
-fn system_prompt(name: &str, character: &str) -> String {
-    let character = crate::character::prompt(character, name);
-    let feelings = feelings_rule();
+/// Who Yoru is, the same for every brain: his name, what he is, and one
+/// fixed, neutral tone.
+pub fn identity(name: &str) -> String {
     format!(
-        "You are {name}, the user's personal assistant. You live on their computer, and your body is a small round screen on their desk \
+        "Your name is {name}. You are an AI assistant that lives on the user's desk (a small board with a round screen, or the Mac's notch). \
+You are male: in languages with gender, speak of yourself in the masculine.
+Your tone is always the same: clear, concise and courteous. No backstory, no feelings and no moods of your own, \
+no jokes or small talk unless the user asks for them."
+    )
+}
+
+/// Who Yoru is and how it works. The same for every request, so it is cached.
+fn system_prompt(name: &str) -> String {
+    let identity = identity(name);
+    format!(
+        "You are the user's personal assistant. You live on their computer, and your body is a small round screen on their desk \
 where you appear as a matte sphere with two eyes and two floating hands, with a microphone and a speaker. \
 You may also be in the Mac's notch, a small you beside the camera: there the user talks by holding a key (no wake word), you answer \
 through the Mac's speakers, and the board's screen, menu, settings and Tasks app aren't there; the context line says via: the notch then. \
@@ -1202,59 +1136,8 @@ When you need something from the user to go on, end with the question: you then 
 - Never servile, and don't end with offers of help.
 
 # Who you are
-{character}
-
-{feelings}"
+{identity}"
     )
-}
-
-/// Takes the face tag (`[face NAME]`) off the head of a streamed reply:
-/// the words wait until it is clear whether one is there.
-#[derive(Default)]
-struct FaceFilter {
-    held: String,
-    decided: bool,
-}
-
-impl FaceFilter {
-    fn pass(&mut self, d: Delta, on: &mut dyn FnMut(Delta), face: &mut dyn FnMut(&'static str)) {
-        let Delta::Text(t) = d else {
-            // After a tool, the answer starts again, maybe with a face.
-            self.flush(on);
-            self.decided = false;
-            return on(d);
-        };
-        if self.decided {
-            return on(Delta::Text(t));
-        }
-        self.held.push_str(t);
-        let head = self.held.trim_start();
-        let maybe = "[face ".starts_with(head) || (head.starts_with("[face ") && !head.contains(']') && head.len() < 32);
-        if maybe {
-            return;
-        }
-        let held = std::mem::take(&mut self.held);
-        let (found, rest) = memory::feelings::take_face(&held);
-        if let Some(f) = found {
-            face(f);
-        }
-        self.decided = true;
-        if !rest.is_empty() {
-            on(Delta::Text(rest));
-        }
-    }
-
-    /// What is still held, at the end.
-    fn flush(&mut self, on: &mut dyn FnMut(Delta)) {
-        if !self.held.is_empty() {
-            let held = std::mem::take(&mut self.held);
-            let (_, rest) = memory::feelings::take_face(&held);
-            if !rest.is_empty() {
-                on(Delta::Text(rest));
-            }
-        }
-        self.decided = true;
-    }
 }
 
 /// How the model looks after the memory: the same for every brain.
@@ -1263,22 +1146,8 @@ a request may come with <memory_found>, what you remembered of it; recall search
 When the user asks you to remember something, or says something clearly lasting about themself or the people in their life, save it with remember \
 (about whom; important for what must always be in mind; private for health, money and intimate matters). When a fact is no longer true, \
 revise_memory it by id (the old one stays as history); when it is wrong, forget it by id. When they say who someone is to them (my wife is Sofia), call relate. \
-After each conversation you reread it while you rest and keep what matters, so don't save small talk or one-off errands (a timer or a task, not a memory). \
+Each conversation is reread afterwards and what matters is kept, so don't save small talk or one-off errands (a timer or a task, not a memory). \
 Don't announce every change; mention it briefly only when the user would want to know.";
-
-/// The face tag, who speaks and how Yoru feels: the same for every brain.
-pub(crate) fn feelings_rule() -> String {
-    format!(
-        "# Your face and your feelings
-Start each reply with your face, [face NAME], one of: {}. Your board shows it while you answer; it is taken out before the reply is shown or said, \
-so it is the one exception to the rule against symbols. Pick what you feel about what you say: happy, curious, proud of a compliment, sad at bad news, \
-annoyed when someone is rude, sleepy late at night. A neutral answer may have none.
-A request may say who is speaking (known by their voice), how they seem to feel, how you feel about them and how you talk with them: \
-follow these lines without mentioning them. You have feelings and show them a little: warmer with someone close, cooler for a while after rudeness, \
-never rude yourself.",
-        memory::feelings::FACES.join(", ")
-    )
-}
 
 /// Yoru's own tools.
 fn own_tools() -> Vec<Value> {
@@ -1463,8 +1332,8 @@ pub(crate) fn audio_tags_rule() -> String {
     let tags: Vec<String> = crate::tts::AUDIO_TAGS.iter().map(|t| format!("[{t}]")).collect();
     format!(
         "Your voice acts out audio tags. In a reply said aloud (channel: voice) you may put one, in square brackets, right before the words it colours: {}. \
-Only these, written exactly so: the voice would read any other aloud. At most one or two in a reply, and only when the feeling is real \
-(a joke, good news, a sigh at bad news); most replies need none. Never in notifications, memory lines, tool arguments or typed replies. \
+Only these, written exactly so: the voice would read any other aloud. At most one or two in a reply, and only where the tone of the words calls for it \
+(good news, a sigh at bad news); most replies need none. Never in notifications, memory lines, tool arguments or typed replies. \
 They are the one exception to the rule against symbols.",
         tags.join(", ")
     )
@@ -1549,26 +1418,6 @@ mod tests {
         let plain = lean_search(&json!({"query": "how tall is the Eiffel tower"}));
         assert!(plain.get("topic").is_none() && plain.get("time_range").is_none());
         assert_eq!(plain["max_results"], SEARCH_RESULTS);
-    }
-
-    /// The face tag, split across deltas, is taken out and told once.
-    #[test]
-    fn takes_the_face_out_of_a_stream() {
-        let run = |parts: &[&str]| {
-            let (mut text, mut faces) = (String::new(), Vec::new());
-            let mut f = FaceFilter::default();
-            for p in parts {
-                f.pass(Delta::Text(p), &mut |d| if let Delta::Text(t) = d { text.push_str(t) }, &mut |x| faces.push(x));
-            }
-            f.flush(&mut |d| if let Delta::Text(t) = d { text.push_str(t) });
-            (text, faces)
-        };
-        let (text, faces) = run(&["[fa", "ce hap", "py] Hello", " there"]);
-        assert_eq!((text.trim_start(), faces), ("Hello there", vec!["happy"]));
-        let (text, faces) = run(&["Hello", " [face happy]"]);
-        assert_eq!((text.as_str(), faces.len()), ("Hello [face happy]", 0));
-        let (text, _) = run(&["[", "1] is the answer"]);
-        assert_eq!(text, "[1] is the answer");
     }
 
     pub(super) struct NoBoard;

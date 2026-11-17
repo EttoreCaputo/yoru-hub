@@ -1,8 +1,8 @@
 <!--
   Settings as Yoru's wiring: the mirror in the middle, and each part of the
   settings a card wired to him by a trace, with what it says right now. On
-  the left what Yoru is (his brain, his character, his voice, the language
-  he answers in); on the right what he's connected to (the services' keys,
+  the left what Yoru is (his brain, his voice, the language he answers
+  in); on the right what he's connected to (the services' keys,
   the Mac, the board, the data folder). A card opens its own page, with the
   everyday choices first and the technical ones under "Advanced".
 -->
@@ -100,28 +100,22 @@
   const setVoice = (change: Partial<VoiceSettings>) =>
     voice && run(() => call<VoiceInfo>("set_voice", { settings: { ...$state.snapshot(voice!.settings), ...change } }), (v) => (voice = v));
 
-  // The levels of core/src/character.rs, friendly to assistant; any other id is the default.
-  const CHARACTERS = ["friend", "confidant", "analyst", "advisor", "assistant"];
-  const character = $derived(CHARACTERS.includes(store.info?.settings.character ?? "") ? store.info!.settings.character : "confidant");
-  const setCharacter = (c: string) => store.saveSettings((x: AssistantSettings) => (x.character = c));
-
   async function setupAgain() {
     await call("set_onboarding", { done: false, tourVersion: null });
     store.onboarding = { done: false, tour_version: store.onboarding?.tour_version ?? 0 };
   }
 
-  // The parts, wired to Yoru: four on each side, top to bottom.
-  type Part = "brain" | "character" | "voice" | "language" | "keys" | "mac" | "board" | "about";
-  type Wire = { id: Part; side: -1 | 1; row: 0 | 1 | 2 | 3; color: string; icon: string };
+  // The parts, wired to Yoru: three on the left, four on the right, top to bottom.
+  type Part = "brain" | "voice" | "language" | "keys" | "mac" | "board" | "about";
+  type Wire = { id: Part; side: -1 | 1; color: string; icon: string };
   const WIRES: Wire[] = [
-    { id: "brain", side: -1, row: 0, color: "var(--think)", icon: "M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-1.5 5.5A3 3 0 0 0 9 18.5M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 1.5 5.5 3 3 0 0 1-4.5 5.5M12 4v16M9 10h3M12 14h3" },
-    { id: "character", side: -1, row: 1, color: "#ff8fb8", icon: "M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2Z" },
-    { id: "voice", side: -1, row: 2, color: "#c58cff", icon: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" },
-    { id: "language", side: -1, row: 3, color: "#5fd4c8", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5M12 3.5C9.6 5.9 8.5 8.7 8.5 12s1.1 6.1 3.5 8.5" },
-    { id: "keys", side: 1, row: 0, color: "var(--wait)", icon: "M14.5 9.5a4 4 0 1 0-3.6 3.98L5 19.5V21h3v-2h2v-2h1.5l1.7-1.7M15.5 7.5h.01" },
-    { id: "mac", side: 1, row: 1, color: "#7fb2ff", icon: "M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1ZM9.5 5.5v1.2a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V5.5M8 20.5h8M12 17v3.5" },
-    { id: "board", side: 1, row: 2, color: "var(--done)", icon: "M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM9.5 9.5h5v5h-5zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" },
-    { id: "about", side: 1, row: 3, color: "var(--pearl-mid)", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5M12 7.6v.1" },
+    { id: "brain", side: -1, color: "var(--think)", icon: "M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-1.5 5.5A3 3 0 0 0 9 18.5M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 1.5 5.5 3 3 0 0 1-4.5 5.5M12 4v16M9 10h3M12 14h3" },
+    { id: "voice", side: -1, color: "#c58cff", icon: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" },
+    { id: "language", side: -1, color: "#5fd4c8", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5M12 3.5C9.6 5.9 8.5 8.7 8.5 12s1.1 6.1 3.5 8.5" },
+    { id: "keys", side: 1, color: "var(--wait)", icon: "M14.5 9.5a4 4 0 1 0-3.6 3.98L5 19.5V21h3v-2h2v-2h1.5l1.7-1.7M15.5 7.5h.01" },
+    { id: "mac", side: 1, color: "#7fb2ff", icon: "M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1ZM9.5 5.5v1.2a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V5.5M8 20.5h8M12 17v3.5" },
+    { id: "board", side: 1, color: "var(--done)", icon: "M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM9.5 9.5h5v5h-5zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" },
+    { id: "about", side: 1, color: "var(--pearl-mid)", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5M12 7.6v.1" },
   ];
   const PAGES: Part[] = WIRES.map((w) => w.id);
 
@@ -146,7 +140,6 @@
     brain: !store.info?.ready
       ? { text: brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain, dot: "wrong", warn: true }
       : { text: profile ? i18n.t.profiles.names[profile] : `${t.customShort} · ${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
-    character: { text: store.info ? t.characters[character][0] : "—", dot: "" },
     voice: {
       text: !vs ? "—" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "),
       dot: vs?.enabled ? "done" : "",
@@ -162,18 +155,27 @@
   });
 
   // The wiring is drawn on a 1000 × 560 stage; the cards take the outer 31%.
+  // Each side's cards are spread around the middle, 140 apart, however many
+  // there are: four fill the height, three sit centred with Yoru.
   const H = 560;
-  const ROW_Y = [70, 210, 350, 490];
-  /** Where each row's trace meets the case, from straight up (−90°) to straight down. */
-  const ROW_ANGLE = [-48, -16, 16, 48].map((d) => (d * Math.PI) / 180);
+  const ROW_STEP = 140;
+  /** Between two rows' traces where they meet the case. */
+  const ANGLE_STEP = (32 * Math.PI) / 180;
+  /** A card's place on its side, from the middle: −1.5 to 1.5 for four, −1 to 1 for three. */
+  function offset(w: Wire) {
+    const side = WIRES.filter((x) => x.side === w.side);
+    return side.indexOf(w) - (side.length - 1) / 2;
+  }
+  const rowY = (w: Wire) => H / 2 + offset(w) * ROW_STEP;
   let stageW = $state(840);
   const yoruSize = $derived(Math.max(110, Math.min(180, stageW * 0.2)));
   /** The case's radius, in stage units. */
   const rim = $derived(((yoruSize * 1.15) / 2) * (1000 / stageW) * 0.96);
   function trace(w: Wire) {
     const ax = 500 + w.side * 190;
-    const ay = ROW_Y[w.row];
-    const a = ROW_ANGLE[w.row];
+    const ay = rowY(w);
+    /** Where the trace meets the case, from straight up (−90°) to straight down. */
+    const a = offset(w) * ANGLE_STEP;
     const ex = 500 + w.side * rim * Math.cos(a);
     const ey = H / 2 + rim * Math.sin(a);
     // Out of the card flat, then in at 45°, as copper runs on a board.
@@ -181,7 +183,7 @@
     return { d: `M ${ax} ${ay} H ${bx} L ${ex} ${ey}`, ax, ay, ex, ey };
   }
   // Yoru looks at the card under the pointer.
-  const gaze = $derived<Gaze | null>(hover ? { x: wire(hover).side * 0.9, y: (wire(hover).row - 1.5) * 0.5, movedAt: store.now } : store.gaze);
+  const gaze = $derived<Gaze | null>(hover ? { x: wire(hover).side * 0.9, y: offset(wire(hover)) * 0.5, movedAt: store.now } : store.gaze);
 </script>
 
 <div class="page">
@@ -204,7 +206,6 @@
         {/each}
       </nav>
       {#if open === "brain"}{@render brainPage()}
-      {:else if open === "character"}{@render characterPage()}
       {:else if open === "voice"}<Voice />
       {:else if open === "language"}{@render languagePage()}
       {:else if open === "keys"}{@render keysPage()}
@@ -246,7 +247,7 @@
           class:warn={sum.warn}
           style:--c={w.color}
           style:--i={i}
-          style:top="{(ROW_Y[w.row] / H) * 100}%"
+          style:top="{(rowY(w) / H) * 100}%"
           onmouseenter={() => (hover = w.id)}
           onmouseleave={() => (hover = null)}
           onfocus={() => (hover = w.id)}
@@ -357,24 +358,6 @@
         </div>
       </div>
     {/if}
-  {/if}
-{/snippet}
-
-<!-- Who Yoru is: a level on one scale, friendly to assistant, for every brain. -->
-{#snippet characterPage()}
-  {#if store.info}
-    <div class="scale faint" aria-hidden="true">
-      <span>{t.scale[0]}</span><span>{t.scale[1]}</span><span>{t.scale[2]}</span>
-    </div>
-    <section class="tiles levels" aria-label={t.parts.character}>
-      {#each CHARACTERS as c, i (c)}
-        <button class="tile" class:on={character === c} onclick={() => setCharacter(c)}>
-          <b>{i + 1} · {t.characters[c][0]}</b>
-          <span>{t.characters[c][1]}</span>
-        </button>
-      {/each}
-    </section>
-    <p class="dim note">{t.characterHint}</p>
   {/if}
 {/snippet}
 
@@ -691,17 +674,6 @@
     box-shadow: 0 0 36px -16px var(--c);
   }
 
-  /* The five levels side by side, under the scale they sit on. */
-  .levels {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-  .scale {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    margin-bottom: 8px;
-    padding: 0 4px;
-  }
   .small {
     font-size: 12.5px;
     margin: -4px 0 10px;

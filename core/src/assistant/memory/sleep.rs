@@ -1,5 +1,6 @@
-//! Yoru's sleep (docs/memory.md, Learning): after a conversation, a
-//! meeting's summary, and at night, the brain rereads what happened, knowing
+//! The memory's consolidation, called the sleep in the code (docs/memory.md,
+//! Learning): after a conversation, a meeting's summary, and in the nightly
+//! memory tidy, the brain rereads what happened, knowing
 //! who said what, and returns the people, relations and facts worth keeping,
 //! which are merged with what the graph already knows. Always the user's
 //! brain: one model, never a second one for the memory.
@@ -188,7 +189,7 @@ pub fn consolidate(memory: &Memory, episode: &Episode, name: &str, ask: Ask) -> 
         _ => "a conversation between the user and you; each line says who spoke",
     };
     let prompt = format!(
-        "You are {name}, the user's assistant, and you are asleep: reread what happened and keep in your long-term memory what is worth it.\n\n\
+        "You are {name}, the user's assistant, consolidating your memory: reread what happened and keep in your long-term memory what is worth it.\n\n\
          What you already know:\n{}\n\n<episode source=\"{}\" date=\"{}\">\n{text}\n</episode>\n\nThe episode is {what}.\n\n{RULES}",
         known(memory, &text),
         episode.source,
@@ -200,7 +201,7 @@ pub fn consolidate(memory: &Memory, episode: &Episode, name: &str, ask: Ask) -> 
     Ok(summary)
 }
 
-/// At night: the whole memory reread at once, for duplicates, placeholders
+/// The nightly memory tidy: the whole memory reread at once, for duplicates, placeholders
 /// that are now someone, and facts that contradict each other.
 pub fn tidy(memory: &Memory, name: &str, ask: Ask) -> Result<String, String> {
     let graph = memory.graph();
@@ -215,7 +216,7 @@ pub fn tidy(memory: &Memory, name: &str, ask: Ask) -> Result<String, String> {
         return Ok("nothing to tidy".into());
     }
     let prompt = format!(
-        "You are {name}, the user's assistant, and it is night: tidy your long-term memory. \
+        "You are {name}, the user's assistant, doing the nightly memory tidy: tidy your long-term memory. \
          Merge duplicate facts (one fact with the best words, `replaces` the others), close facts a newer one contradicts, \
          merge people that are the same person (a placeholder and someone named), fill in a missing summary or gender. \
          Add no new knowledge: only reorganise what is here. Nothing to do: return empty lists.\n\n\

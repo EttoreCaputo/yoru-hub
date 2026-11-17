@@ -11,7 +11,7 @@ Status: all ten steps are done. The core, the CLI and the app drive several boar
   - **WiFi.** Each kind uses its own service and handshake labels, and a paired board keeps its `kind`.
   - **Legacy version line.**
   - **Tools kept on disk.** One `board-tools-<kind>.json` per kind.
-  - **Agent and quip prompts.** The board's body comes from its profile (`Toolbox::kind`).
+  - **Agent prompt.** The board's body comes from its profile (`Toolbox::kind`).
   - **MCP.** The instructions come from the kind, and the tools are kept per kind.
   - **Bridge.** It reads the kind from `hello`, and leaves faces and rotation alone on a board without them.
 - Step 3: both firmwares are embedded.
@@ -21,10 +21,10 @@ Status: all ten steps are done. The core, the CLI and the app drive several boar
   - **Frontend.** It reads `firmware/*/` with `import.meta.glob` (`app/src/lib/bundled.ts`), and offers updates from the board's own changelog. A board that doesn't say what it is (a blank one) gets a choice of firmware in the device tab and in the setup.
 
 - Step 4: `bridge.rs` is split into `core/src/bridge/`:
-  - **`sampler.rs`.** The computer's side, once for every board: sensors, Claude usage, timers, music, presence, the pet's diary and quips. It publishes each snapshot to `Latest`, and samples only while a session is open, as before.
+  - **`sampler.rs`.** The computer's side, once for every board: sensors, Claude usage, timers, music, presence. It publishes each snapshot to `Latest`, and samples only while a session is open, as before.
   - **`session.rs`.** One board's connection: link, handshake, voice pipeline, gaze thread. It sends each published snapshot after its behaviour tailors it.
   - **`behaviour.rs`, `dualeye.rs`, `yoru.rs`.** `BoardBehaviour`, picked from `hello`. DualEye keeps its faces, rotation and cover. Yoru gets no faces or cover, and its eyes always get the pointer.
-  - **`alerts.rs`.** The thread for Claude alerts, timers and quips. The scene before a quip is the profile's `scene_tool` (`play_eyes` or `react`).
+  - **`alerts.rs`.** The thread for Claude alerts and timers.
 
   It was tried on both boards over USB: each one was recognised and streamed.
 - Step 5: `core/src/bridge/manager.rs`.
@@ -38,7 +38,7 @@ Status: all ten steps are done. The core, the CLI and the app drive several boar
   - **Not yet.** There are no separate `BoardAdded`/`BoardRemoved` events, since `Connected`, `Firmware` and `Disconnected` carry the board. The DualEye faces are still shared between DualEyes. The WiFi path hasn't been tried with the manager.
 - Step 6: `core/src/bridge/floor.rs` and the speaker choice in `alerts.rs`.
   - **Voice floor.** A board's `utterance_start` claims the floor (`Receiving::gated`). While another board holds it, the utterance isn't captured: the board gets `voice/stop` and `voice/state idle`. Its own follow-ups and barge-ins claim it again. The pipeline releases it when the conversation ends, and the manager when the session ends. It lapses 30 s after its holder last started listening. Both firmwares already had `voice/stop`.
-  - **Who speaks.** `Targets::speaker(origin, primary)`: the board a timer was set from (`Timer::board`, set by `Timers::call_tool_from` and passed on to the next pomodoro phase), then `BridgeConfig::primary` (a board id; the app sets it in step 8), then the board of the latest conversation (`Floor::last`), then the first connected. Quips wait while any board is in a conversation.
+  - **Who speaks.** `Targets::speaker(origin, primary)`: the board a timer was set from (`Timer::board`, set by `Timers::call_tool_from` and passed on to the next pomodoro phase), then `BridgeConfig::primary` (a board id; the app sets it in step 8), then the board of the latest conversation (`Floor::last`), then the first connected.
   - **Sidecars.** Not serialised: Whisper, llama.cpp and Piper are HTTP servers that queue concurrent requests, and the floor already keeps conversations one at a time.
   - **Not yet.** Tried only in tests, not with two boards hearing one wake word.
 - Step 7: the hub, MCP and CLI.
@@ -48,7 +48,7 @@ Status: all ten steps are done. The core, the CLI and the app drive several boar
   - **CLI.** `--board <id|kind>` (or `COMPANION_BOARD`), written after the subcommand (`companion call --board yoru react …`), since top-level options conflict with subcommands. `companion boards [--json]`. Streaming runs the Manager with no cap. `--port` pins one session, and lines get a `[board]` tag once a second board shows up. `wifi pair` already kept the kind (step 2).
   - **Tried.** `companion boards` with a Yoru on USB, through the hub of the installed app (an older one without `host/boards`). Not yet with two boards behind the new hub.
 - Step 8: the app's Rust side (`app/src-tauri/src/lib.rs`).
-  - **Manager.** The app runs `Manager` with no cap (a port in the settings pins one). `Devices` keeps a `Link` per session target, plus the host's (waiting, alerts, quips).
+  - **Manager.** The app runs `Manager` with no cap (a port in the settings pins one). `Devices` keeps a `Link` per session target, plus the host's (waiting, alerts).
   - **Events.** Every `ManagerEvent` goes out as `manager`. As `bridge` go the host's own and those of the current board (the primary one, else the first connected), so today's frontend keeps showing one board. `boards` (`[DeviceInfo]`) goes out when a board connects, says its firmware, leaves, or the primary changes.
   - **Commands.** Every command about a board takes an optional `board` (an id, a kind or a session's target), and without it reaches the current board. `status` takes `board` and adds `board`, `board_kind`, `boards` and `primary`. New: `boards`, `set_primary`, `yoru_settings`, `yoru_set_setting`, `yoru_react` and `yoru_show_menu`.
   - **Settings.** `boards: {id: {faces, rotation}}` and `primary`. The old `faces` and `rotation` are what a DualEye without its own gets. In core, `BridgeConfig::board_settings` and `screens(id)` give each DualEye its own faces, so they are no longer shared.
@@ -61,9 +61,7 @@ Status: all ten steps are done. The core, the CLI and the app drive several boar
   - **`YoruBoard.svelte`.** The Yoru mirror from `yoru/docs/CONCEPT.md`: a matte sphere in the black, two dark pill eyes that follow the pointer and blink, the state tint and halo from the voice state, and a dim dot with z's while there's no board. The glass/pixels toggle and the face picker are DualEye only.
   - **Device tab.** "Boards", with the primary picker, when there are several. "Yoru", for a Yoru, built from `get_settings`: 0/1 settings as switches, other ranges as sliders, each sent with `set_setting`, plus a button that opens the menu on the board.
   - **Commands.** `monitor` passes `board: boardId` to every board command.
-  - **Voice and Pet tabs on a Yoru.** A Yoru has `set_volume`, `set_mic` (`wake_sound`), `set_pet`, `get_pet` and `play_sound` as DualEye does, so the volume, the wake sound, the pet's switches, its mood card and the sounds stay as they are. It has no `set_eyes` and no `play_eyes`: the eyes/ring switch (Voice) and the idle eyes (Pet) are hidden, and so are their search entries (`Entry.only`). The gallery shows only the scenes in `YORU_REACTIONS` (`scenes.ts`, from `react` in `yoru/docs/protocol.md`) and plays them with `yoru_react`; Yoru's reactions without a scene here are buttons under "More on Yoru", on the board only. The mood card leaves out "Scenes", which `get_pet` doesn't give on a Yoru.
-  - **Yoru's home (`app/src/lib/yoru/`).** A Yoru gets its own window instead of DualEye's telemetry: no gauges, as `yoru/docs/CONCEPT.md` asks. An island over the pet says the one thing that matters now (listening, Claude Code working or done, a timer ringing, the song), and pills beside it show Claude Code and the plan's usage, the music with its controls, the running timer or a quick start, the last conversations and the mood. The mirror has the hands, the `^ ^` eyes and the badge; a click pokes it and the reaction chips play on the board with `yoru_react`. The window keeps the last kind seen (`viewKind`), so an unplugged Yoru sleeps in its own home. The app icon is Yoru.
-  - **Yoru's life (firmware 0.6.0).** `get_pet` on a Yoru adds `needs` (rest, food, fun, company, curiosity, 0–1), `activity` and `alone_s`, and `mood` can be `hungry` (`PetState`, `PetMood` in `monitor.svelte.ts`; its colour and scene in `petMood.ts`, its words in i18n's `pet`). The mood pill shows the five needs instead of the three levels, what it is doing, and a Feed button that calls the board's `feed` through `yoru_feed`, showing the board's error when it sleeps or is busy. A DualEye, and a Yoru before 0.6.0, send no `needs`, so they keep the three levels.
+  - **Yoru's home (`app/src/lib/yoru/`).** A Yoru gets its own window instead of DualEye's telemetry: no gauges, as `yoru/docs/CONCEPT.md` asks. An island over the mirror says the one thing that matters now (listening, Claude Code working or done, a timer ringing, the song), and pills beside it show Claude Code and the plan's usage, the music with its controls, the running timer or a quick start, the last conversations. The mirror has the hands, the `^ ^` eyes and the badge; a click pokes it and the reaction chips play on the board with `yoru_react`. The window keeps the last kind seen (`viewKind`), so an unplugged Yoru sleeps in its own home. The app icon is Yoru.
   - **Not yet.** The mirror and the Yoru tabs haven't been looked at in the running app; the browser preview (`?board=yoru`) has.
 - Step 10: flash and identify per board.
   - **Which port.** The pinned port, else the USB port of the board shown, else the only Espressif device. A blank board has a session too (it shows as "connecting…" in the switcher), so it's picked the same way, with the kind chosen for it; that choice is reset when another board is shown. A board shown on WiFi is refused: esptool needs USB.
@@ -88,7 +86,7 @@ The rest is the plan.
 | Proof labels | `dualeye host` / `dualeye board` | `yoru host` / `yoru board` | `wifi.rs:278, 288` |
 | Session key labels | `dualeye h2b` / `b2h` | `yoru h2b` / `b2h` | `wifi.rs:291-292` |
 | Screens and faces | two, faces and rotation | one, no faces | `bridge.rs:574-588, 832-883`, `hub.rs:56`, `voice.rs:479, 536` |
-| Music cover, media | yes | no (`snapshot.music` still feeds the pet) | `bridge.rs:531, 598-621` |
+| Music cover, media | yes | no | `bridge.rs:531, 598-621` |
 | Gaze | only while the eyes face shows | always (the board decides) | `bridge.rs:486-494, 666` |
 | Timer screen | `ShowOn` | none | `timers.rs:71, 756` |
 | Settings | faces and rotations from `get_state` | the `get_settings` table plus `set_setting` | |
@@ -107,9 +105,8 @@ Behaviour that differs by kind goes behind a `BoardBehaviour` trait (`on_ready`,
 - **Shared services, once:**
   - the sensor collector;
   - Claude usage, timers, music, presence;
-  - pet, diary, quips;
   - the voice models and the hub.
-- **One sampler thread.** It builds one snapshot per second and runs timers, alerts and quips. It publishes the snapshot to a watch slot. There is a single sampler so that a timer fires once, not once per board.
+- **One sampler thread.** It builds one snapshot per second and runs timers and alerts. It publishes the snapshot to a watch slot. There is a single sampler so that a timer fires once, not once per board.
 - **One `BoardSession` per board.** It holds today's `session()` without the sampling: link, reader, voice pipeline, speaker, gaze, and the board's `BoardBehaviour`.
 - **Discovery, every few seconds:**
   - USB ports that no session owns get a pending session until its `hello`;
@@ -117,14 +114,14 @@ Behaviour that differs by kind goes behind a `BoardBehaviour` trait (`on_ready`,
   - one mDNS daemon browses both services.
 - **USB preference.** When a USB session's `id` matches a WiFi session, the WiFi one closes, as `watch_usb` does today.
 
-**Events.** Events become `ManagerEvent { board, kind, event }`. `board` is empty for events of the computer (snapshot, timer fired, Claude alert, quip). There are new events `BoardAdded` and `BoardRemoved`. `Settings` splits into one variant per kind.
+**Events.** Events become `ManagerEvent { board, kind, event }`. `board` is empty for events of the computer (snapshot, timer fired, Claude alert). There are new events `BoardAdded` and `BoardRemoved`. `Settings` splits into one variant per kind.
 
 `Bridge` stays as a thin wrapper (a Manager with one fixed port) for the CLI and tests.
 
 ### Policies
 
 - **Wake word.** The first board to wake claims the voice floor. Another board that wakes meanwhile gets `voice/stop` and goes back to idle. The floor is released when the conversation ends, or after 30 s at most. Any wake still silences a ringing timer.
-- **Who speaks timers, alerts and quips:** only one board, never an echo. It is chosen in this order:
+- **Who speaks timers and alerts:** only one board, never an echo. It is chosen in this order:
   1. the board the timer was set from;
   2. the primary board (an app setting);
   3. the board with the latest conversation;
@@ -171,7 +168,7 @@ The hooks (`core/src/claude/hooks.rs`) cover `PreToolUse`, `PostToolUse`, `PostT
   - Yoru gets `yoru_settings`, `yoru_set_setting`, `yoru_react` and `yoru_show_menu`.
   - Flashing pauses only the session that owns the port.
 - **Frontend.**
-  - `monitor.svelte.ts` splits into a `Device` per board (link, voice, eyes, pet, firmware, settings) and the shared `Monitor` (snapshot, history, timers).
+  - `monitor.svelte.ts` splits into a `Device` per board (link, voice, eyes, firmware, settings) and the shared `Monitor` (snapshot, history, timers).
   - A device switcher sits in the title bar.
   - `Board.svelte` renders a DualEye and a new `YoruBoard.svelte` renders a Yoru.
   - Settings tabs are split into shared and per device. Yoru's device tab is built from its `get_settings` table: 0/1 settings as switches, ranges as sliders.

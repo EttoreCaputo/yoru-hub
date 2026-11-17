@@ -2,9 +2,10 @@
 //! Yoru's `main/metrics_parser.c`.
 //!
 //! Yoru shows no gauges: it reads only the computer's time and how long since
-//! the last input (`pet`: night brightness, and when it gets sleepy) and the
-//! timer that ends first (`timer`). Firmware 0.10.0 takes a snapshot without CPU or GPU
-//! readings, as long as it has `pet`.
+//! the last input (`pet`, for the night brightness and the idle screen) and
+//! the timer that ends first (`timer`). Firmware 0.10.0 takes a snapshot
+//! without CPU or GPU readings, as long as it has `pet`. The key's name is
+//! kept for compatibility: old boards need it.
 
 use serde::{Deserialize, Serialize};
 

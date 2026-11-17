@@ -672,10 +672,9 @@ const it: Messages = {
   settings: {
     title: "Impostazioni",
     lede: "Tutto di Yoru, una parte alla volta.",
-    parts: { brain: "Pensa e parla", character: "Carattere", voice: "Voce", language: "Lingua", keys: "Chiavi", mac: "Sul Mac", board: "La scheda", about: "Informazioni" },
+    parts: { brain: "Pensa e parla", voice: "Voce", language: "Lingua", keys: "Chiavi", mac: "Sul Mac", board: "La scheda", about: "Informazioni" },
     partLedes: {
       brain: "Con cosa Yoru pensa, ti sente e ti risponde: scegli un profilo, poi cambia i dettagli se vuoi.",
-      character: "Chi è Yoru quando parla.",
       voice: "Come Yoru ti sente e ti risponde a voce.",
       language: "La lingua dell'app, e quella in cui Yoru ti risponde.",
       keys: "Le chiavi dei servizi che Yoru usa. Restano su questo Mac.",
@@ -740,15 +739,6 @@ const it: Messages = {
     effortHint: "Più ragiona, più è preciso e più è lento.",
     claudeModels: { opus: "Opus — il più intelligente", sonnet: "Sonnet — veloce e capace", haiku: "Haiku — il più rapido ed economico" },
     webSearch: "Cerca sul web quando serve",
-    scale: ["Amichevole", "Analitico", "Assistente"],
-    characters: {
-      friend: ["Amico", "Caldo e giocoso: scherza, chiacchiera, ha una vita e opinioni sue"],
-      confidant: ["Complice", "Amichevole ma acuto: due chiacchiere, poi opinioni sincere e motivate"],
-      analyst: ["Analista", "Calmo e preciso: fatti, numeri e il perché; dice quando non è sicuro"],
-      advisor: ["Consigliere", "Pensa un passo avanti: risponde, poi il passo dopo o l'opzione migliore"],
-      assistant: ["Assistente", "Discreto e professionale: solo quello che chiedi, con meno parole possibili"],
-    } as Record<string, [string, string]>,
-    characterHint: "Lo stesso carattere arriva a ogni cervello: il modello dell'assistente, Gemini Live, il modello su questo Mac e le battute che fa di sua iniziativa. Cambia come parla, mai cosa fa.",
     appLanguage: "La lingua dell'app",
     system: "Come il sistema",
     notchOn: "Nella notch",

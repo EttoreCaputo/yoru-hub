@@ -252,12 +252,7 @@ pub fn assistant_info(state: State<AppState>) -> AssistantInfo {
 
 #[tauri::command]
 pub fn set_assistant_settings(state: State<AppState>, settings: Settings) -> Result<AssistantInfo, String> {
-    let character = settings.character.clone();
     state.assistant.set_settings(settings).map_err(|e| e.to_string())?;
-    // The local model talks in the same character as the assistant.
-    if let Some(agent) = state.voice.lock().unwrap().agent.clone() {
-        agent.set_personality(&yoru_core::agent::personality_prompt(&character));
-    }
     Ok(info_of(&state.assistant))
 }
 

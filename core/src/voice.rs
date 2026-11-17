@@ -254,17 +254,15 @@ pub struct VoiceConfig {
 }
 
 /// The voice print of `samples` (once the helper's models are here: the
-/// first utterance starts their download) and their prosody.
-fn listen_to(printer: Option<&Arc<crate::voiceprint::Voiceprinter>>, samples: &[i16]) -> (Option<Vec<f32>>, (f32, Option<f32>, f32)) {
-    let prosody = crate::voiceprint::prosody(samples);
-    let print = printer.filter(|_| samples.len() >= 16_000).and_then(|p| {
+/// first utterance starts their download).
+fn listen_to(printer: Option<&Arc<crate::voiceprint::Voiceprinter>>, samples: &[i16]) -> Option<Vec<f32>> {
+    printer.filter(|_| samples.len() >= 16_000).and_then(|p| {
         if !p.is_ready() {
             p.prepare();
             return None;
         }
         p.print(samples).map_err(|e| eprintln!("voice print: {e}")).ok()
-    });
-    (print, prosody)
+    })
 }
 
 /// Whisper's output for silence or noise rather than words.
@@ -467,13 +465,13 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                     Err(if follow_up { "idle" } else { "error" })
                 }
                 Some(stt) => match times.transcribed({
-                    // Whose voice and how it sounded, while the words are transcribed.
+                    // Whose voice it is, while the words are transcribed.
                     let (transcribed, heard) = thread::scope(|scope| {
                         let heard = session.assistant.as_ref().map(|_| scope.spawn(|| listen_to(config.voiceprint.as_ref(), &utterance.samples)));
                         (stt.transcribe(&utterance.samples), heard.and_then(|h| h.join().ok()))
                     });
-                    if let (Some(a), Some((print, (loudness, pitch, seconds)))) = (&session.assistant, heard) {
-                        a.hear(print, loudness, pitch, seconds);
+                    if let (Some(a), Some(print)) = (&session.assistant, heard) {
+                        a.hear(print);
                     }
                     transcribed
                 }) {
@@ -524,13 +522,7 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 None => true,
             },
             Next::Spoken { .. } => true,
-            Next::Interrupted => {
-                // Cut short: a measure of how Yoru talks (docs/memory.md, Style).
-                if let Some(a) = &session.assistant {
-                    a.interrupted();
-                }
-                false
-            }
+            Next::Interrupted => false,
         };
         if over {
             chain = FollowUp::default();
@@ -1017,7 +1009,7 @@ fn respond_live(link: &Link, session: &Session, assistant: &crate::Assistant, si
     }
     let lines = actions.iter().map(|x| if x.ok { format!("{}: {}", x.tool, x.summary) } else { format!("{} failed: {}", x.tool, x.summary) }).collect();
     sink(BridgeEvent::Reply { id: utterance.id, text: turn.said.clone(), language: language.clone(), actions: lines, understood: true, by: "gemini-live".into(), elapsed_ms: started.elapsed().as_millis() as u64 });
-    assistant.live_turn(&turn.heard, &turn.said, actions, follow_up, shown && session.assistant.is_some());
+    assistant.live_turn(&turn.heard, &turn.said, actions, shown && session.assistant.is_some());
     if !kept.is_empty() && turn.said.chars().any(char::is_alphanumeric) {
         // Kept apart from ElevenLabs' (crate::spoken::GEMINI_LIVE), off this
         // thread: the next turn shouldn't wait for the disk.

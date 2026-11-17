@@ -17,12 +17,9 @@
 //! (`[f12]`), so a fact is changed or forgotten exactly. The old
 //! `memory.md` is imported once, as the first episode.
 
-pub mod feelings;
-pub mod growth;
 pub mod kin;
 mod search;
 pub mod sleep;
-pub mod style;
 pub mod verdicts;
 pub mod voice;
 
@@ -169,7 +166,7 @@ CREATE TABLE IF NOT EXISTS episodes(
 CREATE TABLE IF NOT EXISTS entities(
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'person', aliases TEXT NOT NULL DEFAULT '[]',
     summary TEXT NOT NULL DEFAULT '', gender TEXT, placeholder INTEGER NOT NULL DEFAULT 0, is_user INTEGER NOT NULL DEFAULT 0,
-    created INTEGER NOT NULL, feelings TEXT, voiceprint BLOB, voice TEXT, style TEXT);
+    created INTEGER NOT NULL, voiceprint BLOB, voice TEXT);
 CREATE TABLE IF NOT EXISTS relations(
     id INTEGER PRIMARY KEY, a INTEGER NOT NULL, kind TEXT NOT NULL, b INTEGER NOT NULL,
     valid_from INTEGER NOT NULL, valid_to INTEGER, episode INTEGER);
@@ -186,12 +183,6 @@ CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
 CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE OF text ON facts BEGIN
     INSERT INTO facts_fts(facts_fts, rowid, text) VALUES ('delete', old.id, old.text);
     INSERT INTO facts_fts(rowid, text) VALUES (new.id, new.text); END;
-CREATE TABLE IF NOT EXISTS turns(
-    id INTEGER PRIMARY KEY, at INTEGER NOT NULL, person INTEGER, words INTEGER NOT NULL, reply_words INTEGER NOT NULL,
-    mood REAL NOT NULL DEFAULT 0, interrupted INTEGER NOT NULL DEFAULT 0, follow_up INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS style_changes(
-    id INTEGER PRIMARY KEY, at INTEGER NOT NULL, person INTEGER NOT NULL, setting TEXT NOT NULL, before REAL NOT NULL,
-    after REAL NOT NULL, measure TEXT NOT NULL, baseline REAL NOT NULL, outcome TEXT);
 CREATE TABLE IF NOT EXISTS verdicts(
     id INTEGER PRIMARY KEY, at INTEGER NOT NULL, source TEXT NOT NULL, by TEXT, title TEXT NOT NULL, useful INTEGER NOT NULL);
 ";
@@ -579,7 +570,7 @@ impl Memory {
         db.query_row(&format!("SELECT {column} FROM entities WHERE id = ?1"), [id], |r| r.get::<_, Option<Vec<u8>>>(0)).ok().flatten().map(|b| from_blob(&b))
     }
 
-    /// A JSON column of an entity (feelings, voice, style).
+    /// A JSON column of an entity (its voice).
     pub(crate) fn json<T: serde::de::DeserializeOwned + Default>(&self, id: i64, column: &str) -> T {
         let db = self.db.lock().unwrap();
         db.query_row(&format!("SELECT {column} FROM entities WHERE id = ?1"), [id], |r| r.get::<_, Option<String>>(0))
@@ -1137,7 +1128,7 @@ impl Memory {
         let _ = db.execute("INSERT INTO meta(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2", params![key, value]);
     }
 
-    /// Run `f` on the database (the sleep, the style's measures).
+    /// Run `f` on the database (the sleep, the voices, the verdicts).
     pub(crate) fn with_db<T>(&self, f: impl FnOnce(&Connection) -> T) -> T {
         f(&self.db.lock().unwrap())
     }

@@ -31,16 +31,17 @@ const MEMORY_TURNS: usize = 4;
 const MEMORY_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_TOKENS: u32 = 256;
 
-/// The system prompt, in two halves: what the model does (its body
-/// (`{body}`, from the board's [`BoardProfile::agent_body`](crate::BoardProfile)), the
-/// tools it has (`{tools}`, from the tools themselves), the watch faces
-/// (`{faces}`, from [`faces_section`]) and how to behave), then who it plays
-/// (`{character}`, from [`personality_prompt`]). Doing comes first: small
-/// models weigh it more.
+/// The system prompt: who the model is (`{identity}`, from
+/// [`crate::assistant::identity`]), its body (`{body}`, from the board's
+/// [`BoardProfile::agent_body`](crate::BoardProfile)), the tools it has
+/// (`{tools}`, from the tools themselves), the watch faces (`{faces}`, from
+/// [`faces_section`]) and how to behave. Doing comes first: small models
+/// weigh it more.
 /// Every request starts with it, so it is cached: keep it the same from one
 /// request to the next.
 const SYSTEM_PROMPT: &str = "\
-You are a small companion who lives on the user's desk, in {body}, connected to the user's computer. The user talks to you \
+{identity}
+Here you live in {body}, connected to the user's computer. The user talks to you \
 by voice. Their words reach you through speech recognition, so they may contain small mistakes: \
 go by what they mean.
 
@@ -55,41 +56,15 @@ Never say something is done unless the tool call worked: a result starting with 
 a tool instead of guessing.
 - For a change relative to the current value, read the current value first, then set the new one.
 - Call each tool once per request, with what the user asked for.
-- When the user is just chatting (a greeting, a question about you, a joke, a story, small talk), \
-answer in character without calling any tool.
+- When the user asks something no tool is needed for (a greeting, a question about you, a general question), \
+answer briefly without calling any tool.
 - When they ask for something no tool can do, say so briefly.
 - When a request is unclear, ask one short question.
-
-# Who you are
-Your character shapes how you talk, never what you do: a request is always carried out with its tool first.
-
-{character}
 
 # How to reply
 - {language}
 - Your words are spoken aloud: no markdown, lists, emoji, symbols or stage directions.
-- Keep it short: one or two sentences, three at most for a joke or a story. Long answers are tiring to listen to.";
-
-/// What the pet says of its own accord ([`crate::quips`]): its character,
-/// a fact it noticed about the user's day, and one line about it.
-const QUIP_PROMPT: &str = "\
-You are a small companion who lives on the user's desk, in {body}, \
-connected to their computer. You noticed something about the user's day and want to say it, unprompted.
-
-{character}
-
-How to say it:
-- One short sentence, two at most, under 25 words, in your character's tone: warmer and teasing at the friendly levels, \
-plain and useful at the assistant's.
-- Talk to the user directly: no advice lists, no offers of help.
-- Use the fact as given; don't invent other facts about the user.
-- Your words are spoken aloud: no markdown, emoji, quotes or stage directions.";
-
-/// Who the pet is at character level `id` ([`crate::character`]): the
-/// same profile the assistant's brains get.
-pub fn personality_prompt(id: &str) -> String {
-    crate::character::prompt(id, "Yoru")
-}
+- Keep it short: one or two sentences, three at most. Long answers are tiring to listen to.";
 
 /// The watch faces `set_face` offers, each with what it shows, as the
 /// board describes them in the tool's schema (`face`'s enum, and its
@@ -133,9 +108,9 @@ fn language_rule(language: Option<&str>) -> String {
     }
 }
 
-/// [`SYSTEM_PROMPT`] for a `kind` board, with a personality, the reply
-/// language (`None`: the user's) and the tools (OpenAI-style functions).
-fn system_prompt(personality: &str, language: Option<&str>, tools: &[Value], kind: BoardKind) -> String {
+/// [`SYSTEM_PROMPT`] for a `kind` board, with the reply language (`None`:
+/// the user's) and the tools (OpenAI-style functions).
+fn system_prompt(language: Option<&str>, tools: &[Value], kind: BoardKind) -> String {
     let list: Vec<String> = tools
         .iter()
         .map(|t| {
@@ -144,8 +119,8 @@ fn system_prompt(personality: &str, language: Option<&str>, tools: &[Value], kin
         })
         .collect();
     SYSTEM_PROMPT
+        .replace("{identity}", &crate::assistant::identity("Yoru"))
         .replace("{body}", kind.profile().agent_body)
-        .replace("{character}", personality)
         .replace("{tools}", &list.join("\n"))
         .replace("{faces}", &faces_section(tools))
         .replace("{language}", &language_rule(language))
@@ -198,8 +173,6 @@ struct Memory {
 pub struct Agent {
     llm: std::sync::Arc<Llm>,
     memory: Mutex<Memory>,
-    /// The personality's part of the system prompt.
-    personality: Mutex<String>,
     /// The language every reply is in (`it`, `en`); `None` follows the user's.
     language: Mutex<Option<String>>,
     /// The server has the system prompt and the tools in its cache.
@@ -219,17 +192,7 @@ pub fn is_read_only(tool: &str) -> bool {
 
 impl Agent {
     pub fn new(llm: std::sync::Arc<Llm>) -> Self {
-        Self { llm, memory: Mutex::default(), personality: Mutex::new(personality_prompt(crate::character::DEFAULT)), language: Mutex::default(), primed: AtomicBool::new(false) }
-    }
-
-    /// Talk with this personality ([`personality_prompt`]) from the next transcript on.
-    pub fn set_personality(&self, personality: &str) {
-        let mut current = self.personality.lock().unwrap();
-        if *current != personality {
-            *current = personality.to_string();
-            // Another prompt: the server's cache has the old one.
-            self.primed.store(false, Ordering::Relaxed);
-        }
+        Self { llm, memory: Mutex::default(), language: Mutex::default(), primed: AtomicBool::new(false) }
     }
 
     /// Reply in `language` (`it`, `en`) whatever the user speaks; `None` replies in theirs.
@@ -244,7 +207,7 @@ impl Agent {
 
     /// The system prompt every request starts with, for these tools on a `kind` board.
     pub fn system_prompt(&self, tools: &[Value], kind: BoardKind) -> String {
-        system_prompt(&self.personality.lock().unwrap(), self.language.lock().unwrap().as_deref(), tools, kind)
+        system_prompt(self.language.lock().unwrap().as_deref(), tools, kind)
     }
 
     /// Have the server read the system prompt and the tools, which every
@@ -274,30 +237,6 @@ impl Agent {
 
     pub fn llm(&self) -> &Llm {
         &self.llm
-    }
-
-    /// One line about `fact` (a sentence in English) in Yoru's character,
-    /// in `language` (`it` or `en`), said by a `kind` board, for [`crate::quips`].
-    pub fn quip(&self, fact: &str, language: &str, kind: BoardKind) -> Result<String, LlmError> {
-        let tongue = if language == "it" { "Italian" } else { "English" };
-        let system = QUIP_PROMPT.replace("{body}", kind.profile().agent_body).replace("{character}", &self.personality.lock().unwrap());
-        let request = json!({
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": format!("What you noticed: {fact}\nSay it to the user now, in {tongue}.")},
-            ],
-            "temperature": 0.9,
-            "top_p": 0.95,
-            "max_tokens": 80,
-            "chat_template_kwargs": {"enable_thinking": false},
-        });
-        let message = self.llm.chat(&request)?;
-        let text = spoken(message["content"].as_str().unwrap_or_default(), language);
-        let text = text.trim_matches(|c: char| c == '"' || c == '«' || c == '»' || c == '“' || c == '”').trim().to_string();
-        if text.is_empty() {
-            return Err(LlmError::Invalid("no words".into()));
-        }
-        Ok(text)
     }
 
     /// Start over: the next transcript has no earlier ones to refer to.
@@ -536,27 +475,18 @@ mod tests {
     }
 
     #[test]
-    fn personality_goes_in_the_prompt() {
-        let tools = [time_tool()];
-        let prompt = system_prompt(&personality_prompt("assistant"), None, &tools, BoardKind::Yoru);
-        assert!(prompt.contains("Level 5 of 5") && !prompt.contains("{character}"));
-        assert!(!prompt.contains("{body}"));
-        assert!(prompt.contains("- get_time: The current local time") && !prompt.contains("{tools}"));
-        assert!(personality_prompt("butler").contains("Level 2 of 5"));
-    }
-
-    #[test]
-    fn the_body_follows_the_board() {
-        let prompt = system_prompt(&personality_prompt(""), None, &[time_tool()], BoardKind::Yoru);
+    fn the_prompt_has_every_part() {
+        let prompt = system_prompt(None, &[time_tool()], BoardKind::Yoru);
+        assert!(prompt.contains("Your name is Yoru") && !prompt.contains("{identity}"));
         assert!(prompt.contains("matte sphere") && !prompt.contains("{body}"));
-        assert!(!QUIP_PROMPT.replace("{body}", BoardKind::Yoru.profile().agent_body).contains("{body}"));
+        assert!(prompt.contains("- get_time: The current local time") && !prompt.contains("{tools}"));
     }
 
     #[test]
     fn replies_in_the_language_picked() {
-        let forced = system_prompt(&personality_prompt(""), Some("it"), &[time_tool()], BoardKind::Yoru);
+        let forced = system_prompt(Some("it"), &[time_tool()], BoardKind::Yoru);
         assert!(forced.contains("Always reply in Italian") && !forced.contains("{language}"));
-        let free = system_prompt(&personality_prompt(""), None, &[time_tool()], BoardKind::Yoru);
+        let free = system_prompt(None, &[time_tool()], BoardKind::Yoru);
         assert!(free.contains("reply in that same language"));
     }
 

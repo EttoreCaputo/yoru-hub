@@ -15,7 +15,6 @@
 pub mod agent;
 pub mod assistant;
 pub mod bridge;
-pub mod character;
 pub mod claude;
 pub mod cloud;
 #[cfg(feature = "connectors")]

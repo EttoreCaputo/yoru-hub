@@ -1,10 +1,10 @@
 <!--
-  A Yoru, mirrored: one round 466 × 466 AMOLED with the little night
-  creature of yoru/docs/CONCEPT.md in the black. A matte sphere, two dark
+  A Yoru, mirrored: one round 466 × 466 AMOLED with Yoru's figure
+  (yoru/docs/CONCEPT.md) in the black. A matte sphere, two dark
   pill eyes that slide towards the pointer, two floating hands that pop out
   for a gesture, a tint in its lower half and a halo for what the voice is
   doing, and a badge (a card waiting for you). With no board it drifts
-  off into a dim dot, as Yoru does when it falls asleep.
+  off into a dim dot, as the board does when its screen sleeps.
 
   The mirror only plays what it is given: `reaction` is a name from
   `YORU_REACTIONS`, and `at` restarts it when the same one comes again.

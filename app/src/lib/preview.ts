@@ -300,7 +300,7 @@ const memory = {
     { id: 10, about: 7, section: "about", text: "Lives near Navigli", from: Date.now() - 20 * DAY, to: null, importance: 0.5, private: true, episode: 1 },
     { id: 11, about: 8, section: "matters", text: "Ships the release on Fridays", from: Date.now() - 5 * DAY, to: null, importance: 0.6, private: false, episode: 4 },
     { id: 12, about: 9, section: "notes", text: "Runs the Milan marathon every year", from: Date.now() - 3 * DAY, to: null, importance: 0.5, private: false, episode: 5 },
-    { id: 13, about: 1, section: "matters", text: "Wants Yoru to feel alive", from: Date.now() - 3 * DAY, to: null, importance: 0.9, private: false, episode: 5 },
+    { id: 13, about: 1, section: "matters", text: "Prefers short spoken answers", from: Date.now() - 3 * DAY, to: null, importance: 0.9, private: false, episode: 5 },
   ] as { id: number; about: number | null; section: string; text: string; from: number; to: number | null; importance: number; private: boolean; episode: number | null }[],
   relations: [
     { id: 1, a: 2, kind: "partner", b: 1, from: Date.now() - 6 * DAY, to: null },
@@ -335,7 +335,6 @@ const info: AssistantInfo = {
     task_effort: "low",
     web_search: true,
     think: true,
-    character: "confidant",
     routines: { recap: true, recap_at: "08:30", recap_weekdays_only: true, recap_task: "", quiet: true, quiet_from: "22:30", quiet_to: "07:30" },
   },
   ready: !noKey,

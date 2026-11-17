@@ -1,8 +1,8 @@
 <!--
   The board on the desk, as a page of Settings: its firmware (and updating
   it), its WiFi, and the settings it keeps itself; how it's reached, and its
-  log, are advanced. Only the hardware is here: Yoru's voice, character and
-  notch have their own pages. With several boards, first the list of them
+  log, are advanced. Only the hardware is here: Yoru's voice and notch have
+  their own pages. With several boards, first the list of them
   (name, how it's reached, firmware, the main one): the rest of the page is
   about the one picked there.
 -->

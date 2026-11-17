@@ -44,7 +44,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use yoru_core::agent;
 use yoru_core::intent::IntentModel;
 use yoru_core::turn::SmartTurn;
 use yoru_core::claude::{cleanup, mcpconfig};
@@ -511,10 +510,6 @@ fn apply_voice(state: &AppState) {
         |config| Arc::new(Agent::new(warm(Llm::new(config).with_fallback(llm::local_fallback()).kept_warm(settings.keep_warm), Llm::rewarm))),
         |agent: &Arc<Agent>| agent.llm().warm_up().map_err(|e| e.to_string()),
     );
-    if let Some(agent) = &agent {
-        // The character lives with the assistant's settings: every brain gets the same.
-        agent.set_personality(&agent::personality_prompt(&state.assistant.settings().character));
-    }
     let dump_dir = settings.keep_recordings.then(voice::default_dump_dir).flatten();
     let listens = settings.enabled;
     // EmbeddingGemma: the follow-ups' meaning, and the memory's search

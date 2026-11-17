@@ -12,7 +12,7 @@
 //!   yoru settings ollama_model qwen3:8b   # a model on this computer, through Ollama: no key
 //!   yoru ask "che email ho?"      # ask the assistant, as if said to the board
 //!   yoru inbox                    # the notifications (also: inbox read ID, dismiss ID, clear)
-//!   yoru memory                   # what Yoru knows about you (also: memory edit, memory forget TEXT)
+//!   yoru memory                   # what Yoru knows about you (also: memory forget ID, memory remember SECTION TEXT)
 //!   yoru watch                    # the watchers (also: watch add-task NAME MINUTES TASK, watch run ID, watch remove ID)
 //!   yoru recap                    # the morning recap, now
 //!   yoru connectors presets       # services Yoru can connect to (also: add, login, tools, call)
@@ -34,7 +34,6 @@ use std::thread;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use yoru_core::agent;
 use yoru_core::assistant::{self, Assistant, Brain, Channel, TaskHost, watchers::{self, Watcher, Watchers, WatchKind}};
 use yoru_core::bridge::{self, BridgeConfig, BridgeEvent, ManagerEvent, Transport};
 use yoru_core::cloud::{self, CloudRef, Provider};
@@ -124,10 +123,6 @@ struct LlmArgs {
     /// (default: as many as fit)
     #[arg(long, value_name = "N")]
     llm_gpu_layers: Option<u32>,
-    /// Yoru's character for the local language model, from friendly to
-    /// assistant: friend, confidant (default), analyst, advisor, assistant
-    #[arg(long, value_name = "LEVEL")]
-    personality: Option<String>,
 }
 
 /// Talk to the board's tools. While the app or a running `yoru` runs,
@@ -199,8 +194,8 @@ enum Command {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
-    /// What Yoru knows about you: `memory` prints it, `memory edit` opens it
-    /// in $EDITOR, `memory forget TEXT`, `memory remember SECTION TEXT`
+    /// What Yoru knows about you: `memory` prints it, `memory forget ID...`
+    /// (a fact's id, as `f12`), `memory remember SECTION TEXT`
     Memory {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
@@ -427,6 +422,7 @@ fn main() -> ExitCode {
             turn: None,
             language: None,
             live: None,
+            voiceprint: None,
         })),
         confirmations: Arc::default(),
         timers: timers.clone(),
@@ -583,11 +579,7 @@ fn llm_config(args: &LlmArgs) -> Result<LlmConfig, String> {
 /// With `keep_warm`, its local servers start again whenever they stop ([`Llm::kept_warm`]).
 fn agent(args: &LlmArgs, fallback: bool, keep_warm: bool) -> Result<Arc<Agent>, String> {
     let llm = Llm::new(llm_config(args)?).with_fallback(fallback.then(llm::local_fallback).flatten()).kept_warm(keep_warm);
-    let agent = Agent::new(warm(llm, Llm::rewarm));
-    if let Some(p) = &args.personality {
-        agent.set_personality(&agent::personality_prompt(p));
-    }
-    Ok(Arc::new(agent))
+    Ok(Arc::new(Agent::new(warm(llm, Llm::rewarm))))
 }
 
 /// `sidecar` shared, with its servers started again whenever they stop
@@ -839,20 +831,12 @@ fn memory_command(args: &[String]) -> ExitCode {
             print!("{}", memory.text());
             return ExitCode::SUCCESS;
         }
-        ["edit"] => {
-            let Some(file) = assistant.dir().map(|d| d.join("memory.md")) else { return ExitCode::FAILURE };
-            if !file.exists() {
-                let _ = memory.set_text(&memory.text());
-            }
-            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
-            return match std::process::Command::new(editor).arg(&file).status() {
-                Ok(s) if s.success() => ExitCode::SUCCESS,
-                _ => ExitCode::FAILURE,
-            };
-        }
-        ["forget", rest @ ..] => memory.forget(&rest.join(" ")),
-        ["remember", section, rest @ ..] => memory.remember(section, &rest.join(" ")),
-        _ => Err("usage: memory [edit | forget TEXT | remember SECTION TEXT]".into()),
+        ["forget", ids @ ..] if !ids.is_empty() => match ids.iter().map(|i| assistant::memory::fact_id(i)).collect::<Option<Vec<i64>>>() {
+            Some(ids) => memory.forget(&ids),
+            None => Err("forget takes facts' ids, as f12".into()),
+        },
+        ["remember", section, rest @ ..] => memory.remember(&rest.join(" "), None, section, false, false, None),
+        _ => Err("usage: memory [forget ID... | remember SECTION TEXT]".into()),
     };
     match result {
         Ok(m) => {

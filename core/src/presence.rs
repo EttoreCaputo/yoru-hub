@@ -1,7 +1,7 @@
-//! The person at the computer, for the board's pet (firmware 1.4): the local
-//! time, for its day (lively by day, sleepy at night), and how long since
-//! the last mouse or keyboard input, for "away" and "back". Sent as the
-//! snapshot's `pet`.
+//! The person at the computer, for the board (firmware 1.4): the local
+//! time, for its day and night (the screen dims at night), and how long
+//! since the last mouse or keyboard input, for "away" and "back". Sent as
+//! the snapshot's `pet` key, a name kept for compatibility with old boards.
 
 use serde::{Deserialize, Serialize};
 

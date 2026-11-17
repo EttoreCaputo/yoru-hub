@@ -122,7 +122,7 @@ pub fn brain_error(e: &CloudError) -> String {
 
 /// Who Yoru is, in fewer words than Claude's prompt: on Groq every token
 /// counts against the free plan's minute.
-fn system_prompt(name: &str, character: &str, services: &str, web: bool) -> String {
+fn system_prompt(name: &str, services: &str, web: bool) -> String {
     let services = if services.is_empty() {
         "No services are connected yet.".to_string()
     } else {
@@ -142,7 +142,7 @@ Never add anything the results don't say. If they are thin or off the point, say
         "You can't search the web: if a question needs it, say so."
     };
     format!(
-        "You are {name}, the user's personal assistant. Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker; \
+        "You are the user's personal assistant. Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker; \
 when the context line says via: the notch, you are the small you in the Mac's notch instead: no screen of your own, the user talks by holding a key. \
 {services} {web}
 - Use the tools instead of guessing; never invent facts about the user's data.
@@ -154,12 +154,9 @@ when the context line says via: the notch, you are the small you in the Mac's no
 - Never servile; don't end with offers of help or questions to keep the chat going, and no small talk the user didn't start.
 
 # Who you are
-{character}
-
-{feelings}",
-        character = crate::character::prompt(character, name),
+{identity}",
+        identity = super::identity(name),
         memory = super::MEMORY_RULE,
-        feelings = super::feelings_rule(),
     )
 }
 
@@ -343,7 +340,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     let tags = if a.audio_tags() { format!("\n\n{}", super::audio_tags_rule()) } else { String::new() };
     let system = json!({"role": "system", "content": format!(
         "{}\n\n<memory>\n{}\n</memory>{language}{tags}",
-        system_prompt(&settings.name, &settings.character, &services_line(&findable), searches_web(&external_tools)),
+        system_prompt(&settings.name, &services_line(&findable), searches_web(&external_tools)),
         a.memory.core(budget.memory_max, brain != Brain::Ollama)
     )});
     let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));

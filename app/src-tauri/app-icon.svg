@@ -31,7 +31,7 @@
   <rect x="64" y="64" width="896" height="896" rx="210" fill="url(#night)"/>
   <g clip-path="url(#tile)">
     <circle cx="512" cy="530" r="420" fill="url(#halo)"/>
-    <!-- A few stars: it is the night's creature. -->
+    <!-- A few stars: yoru is the night. -->
     <circle cx="232" cy="236" r="7" fill="#fff" opacity="0.55"/>
     <circle cx="792" cy="200" r="5" fill="#fff" opacity="0.4"/>
     <circle cx="840" cy="318" r="3.5" fill="#fff" opacity="0.3"/>

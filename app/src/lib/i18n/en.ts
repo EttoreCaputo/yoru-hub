@@ -674,10 +674,9 @@ const en = {
   settings: {
     title: "Settings",
     lede: "Everything about Yoru, one part at a time.",
-    parts: { brain: "Thinks and talks", character: "Character", voice: "Voice", language: "Language", keys: "Keys", mac: "On the Mac", board: "The board", about: "About" },
+    parts: { brain: "Thinks and talks", voice: "Voice", language: "Language", keys: "Keys", mac: "On the Mac", board: "The board", about: "About" },
     partLedes: {
       brain: "What Yoru thinks, hears and answers with: pick a setup, then change the details if you like.",
-      character: "Who Yoru is when he talks.",
       voice: "How Yoru hears you and answers aloud.",
       language: "The app's language, and the one Yoru answers in.",
       keys: "The keys of the services Yoru uses. They stay on this Mac.",
@@ -742,15 +741,6 @@ const en = {
     effortHint: "The more it thinks, the more precise and the slower it is.",
     claudeModels: { opus: "Opus — the smartest", sonnet: "Sonnet — quick and capable", haiku: "Haiku — the fastest and cheapest" },
     webSearch: "Search the web when needed",
-    scale: ["Friendly", "Analytical", "Assistant"],
-    characters: {
-      friend: ["Friend", "Warm and playful: jokes, chats, has a life and opinions of his own"],
-      confidant: ["Confidant", "Friendly but sharp: a little chat, then honest opinions with a reason"],
-      analyst: ["Analyst", "Calm and precise: facts, numbers and the why; says when he isn't sure"],
-      advisor: ["Advisor", "Thinks a step ahead: answers, then the next step or the better option"],
-      assistant: ["Assistant", "Discreet and professional: just what you asked, in the fewest words"],
-    } as Record<string, [string, string]>,
-    characterHint: "Every brain gets the same character: the assistant's model, Gemini Live, the model on this Mac and his remarks of his own. It changes how he talks, never what he does.",
     appLanguage: "The app's language",
     system: "Like the system",
     notchOn: "In the notch",

@@ -735,7 +735,7 @@ mod tests {
         let start = wav.windows(4).position(|w| w == b"data").unwrap() + 8;
         let samples: Vec<i16> = wav[start..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
         let setup = Setup {
-            system: "You are Yoru, a small desk companion. Answer in one short sentence. To know the time, call get_time.".into(),
+            system: "You are Yoru, an AI assistant. Answer in one short sentence. To know the time, call get_time.".into(),
             tools: vec![json!({"name": "get_time", "description": "The time now.", "input_schema": {"type": "object", "properties": {}}})],
             voice: DEFAULT_VOICE.into(),
             web: true,
