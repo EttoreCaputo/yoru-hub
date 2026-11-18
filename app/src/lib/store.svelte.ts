@@ -41,7 +41,15 @@ import type {
   Watcher,
 } from "./types";
 
-export type Page = "today" | "conversation" | "inbox" | "connectors" | "tasks" | "routines" | "memory" | "meetings" | "spoken" | "animations" | "settings";
+/** What Yoru on the Mac does (`yoru_core::notch::Event`). */
+type MacEvent =
+  | { event: "state"; state: string }
+  | { event: "level"; level: number }
+  | { event: "react"; name: string }
+  | { event: "fetch"; state: string; source: string; kind: string }
+  | { event: "error"; message: string };
+
+export type Page = "home" | "inbox" | "connectors" | "tasks" | "routines" | "memory" | "meetings" | "spoken" | "animations" | "settings";
 
 /** Opening the port resets the S3: it's up again after about this long. */
 const BOOT_MS = 1100;
@@ -54,7 +62,7 @@ const HEARING_MS = 15_000;
 
 class Store {
   readonly preview = inPreview;
-  page = $state<Page>("today");
+  page = $state<Page>("home");
   now = $state(Date.now());
 
   // Every board, and the one the window shows (the rest of "the board" below).
@@ -135,6 +143,17 @@ class Store {
 
   unread = $derived(this.inbox.filter((n) => !n.read).length);
 
+  // Yoru on the Mac: the notch's session, which the Home talks through too.
+  /** His voice's state: idle, starting, listening, thinking, speaking, error. */
+  macVoice = $state<VoiceState>("idle");
+  /** How loud the microphone is, 0 to 1, while he listens. */
+  macLevel = $state(0);
+  /** The last reaction he was asked to play. */
+  macReaction = $state<{ name: string; at: number } | null>(null);
+  macError = $state("");
+  /** The Home's microphone button is on. */
+  talking = $state(false);
+
   #started = false;
 
   start() {
@@ -163,6 +182,7 @@ class Store {
     on<ConnectorStatus[]>("connectors", (list) => (this.connectors = list));
     on<AssistantInfo>("assistant", (info) => (this.info = info));
     on<MeetingEvent>("meeting", (e) => this.#onMeeting(e));
+    on<MacEvent>("notch", (e) => this.#onMac(e));
     void this.#load();
   }
 
@@ -304,6 +324,39 @@ class Store {
 
   go(page: Page) {
     this.page = page;
+  }
+
+  #onMac(e: MacEvent) {
+    if (e.event === "state") {
+      this.macVoice = (e.state as VoiceState) ?? "idle";
+      if (this.macVoice !== "error") this.macError = "";
+      if (this.macVoice !== "listening") this.macLevel = 0;
+      // The turn ended on its own (an error, Yoru stopped): the button is off.
+      if (this.talking && (this.macVoice === "idle" || this.macVoice === "error")) this.talking = false;
+    } else if (e.event === "level") this.macLevel = e.level;
+    else if (e.event === "react") this.macReaction = { name: e.name, at: Date.now() };
+    else if (e.event === "error") {
+      this.macError = e.message;
+      this.macVoice = "error";
+      this.talking = false;
+    }
+  }
+
+  /** Talk to Yoru through the Mac's microphone: on, then off to send what was said. */
+  talk(on: boolean) {
+    if (this.talking === on) return;
+    this.talking = on;
+    this.macError = "";
+    void call("notch_talk", { pressed: on }).catch((e) => {
+      this.talking = false;
+      this.macError = why(e);
+    });
+  }
+
+  /** Stop what Yoru on the Mac says or hears. */
+  hush() {
+    this.talking = false;
+    void call("notch_hush").catch(() => {});
   }
 
   // The assistant.

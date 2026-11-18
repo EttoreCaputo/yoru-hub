@@ -85,13 +85,15 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .build()
 }
 
-/// Turn the Yoru in the notch on or off: his session, his window, his key.
+/// Turn the Yoru in the notch on or off: his window and his key. His
+/// session, the Mac's ears and voice, runs either way: the window's Home
+/// talks through it too, and shows what it does.
 pub fn apply(app: &AppHandle, on: bool) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    yoru_core::notch::set_enabled(on);
+    yoru_core::notch::set_enabled(true);
     let events = app.clone();
     yoru_core::notch::on_event(move |e| {
-        let _ = events.emit_to(LABEL, "notch", e);
+        let _ = events.emit("notch", e);
     });
     let shortcuts = app.global_shortcut();
     let registered = shortcuts.is_registered(TALK_KEY);

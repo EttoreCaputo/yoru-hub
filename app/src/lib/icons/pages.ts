@@ -4,8 +4,7 @@
 import type { Page } from "../store.svelte";
 
 export const PAGE_ICONS: Record<Page, string> = {
-  today: "M3 18h18M7 18a5 5 0 0 1 10 0M12 6v2.5M5.6 10.6l1.6 1.6M18.4 10.6l-1.6 1.6",
-  conversation: "M5 6h14v9H10l-4 3v-3H5z",
+  home: "M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z",
   inbox: "M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
   connectors: "M9 7V4M15 7V4M7 7h10v4a5 5 0 0 1-10 0zM12 16v4",
   tasks: "M9 6h10M9 12h10M9 18h10M4.5 5.5l1 1 2-2M4.5 11.5l1 1 2-2M4.5 17.5l1 1 2-2",

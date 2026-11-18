@@ -13,7 +13,7 @@
 
   const MOON = "M4 13a8 8 0 0 0 15 3.5A8 8 0 0 1 9 5a8 8 0 0 0-5 8Z";
   // Notifications and Settings are icons in the window bar; Settings opens Services, Spoken and Animations.
-  const MAIN: Page[] = ["today", "conversation", "tasks", "routines", "memory", "meetings"];
+  const MAIN: Page[] = ["home", "tasks", "routines", "memory", "meetings"];
 
   const tint = $derived(
     store.asking || store.voice === "thinking" ? "think" : store.voice === "speaking" ? "done" : store.confirmations.length ? "wait" : null,
@@ -30,7 +30,7 @@
   const boardDot = (link: string) => (link === "connected" ? "done" : link === "searching" ? "think" : "wrong");
 
   const badge = (p: Page): { n?: number; dot?: string } | null => {
-    if (p === "conversation" && store.confirmations.length) return { dot: "wait" };
+    if (p === "home" && store.confirmations.length) return { dot: "wait" };
     if (p === "meetings" && store.recording) return { dot: "wrong" };
     return null;
   };

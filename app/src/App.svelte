@@ -2,7 +2,7 @@
   import { i18n } from "./lib/i18n/index.svelte";
   import Animations from "./lib/pages/Animations.svelte";
   import Connectors from "./lib/pages/Connectors.svelte";
-  import Conversation from "./lib/pages/Conversation.svelte";
+  import Home from "./lib/pages/Home.svelte";
   import Inbox from "./lib/pages/Inbox.svelte";
   import Meetings from "./lib/pages/Meetings.svelte";
   import Memory from "./lib/pages/Memory.svelte";
@@ -10,7 +10,6 @@
   import Tasks from "./lib/pages/Tasks.svelte";
   import Settings from "./lib/pages/Settings.svelte";
   import Spoken from "./lib/pages/Spoken.svelte";
-  import Today from "./lib/pages/Today.svelte";
   import PermissionGate from "./lib/PermissionGate.svelte";
   import Setup from "./lib/Setup.svelte";
   import Sidebar from "./lib/Sidebar.svelte";
@@ -21,7 +20,7 @@
   store.start();
   i18n.start();
 
-  const PAGES = { today: Today, conversation: Conversation, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, animations: Animations, settings: Settings };
+  const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
   // Services, Spoken and Animations are opened from Settings, and lead back to it.
   const fromSettings = $derived((SETTINGS_PAGES as readonly string[]).includes(store.page));
@@ -35,7 +34,8 @@
 
 <div class="app">
   <Sidebar />
-  <main bind:this={main}>
+  <!-- The Home fills the window and scrolls inside; the other pages scroll here. -->
+  <main bind:this={main} class:fill={store.page === "home"}>
     {#if fromSettings}
       <div class="back">
         <button class="btn quiet small" onclick={() => store.go("settings")}>
@@ -62,6 +62,10 @@
     position: relative;
     overflow-y: auto;
     padding-top: 18px;
+  }
+  main.fill {
+    padding-top: 0;
+    overflow: hidden;
   }
   /* Lined up with the page under it, which then starts a little higher. */
   .back {
