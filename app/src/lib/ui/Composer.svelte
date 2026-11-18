@@ -3,13 +3,22 @@
   an answer is on its way the field waits, and says so. With `mic`, a button
   talks to him through the Mac's microphone instead: click to start, click
   again to send what you said; while he answers aloud, it stops him.
+  `conversation` is the one it goes on: an earlier one is opened again
+  first, and `new` starts one (in a tab of its own).
 -->
 <script lang="ts">
+  import { call } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
   import Icon from "./Icon.svelte";
 
-  let { autofocus = false, big = false, mic = false }: { autofocus?: boolean; big?: boolean; mic?: boolean } = $props();
+  let {
+    autofocus = false,
+    big = false,
+    mic = false,
+    conversation,
+    placeholder,
+  }: { autofocus?: boolean; big?: boolean; mic?: boolean; conversation?: string; placeholder?: string } = $props();
   const t = $derived(i18n.t.composer);
   const ready = $derived(store.info?.ready ?? false);
   let text = $state("");
@@ -23,15 +32,27 @@
     const said = text.trim();
     if (!said || store.asking || !ready) return;
     text = "";
-    await store.ask(said);
+    await store.ask(said, false, await target());
     field?.focus();
+  }
+
+  /** The conversation to go on: a new one made, an earlier one opened again. */
+  async function target(): Promise<string | undefined> {
+    if (conversation === "new") return await store.newChat();
+    if (conversation && conversation !== store.currentChat) {
+      await call("open_conversation", { id: conversation });
+      store.currentChat = conversation;
+    }
+    return conversation;
   }
 
   const listening = $derived(store.talking || store.macVoice === "listening" || store.macVoice === "starting");
   const speaking = $derived(!store.talking && store.macVoice === "speaking");
-  function micClick() {
-    if (speaking) store.hush();
-    else store.talk(!store.talking);
+  async function micClick() {
+    if (speaking) return store.hush();
+    // What's said goes to the conversation Yoru is in: this one, first.
+    if (!store.talking) await target();
+    store.talk(!store.talking);
   }
 
   function key(e: KeyboardEvent) {
@@ -65,7 +86,7 @@
     bind:this={field}
     bind:value={text}
     rows="1"
-    placeholder={listening ? t.listening : store.asking ? t.thinking : ready ? t.placeholder : t.placeholderNoKey}
+    placeholder={listening ? t.listening : store.asking ? t.thinking : ready ? (placeholder ?? t.placeholder) : t.placeholderNoKey}
     disabled={!ready}
     onkeydown={key}
     aria-label={t.placeholder}

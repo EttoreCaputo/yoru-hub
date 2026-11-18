@@ -35,6 +35,12 @@ export type ActiveAgent = {
 export type ChatLine = { from: "you" | "yoru"; text: string; channel: Channel; actions?: Action[]; at: number };
 /** The conversation's title: named by Yoru as it goes on, unless the user typed one. */
 export type ChatTitle = { text: string; by_user: boolean; lines: number };
+/** A conversation as the list shows it; an empty `title` isn't named yet (`preview` instead). */
+export type ChatSummary = { id: string; title: string; by_user: boolean; started: number; updated: number; lines: number; preview: string };
+/** Every conversation with a line, newest first, and the one Yoru is in (`conversations`). */
+export type Conversations = { current: string; list: ChatSummary[] };
+/** One conversation, to read (`conversation`). */
+export type SavedChat = { id: string; title: ChatTitle; lines: ChatLine[] };
 export type Reply = { text: string; actions: Action[]; model: string; elapsed_ms: number };
 
 export type Routines = {

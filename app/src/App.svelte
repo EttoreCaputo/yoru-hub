@@ -2,7 +2,9 @@
   import { i18n } from "./lib/i18n/index.svelte";
   import Animations from "./lib/pages/Animations.svelte";
   import Connectors from "./lib/pages/Connectors.svelte";
+  import Chat from "./lib/pages/Chat.svelte";
   import Home from "./lib/pages/Home.svelte";
+  import MeetingView from "./lib/pages/MeetingView.svelte";
   import Inbox from "./lib/pages/Inbox.svelte";
   import Meetings from "./lib/pages/Meetings.svelte";
   import Memory from "./lib/pages/Memory.svelte";
@@ -14,6 +16,7 @@
   import Setup from "./lib/Setup.svelte";
   import Sidebar from "./lib/Sidebar.svelte";
   import { store } from "./lib/store.svelte";
+  import { tabs } from "./lib/tabs.svelte";
   import WindowBar from "./lib/WindowBar.svelte";
   import { SETTINGS_PAGES } from "./lib/icons/pages";
   import { look } from "./lib/look.svelte";
@@ -27,11 +30,14 @@
   const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
   // Tasks, Routines, Services, Spoken and Animations are opened from Settings, and lead back to it.
-  const fromSettings = $derived((SETTINGS_PAGES as readonly string[]).includes(store.page));
+  const fromSettings = $derived(!tabs.shown && (SETTINGS_PAGES as readonly string[]).includes(store.page));
+  // The Home and a conversation fill the card and scroll inside; the other pages scroll here.
+  const fill = $derived(tabs.shown ? tabs.shown.kind === "chat" : store.page === "home");
   let main: HTMLElement | undefined = $state();
   // Each page starts at its top.
   $effect(() => {
     void store.page;
+    void tabs.shown;
     main?.scrollTo({ top: 0 });
   });
 </script>
@@ -41,8 +47,7 @@
 <div class="app" class:folded={!look.sidebar}>
   <WindowBar />
   <Sidebar />
-  <!-- The Home fills the card and scrolls inside; the other pages scroll here. -->
-  <main bind:this={main} class:fill={store.page === "home"}>
+  <main bind:this={main} class:fill>
     {#if fromSettings}
       <div class="back">
         <button class="btn quiet small" onclick={() => store.go("settings")}>
@@ -50,7 +55,13 @@
         </button>
       </div>
     {/if}
-    <Page />
+    {#if tabs.shown?.kind === "chat"}
+      {#key tabs.shown.id}<Chat id={tabs.shown.id} />{/key}
+    {:else if tabs.shown?.kind === "meeting"}
+      {#key tabs.shown.id}<MeetingView id={tabs.shown.id} />{/key}
+    {:else}
+      <Page />
+    {/if}
   </main>
   {#if look.activity}<ActivityPanel />{/if}
   <!-- The first run asks for the permissions itself; after it, the gate

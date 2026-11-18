@@ -17,6 +17,7 @@ import type {
   BoardClip,
   ChatLine,
   ChatTitle,
+  SavedChat,
   DeviceInfo,
   Confirmation,
   ConnectorConfig,
@@ -136,6 +137,56 @@ let chat: ChatLine[] = [
 ];
 
 const HOUR = 60 * MIN;
+
+// The other conversations, put aside; `currentChat` is the one above.
+let currentChat = "c2";
+let chatIds = 2;
+let archived: SavedChat[] = [
+  {
+    id: "c1",
+    title: { text: "Trip to Rome", by_user: false, lines: 4 },
+    lines: [
+      { from: "you", text: "Find me a train to Rome on Friday morning", channel: "text", at: now() - 26 * HOUR },
+      { from: "yoru", text: "The 7:10 Frecciarossa gets there at 10:05, 49 euros. Want me to put it in your calendar?", channel: "text", at: now() - 26 * HOUR + 8000 },
+      { from: "you", text: "Yes, please", channel: "text", at: now() - 26 * HOUR + 30000 },
+      { from: "yoru", text: "Done: Friday, 7:10 to 10:05.", channel: "text", at: now() - 26 * HOUR + 36000 },
+    ],
+  },
+  {
+    id: "c0",
+    title: { text: "", by_user: false, lines: 0 },
+    lines: [
+      { from: "you", text: "What's the weather like in Milan this weekend?", channel: "voice", at: now() - 4 * 24 * HOUR },
+      { from: "yoru", text: "Sunny on Saturday, 18 degrees; rain on Sunday afternoon.", channel: "voice", at: now() - 4 * 24 * HOUR + 7000 },
+    ],
+  },
+];
+const savedCurrent = (): SavedChat => ({ id: currentChat, title: chatTitle, lines: chat });
+function summarize(c: SavedChat) {
+  const first = c.lines.find((l) => l.from === "you") ?? c.lines[0];
+  return { id: c.id, title: c.title.text, by_user: c.title.by_user, started: c.lines[0]?.at ?? 0, updated: c.lines.at(-1)?.at ?? 0, lines: c.lines.length, preview: first?.text ?? "" };
+}
+function conversations() {
+  const list = [...archived, ...(chat.length ? [savedCurrent()] : [])].map(summarize).sort((a, b) => b.updated - a.updated);
+  return { current: currentChat, list };
+}
+function switchTo(c: SavedChat | null) {
+  if (chat.length) archived = [...archived, savedCurrent()];
+  const next = c ?? { id: `c${++chatIds}`, title: { text: "", by_user: false, lines: 0 }, lines: [] };
+  currentChat = next.id;
+  chat = next.lines;
+  chatTitle = next.title;
+  emit("chat", chat);
+  emit("chat_title", chatTitle);
+  emit("conversations", conversations());
+}
+function openChat(id: string) {
+  if (id === currentChat) return;
+  const c = archived.find((x) => x.id === id);
+  if (!c) throw "no such conversation";
+  archived = archived.filter((x) => x.id !== id);
+  switchTo(c);
+}
 
 let tasks: TaskEntry[] = [
   {
@@ -472,7 +523,7 @@ function emit(event: string, payload: unknown) {
 (globalThis as { yoruEmit?: typeof emit }).yoruEmit = emit;
 
 const emitInbox = () => emit("inbox", inbox);
-const emitChat = () => emit("chat", chat);
+const emitChat = () => (emit("chat", chat), emit("conversations", conversations()));
 const emitConfirmations = () => emit("bridge", { kind: "confirmations", cards: confirmations, target: null });
 const emitConnectors = () => emit("connectors", connectors);
 
@@ -483,6 +534,7 @@ function addChat(line: Omit<ChatLine, "at">) {
   if (line.from === "yoru" && !chatTitle.text && chat.length >= 2) {
     chatTitle = { text: chat[0].text.split(/\s+/).slice(0, 4).join(" "), by_user: false, lines: chat.length };
     emit("chat_title", chatTitle);
+    emit("conversations", conversations());
   }
 }
 
@@ -545,9 +597,28 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   assistant_info: () => info,
   set_assistant_settings: (a) => ((info.settings = a.settings), resolveBrain(), info),
   set_do_not_disturb: (a) => ((info.quiet_until = a.minutes ? now() + a.minutes * MIN : null), (info.quiet_now = !!a.minutes), info),
-  ask: (a) => ask(a.text),
+  ask: (a) => (a.conversation && openChat(a.conversation), ask(a.text)),
+  conversations: () => conversations(),
+  conversation: (a) => (a.id === currentChat ? savedCurrent() : (archived.find((c) => c.id === a.id) ?? null)),
+  new_conversation: () => (chat.length && switchTo(null), currentChat),
+  open_conversation: (a) => openChat(a.id),
+  delete_conversation: (a) => {
+    if (a.id === currentChat) {
+      chat = [];
+      switchTo(null);
+    } else {
+      archived = archived.filter((c) => c.id !== a.id);
+      emit("conversations", conversations());
+    }
+  },
+  rename_conversation: (a) => {
+    const text = String(a.text).trim();
+    if (a.id === currentChat) COMMANDS.set_chat_title({ text });
+    else archived = archived.map((c) => (c.id === a.id ? { ...c, title: { text, by_user: !!text, lines: c.lines.length } } : c));
+    emit("conversations", conversations());
+  },
   chat: () => chat,
-  forget_conversation: () => ((chat = []), emitChat(), (chatTitle = { text: "", by_user: false, lines: 0 }), emit("chat_title", chatTitle)),
+  forget_conversation: () => ((chat = []), switchTo(null)),
   chat_title: () => chatTitle,
   set_chat_title: (p) => {
     const text = String((p as { text: string }).text).trim();

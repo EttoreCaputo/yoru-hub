@@ -63,6 +63,11 @@ impl Titles {
         self.put(ChatTitle::default());
     }
 
+    /// Another conversation's title, opened.
+    pub fn replace(&self, title: ChatTitle) {
+        self.put(title);
+    }
+
     /// Whether the conversation, `log` long and last said by `last_from`,
     /// is due a (new) name; if so, takes the turn to name it.
     pub fn due(&self, log: usize, last_from: Option<&str>) -> bool {

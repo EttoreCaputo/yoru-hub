@@ -1,7 +1,8 @@
 <!--
   The conversation with Yoru, typed or spoken: its tools folded under each
   answer, what you're saying while you say it, his thinking dots, and the
-  cards he's waiting on right where he stopped. The Home shows it.
+  cards he's waiting on right where he stopped. A conversation's tab shows
+  it: the one Yoru is in live, an earlier one as it was (`lines`).
 -->
 <script lang="ts">
   import { i18n } from "../i18n/index.svelte";
@@ -10,12 +11,14 @@
   import ConfirmCard from "./ConfirmCard.svelte";
   import { ago } from "./when";
 
+  let { lines, live = true }: { lines?: ChatLine[]; live?: boolean } = $props();
   const t = $derived(i18n.t.conversation);
+  const shown = $derived(lines ?? store.chat);
   const failed = (l: ChatLine) => l.from === "yoru" && l.text.startsWith("(error:");
 </script>
 
 <ol class="log">
-  {#each store.chat as l, i (i)}
+  {#each shown as l, i (i)}
     <li class="line {l.from}" class:failed={failed(l)}>
       <div class="meta">
         <span class="who">{l.from === "you" ? t.you : t.yoru}</span>
@@ -39,14 +42,14 @@
       {/if}
     </li>
   {/each}
-  {#if store.hearing}
+  {#if live && store.hearing}
     <!-- What the user is saying, as it's written: the chat line replaces it. -->
     <li class="line you live" aria-live="polite">
       <div class="meta"><span class="who">{t.you}</span><span class="tag">{t.voice}</span></div>
       <p class="text">{store.hearing}</p>
     </li>
   {/if}
-  {#if store.asking}
+  {#if live && store.asking}
     <!-- The question itself is in the log already: the Rust side adds it before thinking. -->
     <li class="line yoru thinking" aria-live="polite">
       <span class="dots"><i></i><i></i><i></i></span>
@@ -54,7 +57,7 @@
   {/if}
 </ol>
 
-{#if store.confirmations.length}
+{#if live && store.confirmations.length}
   <div class="cards">
     {#each store.confirmations as c (c.id)}<ConfirmCard card={c} />{/each}
   </div>

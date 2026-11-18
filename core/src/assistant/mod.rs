@@ -43,6 +43,7 @@ pub mod memory;
 pub mod routines;
 pub mod select;
 pub mod tasks;
+pub mod chats;
 pub mod title;
 pub mod watchers;
 mod written_calls;
@@ -67,6 +68,7 @@ pub use external::{Errand, ErrandListener, ExternalTool, ExternalTools};
 pub use inbox::{Inbox, InboxChange, Notification, Urgency};
 pub use memory::Memory;
 pub use tasks::{TaskEntry, Tasks};
+pub use chats::{ChatSummary, Conversations, SavedChat};
 pub use title::ChatTitle;
 
 /// Claude's model, unless the settings say otherwise.
@@ -84,6 +86,9 @@ const MAX_TOKENS: u32 = 16_000;
 const CONVERSATION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// Messages after which the conversation starts over.
 const CONVERSATION_MAX: usize = 120;
+/// Lines of a conversation a brain starting afresh in it is reminded of.
+const EARLIER_LINES: usize = 16;
+const EARLIER_CHARS: usize = 400;
 /// Lines kept in the chat log the app shows.
 const LOG_KEEP: usize = 300;
 /// The facts found for a request, in characters (a small local model gets half).
@@ -342,6 +347,8 @@ pub struct Assistant {
     log: Mutex<Vec<ChatLine>>,
     /// The conversation's title ([`title`]).
     pub titles: title::Titles,
+    /// The other conversations ([`chats`]).
+    archive: chats::Archive,
     listeners: Mutex<Vec<ChatListener>>,
     /// "Do not disturb" until then (Unix ms), on top of the quiet hours; not
     /// kept across launches, on purpose.
@@ -391,6 +398,7 @@ impl Assistant {
             turn: Mutex::default(),
             log: Mutex::new(log),
             titles: title::Titles::open(file("conversation_title.json")),
+            archive: chats::Archive::open(file("conversations")),
             listeners: Mutex::default(),
             quiet_until: Mutex::default(),
             language: Mutex::default(),
@@ -490,11 +498,112 @@ impl Assistant {
 
     /// Start a new conversation, and empty the log.
     pub fn forget_conversation(&self) {
+        let _turn = self.turn.lock().unwrap();
+        self.switch_to(None);
+    }
+
+    /// The conversation in use and the others, newest first.
+    pub fn conversations(&self) -> Conversations {
+        let current = self.archive.current();
+        let mut list = self.archive.summaries();
+        let now = self.saved_current();
+        if !now.lines.is_empty() {
+            list.push(now.summary());
+        }
+        list.sort_by(|a, b| b.updated.cmp(&a.updated));
+        Conversations { current, list }
+    }
+
+    /// One conversation, the one in use or one put aside.
+    pub fn conversation(&self, id: &str) -> Option<SavedChat> {
+        if id == self.archive.current() { Some(self.saved_current()) } else { self.archive.get(id) }
+    }
+
+    /// Put the conversation in use aside and start a new one (or stay in
+    /// this one, when nothing was said in it yet): its id.
+    pub fn new_conversation(&self) -> String {
+        let _turn = self.turn.lock().unwrap();
+        if !self.log.lock().unwrap().is_empty() {
+            self.put_aside();
+            self.switch_to(None);
+        }
+        self.archive.current()
+    }
+
+    /// Go on with conversation `id`: the one in use is put aside. The brain
+    /// starts afresh, with the last lines as a reminder ([`Self::earlier`]).
+    pub fn open_conversation(&self, id: &str) -> Result<(), String> {
+        let _turn = self.turn.lock().unwrap();
+        self.open_unlocked(id)
+    }
+
+    fn open_unlocked(&self, id: &str) -> Result<(), String> {
+        if id == self.archive.current() {
+            return Ok(());
+        }
+        let chat = self.archive.take(id).ok_or("no such conversation")?;
+        self.put_aside();
+        self.switch_to(Some(chat));
+        Ok(())
+    }
+
+    /// Delete conversation `id` for good.
+    pub fn delete_conversation(&self, id: &str) {
+        if id == self.archive.current() {
+            self.forget_conversation();
+        } else {
+            self.archive.take(id);
+        }
+    }
+
+    /// The user's title for conversation `id` (empty: Yoru names it).
+    pub fn rename_conversation(&self, id: &str, text: &str) -> Result<(), String> {
+        if id == self.archive.current() {
+            self.set_title(text);
+            return Ok(());
+        }
+        let lines = self.archive.get(id).map_or(0, |c| c.lines.len());
+        let title = title::Titles::open(None);
+        let named = title.set_by_user(text, lines);
+        if self.archive.rename(id, named) { Ok(()) } else { Err("no such conversation".into()) }
+    }
+
+    fn saved_current(&self) -> SavedChat {
+        SavedChat { id: self.archive.current(), title: self.titles.get(), lines: self.chat() }
+    }
+
+    fn put_aside(&self) {
+        self.archive.put(self.saved_current());
+    }
+
+    /// Make `chat` the conversation in use (`None`: a new one). The turn is held.
+    fn switch_to(&self, chat: Option<SavedChat>) {
+        let chat = chat.unwrap_or_else(|| SavedChat { id: chats::new_id(), ..Default::default() });
         *self.conversation.lock().unwrap() = Conversation::default();
         self.memory.end_episode();
-        self.log.lock().unwrap().clear();
-        self.titles.clear();
+        self.archive.set_current(chat.id);
+        self.titles.replace(chat.title);
+        *self.log.lock().unwrap() = chat.lines;
         self.log_changed();
+    }
+
+    /// The conversation so far, for a brain that starts afresh in the middle
+    /// of it (a conversation opened again, or after a quiet while): its last
+    /// lines before `text`, which was just added.
+    fn earlier(&self) -> String {
+        let log = self.chat();
+        let before = &log[..log.len().saturating_sub(1)];
+        if before.is_empty() {
+            return String::new();
+        }
+        let lines: Vec<String> = before
+            .iter()
+            .rev()
+            .take(EARLIER_LINES)
+            .rev()
+            .map(|l| format!("{}: {}", if l.from == "you" { "User" } else { "Yoru" }, l.text.chars().take(EARLIER_CHARS).collect::<String>()))
+            .collect();
+        format!("<earlier_in_this_conversation>\n{}\n</earlier_in_this_conversation>", lines.join("\n"))
     }
 
     /// Name the conversation, or name it again, if it is due ([`title`]):
@@ -613,6 +722,13 @@ impl Assistant {
         let _turn = self.turn.lock().unwrap();
         let language = self.reply_language(language);
         let language = language.as_deref();
+        // Spoken after a quiet while, it's a new conversation; typed, it goes
+        // on with the one open in the app.
+        let quiet = self.log.lock().unwrap().last().is_some_and(|l| inbox::now_ms().saturating_sub(l.at) > CONVERSATION_TIMEOUT.as_millis() as u64);
+        if channel == Channel::Voice && quiet {
+            self.put_aside();
+            self.switch_to(None);
+        }
         self.add_line("you", text, channel, Vec::new());
         let settings = self.settings();
         let brain = settings.brain();
@@ -642,6 +758,8 @@ impl Assistant {
         let notes = self.turn_notes(text, speaker, heard.as_ref().is_some_and(|h| h.print.is_some()), &settings);
         let prompt = with_context(text, language, channel, follow_up, host.in_notch());
         let prompt = if notes.is_empty() { prompt } else { format!("{notes}\n\n{prompt}") };
+        let earlier = if messages.is_empty() { self.earlier() } else { String::new() };
+        let prompt = if earlier.is_empty() { prompt } else { format!("{earlier}\n\n{prompt}") };
         let mut result = self.run(&mut messages, &prompt, language, channel, &settings, &settings.effort, host, on);
         // The tags are for the voice: the app and the board show the words.
         if let Ok(reply) = &mut result {
@@ -1556,6 +1674,34 @@ mod tests {
 
     pub(super) fn assistant() -> Assistant {
         Assistant::open(None, Arc::new(Timers::open(None)))
+    }
+
+    #[test]
+    fn conversations_put_aside_and_opened_again() {
+        let a = assistant();
+        let first = a.archive.current();
+        // Nothing said: a new conversation is this one.
+        assert_eq!(a.new_conversation(), first);
+        a.add_line("you", "Plan my trip", Channel::Text, Vec::new());
+        a.add_line("yoru", "Where to?", Channel::Text, Vec::new());
+        a.set_title("Trip");
+        let second = a.new_conversation();
+        assert_ne!(second, first);
+        assert!(a.chat().is_empty() && a.titles.get().text.is_empty());
+        let list = a.conversations();
+        assert_eq!((list.current.as_str(), list.list.len(), list.list[0].title.as_str()), (second.as_str(), 1, "Trip"));
+        a.add_line("you", "Hello", Channel::Text, Vec::new());
+        a.open_conversation(&first).unwrap();
+        assert_eq!(a.chat().len(), 2);
+        assert_eq!(a.titles.get().text, "Trip");
+        // The question just asked isn't in the reminder; what came before is.
+        a.add_line("you", "Rome", Channel::Text, Vec::new());
+        assert!(a.earlier().contains("Yoru: Where to?") && !a.earlier().contains("Rome"));
+        assert_eq!(a.conversation(&second).unwrap().lines.len(), 1);
+        a.rename_conversation(&second, "Greeting").unwrap();
+        assert_eq!(a.conversation(&second).unwrap().title.text, "Greeting");
+        a.delete_conversation(&second);
+        assert_eq!(a.conversations().list.len(), 1);
     }
 
     #[test]

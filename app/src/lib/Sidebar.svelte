@@ -9,6 +9,7 @@
   import { PAGE_ICONS } from "./icons/pages";
   import { look } from "./look.svelte";
   import { store, type Page } from "./store.svelte";
+  import { tabs } from "./tabs.svelte";
   import Icon from "./ui/Icon.svelte";
 
   const t = $derived(i18n.t);
@@ -102,7 +103,7 @@
 {#snippet item(p: Page)}
   {@const b = badge(p)}
   <li>
-    <button class="nav-row" class:on={store.page === p} aria-current={store.page === p ? "page" : undefined} onclick={() => store.go(p)}>
+    <button class="nav-row" class:on={store.page === p && !tabs.shown} aria-current={store.page === p && !tabs.shown ? "page" : undefined} onclick={() => store.go(p)}>
       <Icon name={PAGE_ICONS[p]} />
       <span>{t.nav[p]}</span>
       {#if b?.n}<span class="count">{b.n}</span>{:else if b?.dot}<span class="dot {b.dot}"></span>{/if}

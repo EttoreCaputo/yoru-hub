@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use yoru_core::assistant::memory;
 use yoru_core::assistant::tasks::{self, Task, TaskEntry};
 use yoru_core::assistant::watchers::{self, ScheduleEvent, WatchEntry, Watcher};
-use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, ChatTitle, Confirmations, Host, Notification, Reply, Settings, TaskHost};
+use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, ChatTitle, Confirmations, Conversations, SavedChat, Host, Notification, Reply, Settings, TaskHost};
 use yoru_core::cloud::{self, KeySource, Provider};
 use yoru_core::connectors::catalog::{self, Preset};
 use yoru_core::connectors::{ConnectorConfig, ConnectorEvent, ConnectorStatus, Connectors};
@@ -108,12 +108,14 @@ pub fn start(app: &AppHandle) {
         let named = a.clone();
         a.on_chat(Arc::new(move |lines| {
             let _ = app.emit("chat", lines);
+            let _ = app.emit("conversations", named.conversations());
             // After Yoru answers, the conversation may be due a (new) title: asked off this thread.
             if lines.last().is_some_and(|l| l.from == "yoru") {
                 let (app, named) = (app.clone(), named.clone());
                 std::thread::spawn(move || {
                     if let Some(title) = named.retitle() {
                         let _ = app.emit("chat_title", title);
+                        let _ = app.emit("conversations", named.conversations());
                     }
                 });
             }
@@ -302,8 +304,14 @@ pub async fn coding_stop(app: AppHandle, run: u64) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn ask(app: AppHandle, text: String, notch: Option<bool>) -> Result<Reply, String> {
+pub async fn ask(app: AppHandle, text: String, notch: Option<bool>, conversation: Option<String>) -> Result<Reply, String> {
+    let changed = app.clone();
     blocking(app, move |state| {
+        // Typed in a conversation the app has open: that one goes on.
+        if let Some(id) = conversation.filter(|id| *id != state.assistant.conversations().current) {
+            state.assistant.open_conversation(&id)?;
+            conversations_changed(&changed, state);
+        }
         let language = state.settings.lock().unwrap().ui_language.clone();
         let host = AppHost { notch: notch.unwrap_or(false) && yoru_core::notch::enabled(), ..host(state) };
         state.assistant.respond(&text, language.as_deref(), Channel::Text, &host)
@@ -316,10 +324,78 @@ pub fn chat(state: State<AppState>) -> Vec<ChatLine> {
     state.assistant.chat()
 }
 
-#[tauri::command]
-pub fn forget_conversation(app: AppHandle, state: State<AppState>) {
-    state.assistant.forget_conversation();
+/// The conversation in use changed (another one opened, a new one, one
+/// deleted or renamed): the app hears its title and the list again.
+fn conversations_changed(app: &AppHandle, state: &AppState) {
     let _ = app.emit("chat_title", state.assistant.titles.get());
+    let _ = app.emit("conversations", state.assistant.conversations());
+}
+
+#[tauri::command]
+pub async fn forget_conversation(app: AppHandle) -> Result<(), String> {
+    let changed = app.clone();
+    blocking(app, move |state| {
+        state.assistant.forget_conversation();
+        conversations_changed(&changed, state);
+        Ok(())
+    })
+    .await
+}
+
+/// Every conversation, newest first, and the one in use.
+#[tauri::command]
+pub fn conversations(state: State<AppState>) -> Conversations {
+    state.assistant.conversations()
+}
+
+/// One conversation, to read it.
+#[tauri::command]
+pub fn conversation(state: State<AppState>, id: String) -> Option<SavedChat> {
+    state.assistant.conversation(&id)
+}
+
+/// Put the conversation in use aside and start a new one: its id. Waits for
+/// a turn on its way, so it's off the main thread.
+#[tauri::command]
+pub async fn new_conversation(app: AppHandle) -> Result<String, String> {
+    let changed = app.clone();
+    blocking(app, move |state| {
+        let id = state.assistant.new_conversation();
+        conversations_changed(&changed, state);
+        Ok(id)
+    })
+    .await
+}
+
+/// Go on with conversation `id`.
+#[tauri::command]
+pub async fn open_conversation(app: AppHandle, id: String) -> Result<(), String> {
+    let changed = app.clone();
+    blocking(app, move |state| {
+        state.assistant.open_conversation(&id)?;
+        conversations_changed(&changed, state);
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
+    let changed = app.clone();
+    blocking(app, move |state| {
+        state.assistant.delete_conversation(&id);
+        conversations_changed(&changed, state);
+        Ok(())
+    })
+    .await
+}
+
+/// The user's title for conversation `id` (empty: Yoru names it).
+#[tauri::command]
+pub fn rename_conversation(app: AppHandle, state: State<AppState>, id: String, text: String) -> Result<(), String> {
+    state.assistant.rename_conversation(&id, &text)?;
+    conversations_changed(&app, &state);
+    Ok(())
 }
 
 /// The conversation's title.
@@ -332,7 +408,7 @@ pub fn chat_title(state: State<AppState>) -> ChatTitle {
 #[tauri::command]
 pub fn set_chat_title(app: AppHandle, state: State<AppState>, text: String) -> ChatTitle {
     let title = state.assistant.set_title(&text);
-    let _ = app.emit("chat_title", &title);
+    conversations_changed(&app, &state);
     title
 }
 

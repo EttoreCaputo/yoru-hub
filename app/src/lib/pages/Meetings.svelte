@@ -5,15 +5,18 @@
   listen again, and read the transcript Parakeet makes on this computer,
   with "you" told apart by track and the others by voice (Nemotron), each
   of them nameable, and the summary (the local model, or the assistant's
-  brain): what was said, decided, left to do and left open. The meetings' settings are a panel of this page.
+  brain): what was said, decided, left to do and left open. A meeting's
+  transcript and summary open in a tab of their own (MeetingView.svelte).
+  The meetings' settings are a panel of this page.
 -->
 <script lang="ts">
   import Icon from "../ui/Icon.svelte";
-  import { tick, untrack } from "svelte";
+  import { untrack } from "svelte";
   import { call, inPreview, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { Meeting, MeetingRequest, MeetingSettings, MeetingSources, MeetingTrack, Speaker, Summarizers, Summary, Transcript, TranscriptLine } from "../types";
+  import type { Meeting, MeetingRequest, MeetingSettings, MeetingSources, MeetingTrack, Summarizers } from "../types";
+  import { tabs } from "../tabs.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import { clock } from "../ui/when";
@@ -37,18 +40,10 @@
   let settings = $state<MeetingSettings | null>(null);
   /** Whether the transcription model is downloaded; null until known. */
   let model = $state<boolean | null>(null);
-  /** The meeting whose transcript is open. */
-  let open = $state<string | null>(null);
-  let transcripts = $state<Record<string, Transcript | null>>({});
-  let exported = $state("");
   let importing = $state(false);
   let dropping = $state(false);
-  /** The tracks' players, to jump to a line. */
-  const players: Record<string, HTMLAudioElement> = {};
-  let summaries = $state<Record<string, Summary | null>>({});
   let summarizers = $state<Summarizers | null>(null);
   let fetchingLlm = $state(false);
-  let copied = $state<string | null>(null);
 
   $effect(() => {
     call<Meeting[]>("meetings_list").then(
@@ -69,14 +64,7 @@
     untrack(() => {
       if (done.state !== "recording") stopping = false;
       meetings = [done, ...meetings.filter((m) => m.id !== done.id)].sort((a, b) => b.id.localeCompare(a.id));
-      if (done.transcribed_at && done.id in transcripts) void readTranscript(done.id);
     });
-  });
-
-  // A summary just written shows at once.
-  $effect(() => {
-    const done = store.summarized;
-    if (done) untrack(() => (summaries = { ...summaries, [done.id]: done.summary }));
   });
 
   // Audio or video files dropped on the window become meetings.
@@ -109,6 +97,7 @@
     try {
       const m = await call<Meeting | null>("meeting_import", { path: path ?? null });
       if (m) meetings = [m, ...meetings.filter((x) => x.id !== m.id)];
+      void store.refreshMeetings();
     } catch (e) {
       error = why(e);
     } finally {
@@ -148,27 +137,6 @@
     }
   }
 
-  async function readTranscript(id: string) {
-    try {
-      transcripts = { ...transcripts, [id]: await call<Transcript | null>("meeting_transcript", { id }) };
-    } catch (e) {
-      error = why(e);
-    }
-  }
-
-  function toggleTranscript(m: Meeting) {
-    exported = "";
-    open = open === m.id ? null : m.id;
-    if (open && !(m.id in transcripts)) void readTranscript(m.id);
-    if (open && !(m.id in summaries)) call<Summary | null>("meeting_summary", { id: m.id }).then((x) => (summaries = { ...summaries, [m.id]: x }), (e) => (error = why(e)));
-  }
-
-  /** Whether the settings' summarizer is there. */
-  const canSummarize = $derived(
-    !!settings &&
-      !!summarizers &&
-      (settings.summary_by === "local" ? summarizers.local : settings.summary_by === "brain" ? !!summarizers.brain : summarizers.models.some((m) => m.id === settings!.summary_by)),
-  );
   /** The models to summarize with, by provider. */
   const providers = $derived.by(() => {
     const by = new Map<string, Summarizers["models"]>();
@@ -177,16 +145,6 @@
   });
   /** The chosen model when its provider's key is gone: still shown, as missing. */
   const lost = $derived(!!settings && !!summarizers && !["local", "brain"].includes(settings.summary_by) && !summarizers.models.some((m) => m.id === settings!.summary_by));
-
-  async function summarize(m: Meeting) {
-    error = "";
-    store.summarizing = { ...store.summarizing, [m.id]: 0 };
-    try {
-      await call("meeting_summarize", { id: m.id });
-    } catch (e) {
-      error = why(e);
-    }
-  }
 
   /** Qwen3.5 4B, the local model, through the voice's downloads. */
   async function fetchLlm() {
@@ -199,74 +157,6 @@
       error = why(e);
     } finally {
       fetchingLlm = false;
-    }
-  }
-
-  /** The summary as Markdown, on the clipboard. */
-  async function copySummary(m: Meeting, s: Summary) {
-    const list = (title: string, items: string[]) => (items.length ? `\n## ${title}\n\n${items.map((x) => `- ${x}`).join("\n")}\n` : "");
-    const actions = s.actions.map((a) => {
-      const who = [a.owner, a.due].map((x) => x.trim()).filter(Boolean).join(", ");
-      return who ? `${a.text} (${who})` : a.text;
-    });
-    const text = `# ${s.title}\n\n${s.overview}\n${list(t.points, s.points)}${list(t.decisions, s.decisions)}${list(t.actions, actions)}${list(t.questions, s.questions)}`;
-    try {
-      await navigator.clipboard.writeText(text);
-      copied = m.id;
-      setTimeout(() => (copied = copied === m.id ? null : copied), 1600);
-    } catch (e) {
-      error = why(e);
-    }
-  }
-
-  /** Play the line's track from where it starts. */
-  async function seek(m: Meeting, line: TranscriptLine) {
-    const track = m.tracks.find((x) => x.name === line.track);
-    if (!track) return;
-    const key = `${m.id}/${track.name}`;
-    await listen(m, track);
-    await tick();
-    const player = players[key];
-    if (!player) return;
-    player.currentTime = line.start_ms / 1000;
-    player.play().catch(() => {});
-  }
-
-  /** The speaker being named: `<meeting>/<key>`. */
-  let naming = $state<string | null>(null);
-  let nameDraft = $state("");
-
-  const speakerOf = (transcript: Transcript, line: TranscriptLine): Speaker | undefined => {
-    const key = `${line.track}/${line.speaker ?? "-"}`;
-    return transcript.speakers.find((s) => s.key === key);
-  };
-  const label = (s: Speaker | undefined) => s?.name ?? (!s ? "?" : s.number === 0 ? t.you : t.person(s.number));
-  // A color per person, the same in every line.
-  const TINTS = ["var(--think)", "#c58cff", "#5fd4c8", "var(--wait)", "#ff7eb6", "var(--done)", "#f5d061", "#8aa4ff"];
-  const tint = (s: Speaker | undefined) => (s ? TINTS[s.number % TINTS.length] : "var(--dusk)");
-
-  function startNaming(m: Meeting, s: Speaker) {
-    naming = `${m.id}/${s.key}`;
-    nameDraft = s.name ?? "";
-  }
-
-  async function saveName(m: Meeting, s: Speaker) {
-    if (naming !== `${m.id}/${s.key}`) return;
-    naming = null;
-    if ((s.name ?? "") === nameDraft.trim()) return;
-    try {
-      transcripts = { ...transcripts, [m.id]: await call<Transcript>("rename_speaker", { id: m.id, key: s.key, name: nameDraft }) };
-    } catch (e) {
-      error = why(e);
-    }
-  }
-
-  async function exportAs(m: Meeting, format: "markdown" | "srt" | "text") {
-    error = "";
-    try {
-      exported = await call<string>("meeting_export", { id: m.id, format, you: t.you, person: t.personWord });
-    } catch (e) {
-      error = why(e);
     }
   }
 
@@ -338,6 +228,7 @@
     try {
       const renamed = await call<Meeting>("rename_meeting", { id: m.id, title: draft });
       meetings = meetings.map((x) => (x.id === m.id ? renamed : x));
+      void store.refreshMeetings();
     } catch (e) {
       error = why(e);
     }
@@ -346,6 +237,7 @@
   async function remove(m: Meeting) {
     try {
       meetings = await call<Meeting[]>("delete_meeting", { id: m.id });
+      void store.refreshMeetings();
       for (const track of m.tracks) {
         const key = `${m.id}/${track.name}`;
         if (audio[key]) URL.revokeObjectURL(audio[key]);
@@ -553,7 +445,7 @@
                 {:else if m.id in store.summarizing}
                   <span class="faint small">{t.summarizing(percent(store.summarizing[m.id]))}</span>
                 {:else if m.transcribed_at}
-                  <button class="btn small" class:on={open === m.id} aria-expanded={open === m.id} onclick={() => toggleTranscript(m)}>{open === m.id ? t.hideTranscript : t.transcript}</button>
+                  <button class="btn small" onclick={() => tabs.open({ kind: "meeting", id: m.id })}>{t.transcript}</button>
                 {:else if m.tracks.some((x) => x.file)}
                   <button class="btn small" disabled={!model} title={model ? undefined : t.needModel} onclick={() => transcribe(m)}>{t.transcribe}</button>
                 {/if}
@@ -568,7 +460,7 @@
             <div class="track">
               <span class="dim small">{track.kind === "mic" ? t.you : t.others} · {track.source}</span>
               {#if audio[key]}
-                <audio controls src={audio[key]} bind:this={players[key]}></audio>
+                <audio controls src={audio[key]}></audio>
               {:else if track.file}
                 <button class="btn small" onclick={() => listen(m, track)}>{t.listen}</button>
               {:else}
@@ -576,88 +468,6 @@
               {/if}
             </div>
           {/each}
-          {#if open === m.id}
-            {@const transcript = transcripts[m.id]}
-            {@const summary = summaries[m.id]}
-            <div class="well summary">
-              {#if summary}
-                <header class="summary-head">
-                  <b>{summary.title}</b>
-                  <span class="end">
-                    <button class="btn small quiet" onclick={() => copySummary(m, summary)}>{copied === m.id ? t.copied : t.copy}</button>
-                    <button class="btn small quiet" disabled={m.id in store.summarizing || !canSummarize} onclick={() => summarize(m)}>{t.summarizeAgain}</button>
-                  </span>
-                </header>
-                <p class="overview">{summary.overview}</p>
-                {#each [{ title: t.points, items: summary.points }, { title: t.decisions, items: summary.decisions }] as part (part.title)}
-                  {#if part.items.length}
-                    <h3>{part.title}</h3>
-                    <ul>{#each part.items as item, i (i)}<li>{item}</li>{/each}</ul>
-                  {/if}
-                {/each}
-                {#if summary.actions.length}
-                  <h3>{t.actions}</h3>
-                  <ul class="todo">
-                    {#each summary.actions as a, i (i)}
-                      <li>{a.text}{#if a.owner || a.due}<span class="faint"> · {[a.owner, a.due].filter(Boolean).join(", ")}</span>{/if}</li>
-                    {/each}
-                  </ul>
-                {/if}
-                {#if summary.questions.length}
-                  <h3>{t.questions}</h3>
-                  <ul>{#each summary.questions as item, i (i)}<li>{item}</li>{/each}</ul>
-                {/if}
-                <p class="faint small by">{t.summaryBy}: {summary.by}</p>
-              {:else if summary === null && !(m.id in store.summarizing)}
-                <button class="btn small" disabled={!canSummarize} title={canSummarize ? undefined : t.needSummarizer} onclick={() => summarize(m)}>{t.summarize}</button>
-              {/if}
-            </div>
-            <div class="transcript">
-              <div class="exports">
-                <span class="faint small">{t.exportAs}</span>
-                <button class="btn small quiet" onclick={() => exportAs(m, "markdown")}>Markdown</button>
-                <button class="btn small quiet" onclick={() => exportAs(m, "srt")}>SRT</button>
-                <button class="btn small quiet" onclick={() => exportAs(m, "text")}>{t.plainText}</button>
-                <button class="btn small quiet again" disabled={m.id in store.transcribing || !model} onclick={() => transcribe(m)}>{t.again}</button>
-                {#if exported}<span class="faint small saved">{t.exported(exported)}</span>{/if}
-              </div>
-              {#if transcript?.lines.length}
-                {#if transcript.speakers.length > 1}
-                  <div class="people">
-                    {#each transcript.speakers as s (s.key)}
-                      {#if naming === `${m.id}/${s.key}`}
-                        <!-- svelte-ignore a11y_autofocus -->
-                        <input
-                          class="compact person-name"
-                          type="text"
-                          bind:value={nameDraft}
-                          autofocus
-                          placeholder={label({ ...s, name: null })}
-                          aria-label={t.nameSpeaker}
-                          onblur={() => saveName(m, s)}
-                          onkeydown={(e) => (e.key === "Enter" ? saveName(m, s) : e.key === "Escape" ? (naming = null) : null)}
-                        />
-                      {:else}
-                        <button class="chip small person" style:--tint={tint(s)} title={t.nameSpeaker} onclick={() => startNaming(m, s)}>{label(s)}</button>
-                      {/if}
-                    {/each}
-                    <span class="faint small">{t.nameHint}</span>
-                  </div>
-                {/if}
-                {#each transcript.lines as line, i (i)}
-                  {@const s = speakerOf(transcript, line)}
-                  {@const same = i > 0 && speakerOf(transcript, transcript.lines[i - 1]) === s}
-                  <div class="line">
-                    <button class="btn link at mono" title={t.playFrom} onclick={() => seek(m, line)}>{clock(line.start_ms / 1000)}</button>
-                    <span class="who" style:color={tint(s)}>{same ? "" : label(s)}</span>
-                    <p>{line.text}</p>
-                  </div>
-                {/each}
-              {:else if transcript}
-                <p class="faint small">{t.noSpeech}</p>
-              {/if}
-            </div>
-          {/if}
         </article>
       {/each}
     </div>
@@ -692,108 +502,6 @@
   .drop span {
     font: 600 var(--fs-head)/1.2 var(--display);
     color: var(--pearl);
-  }
-  .summary {
-    margin-top: 12px;
-    padding: 14px 16px;
-  }
-  .summary:empty {
-    display: none;
-  }
-  .summary-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .summary-head b {
-    font: 600 var(--fs-head)/1.3 var(--sans);
-  }
-  .overview {
-    margin-top: 6px;
-    color: var(--pearl);
-    font-size: var(--fs-body);
-    line-height: 1.5;
-    user-select: text;
-  }
-  .summary h3 {
-    margin: 12px 0 4px;
-    font: 600 var(--fs-body)/1.3 var(--sans);
-    color: var(--pearl);
-  }
-  .summary ul {
-    padding-left: 18px;
-    color: var(--pearl);
-    font-size: var(--fs-body);
-    line-height: 1.5;
-    user-select: text;
-  }
-  .todo li::marker {
-    content: "☐  ";
-  }
-  .by {
-    margin-top: 10px;
-  }
-  .transcript {
-    margin-top: 12px;
-    padding-top: 10px;
-    border-top: 1px dashed var(--rim);
-  }
-  .exports {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-  .saved {
-    user-select: text;
-  }
-  .again {
-    margin-left: auto;
-  }
-  .line {
-    display: grid;
-    grid-template-columns: 58px 96px minmax(0, 1fr);
-    gap: 10px;
-    align-items: baseline;
-    padding: 5px 0;
-  }
-  .at {
-    color: var(--dusk);
-    text-decoration: none;
-  }
-  .at:hover {
-    color: var(--pearl);
-  }
-  .who {
-    font-size: var(--fs-meta);
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .people {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 10px;
-  }
-  .person {
-    border-color: color-mix(in srgb, var(--tint) 45%, transparent);
-    background: color-mix(in srgb, var(--tint) 12%, transparent);
-    color: var(--tint);
-    font-weight: 600;
-    cursor: text;
-  }
-  .person-name {
-    width: 140px;
-  }
-  .line p {
-    color: var(--pearl);
-    font-size: var(--fs-body);
-    line-height: 1.5;
-    user-select: text;
   }
   .recorder.live {
     border-color: color-mix(in srgb, var(--wrong) 40%, var(--rim));

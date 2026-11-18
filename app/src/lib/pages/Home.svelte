@@ -1,199 +1,361 @@
 <!--
-  Home: Yoru as a mascot, the conversation with him, and the field to type
-  or talk at the bottom.
-
-  The mascot is his own, not the board's mirror: awake whether or not a
-  board is on the desk, he thinks while an answer is on its way, listens
-  and talks with the Mac's voice (and the board's), and reacts to what's
-  said in the chat (mood.ts) and to the reactions Yoru plays. With no
-  conversation he's in the middle with a greeting; in one, he's small, left
-  of the newest line. His eyes follow the pointer.
+  Home, after Pocket's: every conversation with Yoru and every meeting
+  recorded, newest first, by day, with a search over their titles; each
+  opens in a tab of its own (tabs.svelte.ts). At the bottom the field to ask
+  Yoru something, which starts a new conversation in a new tab. With
+  nothing yet, Yoru greets you in the middle.
 -->
 <script lang="ts">
-  import { call } from "../api";
+  import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
-  import { reactionFor } from "../mood";
   import { store } from "../store.svelte";
-  import type { VoiceState } from "../types";
-  import ChatLog from "../ui/ChatLog.svelte";
+  import { tabs } from "../tabs.svelte";
+  import type { Meeting } from "../types";
   import Composer from "../ui/Composer.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
+  import ConfirmCard from "../ui/ConfirmCard.svelte";
   import Icon from "../ui/Icon.svelte";
   import YoruBoard from "../YoruBoard.svelte";
 
   const t = $derived(i18n.t.home);
+  const tm = $derived(i18n.t.meetings);
+  let query = $state("");
+  let error = $state("");
 
+  type Row = { kind: "chat" | "meeting"; id: string; title: string; faint: boolean; note: string; at: number; now: boolean };
+
+  const meetingTitle = (m: Meeting) => m.title ?? tm.untitled(`${i18n.date(m.started_at)} · ${i18n.time(m.started_at)}`);
+  const rows = $derived.by<Row[]>(() => {
+    const chats: Row[] = store.conversations.map((c) => ({
+      kind: "chat",
+      id: c.id,
+      title: c.title || c.preview || t.untitled,
+      faint: !c.title,
+      note: c.title ? c.preview : "",
+      at: c.updated,
+      now: c.id === store.currentChat,
+    }));
+    const meetings: Row[] = store.meetings.map((m) => ({
+      kind: "meeting",
+      id: m.id,
+      title: meetingTitle(m),
+      faint: false,
+      note: [m.summarized_at ? t.hasSummary : "", m.transcribed_at ? t.hasTranscript : ""].filter(Boolean).join(" · "),
+      at: m.started_at,
+      now: m.state === "recording",
+    }));
+    const q = query.trim().toLowerCase();
+    return [...chats, ...meetings].filter((r) => !q || `${r.title} ${r.note}`.toLowerCase().includes(q)).sort((a, b) => b.at - a.at);
+  });
+
+  // By day: Today, Yesterday, then the weekday and date.
+  const days = $derived.by(() => {
+    const groups: { key: string; name: string; date: string; rows: Row[] }[] = [];
+    const today = new Date(store.now).toDateString();
+    const yesterday = new Date(store.now - 86_400_000).toDateString();
+    for (const r of rows) {
+      const key = new Date(r.at).toDateString();
+      let g = groups.at(-1);
+      if (g?.key !== key) {
+        const date = i18n.date(r.at, { weekday: "long", day: "numeric", month: "long" });
+        const name = key === today ? t.today : key === yesterday ? t.yesterday : "";
+        g = { key, name: name || date, date: name ? date : "", rows: [] };
+        groups.push(g);
+      }
+      g.rows.push(r);
+    }
+    return groups;
+  });
+
+  const nothing = $derived(!store.conversations.length && !store.meetings.length);
+  const ready = $derived(store.info?.ready ?? true);
   const greeting = $derived.by(() => {
     const h = new Date(store.now).getHours();
     return h < 5 ? t.greeting.night : h < 12 ? t.greeting.morning : h < 18 ? t.greeting.afternoon : h < 23 ? t.greeting.evening : t.greeting.night;
   });
-  const ready = $derived(store.info?.ready ?? true);
-  const line = $derived(!ready ? t.noKey : store.unread ? t.unreadLine(store.unread) : t.quietLine);
-  const empty = $derived(!store.chat.length && !store.asking && !store.hearing);
-
-  // What he's doing: thinking over a typed question, else the Mac's voice, else the board's.
-  const voice = $derived<VoiceState>(
-    store.asking ? "thinking" : store.talking ? "listening" : store.macVoice !== "idle" ? store.macVoice : store.voice,
-  );
-  // The conversation's title: Yoru names it as it goes on; a click renames it.
-  const title = $derived(store.chatTitle?.text ?? "");
-  let renaming = $state(false);
-  let renamed = false;
-  function rename(text: string) {
-    if (renamed || !renaming) return;
-    renamed = true;
-    renaming = false;
-    if (text.trim() !== title) void call("set_chat_title", { text: text.trim() });
-    queueMicrotask(() => (renamed = false));
-  }
-  function renameKey(e: KeyboardEvent) {
-    if (e.key === "Enter") rename((e.currentTarget as HTMLInputElement).value);
-    else if (e.key === "Escape") renaming = false;
-  }
-
-  const badge = $derived(store.confirmations.length ? "wait" : null);
-
-  // A reaction for each new line of the chat, and for each one Yoru plays.
   let reaction = $state<{ name: string; at: number } | null>(null);
-  const play = (name: string) => (reaction = { name, at: Date.now() });
-  let seen = store.chat.length;
   $effect(() => {
-    const lines = store.chat;
-    if (lines.length < seen) seen = 0;
-    const fresh = lines.slice(seen);
-    seen = lines.length;
-    // Only the newest one: a reload of the log isn't a conversation.
-    const last = fresh.length === 1 ? fresh[0] : null;
-    const name = last && reactionFor(last);
-    if (name) play(name);
-  });
-  $effect(() => {
-    if (store.macReaction) reaction = store.macReaction;
-  });
-  // Hello, once the Home opens.
-  $effect(() => {
-    const hello = setTimeout(() => play("wave"), 500);
+    const hello = setTimeout(() => (reaction = { name: "wave", at: Date.now() }), 500);
     return () => clearTimeout(hello);
   });
 
-  // Down to the newest line whenever one comes, or a card, or the wait.
-  let log: HTMLElement | undefined = $state();
-  $effect(() => {
-    void store.chat.length;
-    void store.confirmations.length;
-    void store.asking;
-    void store.hearing;
-    queueMicrotask(() => log?.scrollTo({ top: log.scrollHeight, behavior: "smooth" }));
-  });
+  const open = (r: Row) => tabs.open({ kind: r.kind, id: r.id });
 
-  // In the conversation Yoru sits left of the newest line (his answer, your
-  // question, his thinking dots), and moves down with it.
-  let column: HTMLElement | undefined = $state();
-  let avatarTop = $state(0);
-  /** The board's size: the sphere in it is about 40% of that, about 30px. */
-  const AVATAR = 72;
-  const box = AVATAR * 1.15;
-  function place() {
-    const lines = column?.querySelectorAll<HTMLElement>(":scope .log > li");
-    const last = lines?.[lines.length - 1];
-    if (last) avatarTop = last.offsetTop + Math.min(last.offsetHeight, 48) / 2 - box / 2;
+  async function remove(r: Row) {
+    error = "";
+    try {
+      if (r.kind === "chat") await call("delete_conversation", { id: r.id });
+      else {
+        await call("delete_meeting", { id: r.id });
+        await store.refreshMeetings();
+      }
+    } catch (e) {
+      error = why(e);
+    }
   }
-  $effect(() => {
-    void store.chat.length;
-    void store.asking;
-    void store.hearing;
-    if (!column) return;
-    queueMicrotask(place);
-    const watch = new ResizeObserver(place);
-    watch.observe(column);
-    return () => watch.disconnect();
-  });
+
+  let search: HTMLInputElement | undefined = $state();
+  // ⌘K finds, as in Pocket.
+  function keys(e: KeyboardEvent) {
+    if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      search?.focus();
+    }
+  }
 </script>
 
-<section class="talk">
-  {#if empty}
-    <div class="mascot">
-      <div class="yoru">
-        <YoruBoard board="live" size={150} {voice} {badge} {reaction} follow onpoke={() => play("happy")} />
-      </div>
-      <p class="eyebrow">{greeting}</p>
-      <h1 class="said">{line}</h1>
-      {#if !ready}<button class="btn primary" onclick={() => store.go("settings")}>{t.noKeyAction}</button>{/if}
-    </div>
-  {:else}
-    <header class="head">
-      {#if renaming}
-        <input
-          class="rename"
-          type="text"
-          value={store.chatTitle?.text ?? ""}
-          placeholder={t.untitled}
-          title={t.renameHint}
-          aria-label={t.rename}
-          {@attach (el: HTMLInputElement) => (el.focus(), el.select())}
-          onkeydown={renameKey}
-          onblur={(e) => rename(e.currentTarget.value)}
-        />
-      {:else}
-        <button class="title" onclick={() => (renaming = true)} title={t.rename}>
-          <span class:faint={!title}>{title || t.untitled}</span>
-          <span class="pen"><Icon name="pencil" size={13} /></span>
-        </button>
-      {/if}
-      <div class="tools">
-        <ConfirmButton icon="rotate-ccw" label={t.forget} question={t.forgetConfirm} sure={t.forgetSure} onconfirm={() => call("forget_conversation")} />
-      </div>
-    </header>
-  {/if}
+<svelte:window onkeydown={keys} />
 
-  <div class="log" bind:this={log}>
-    <div class="column" class:chat={!empty} bind:this={column}>
-      {#if empty && ready}
-        <div class="suggestions">
-          {#each t.suggestions as s (s)}
-            <button class="btn" onclick={() => store.ask(s)}>{s}</button>
-          {/each}
+<section class="home">
+  <div class="scroll">
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>{t.all}</h1>
+          <p class="lede">{t.allLede}</p>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick={() => store.go("meetings")}><span class="rec" aria-hidden="true"></span>{tm.record}</button>
+          <button class="btn primary" onclick={() => store.newChat()}><Icon name="plus" size={15} stroke={2.25} />{t.newChat}</button>
+        </div>
+      </div>
+
+      {#if store.confirmations.length}
+        <div class="cards">
+          {#each store.confirmations as c (c.id)}<ConfirmCard card={c} />{/each}
         </div>
       {/if}
-      {#if !empty}
-        <div class="avatar yoru" style:top="{avatarTop}px">
-          <YoruBoard board="live" size={AVATAR} {voice} {badge} {reaction} follow onpoke={() => play("happy")} />
+
+      {#if nothing}
+        <div class="mascot">
+          <div class="yoru"><YoruBoard board="live" size={130} {reaction} follow onpoke={() => (reaction = { name: "happy", at: Date.now() })} /></div>
+          <p class="eyebrow">{greeting}</p>
+          <h2 class="said">{t.noneYet}</h2>
+          <p class="dim">{t.noneYetHint}</p>
+          {#if ready}
+            <div class="suggestions">
+              {#each t.suggestions as s (s)}<button class="btn" onclick={() => store.askNew(s)}>{s}</button>{/each}
+            </div>
+          {:else}
+            <button class="btn primary" onclick={() => store.go("settings")}>{t.noKeyAction}</button>
+          {/if}
         </div>
+      {:else}
+        <label class="search">
+          <Icon name="search" size={16} />
+          <input type="search" bind:this={search} bind:value={query} placeholder={t.search} aria-label={t.search} />
+          <kbd>⌘K</kbd>
+        </label>
+        {#if error}<p class="error-text">{error}</p>{/if}
+
+        {#each days as day (day.key)}
+          <h2 class="day">{day.name}{#if day.date}<span>{day.date}</span>{/if}</h2>
+          <ul class="rows">
+            {#each day.rows as r (r.kind + r.id)}
+              <li class:removable={!r.now}>
+                <button class="row" onclick={() => open(r)}>
+                  <span class="kind {r.kind}" title={r.kind === "chat" ? t.chatKind : t.meetingKind}>
+                    <Icon name={r.kind === "chat" ? "message-circle" : "file-text"} size={16} />
+                  </span>
+                  <span class="what">
+                    <span class="name" class:faint={r.faint}>{r.title}</span>
+                    {#if r.note}<span class="note">{r.note}</span>{/if}
+                  </span>
+                  {#if r.now}<span class="tag done">{t.now}</span>{/if}
+                  <time class="faint">{i18n.time(r.at)}</time>
+                </button>
+                {#if !r.now}
+                  <span class="remove">
+                    <ConfirmButton icon="trash-2" small label={r.kind === "chat" ? t.forget : tm.delete} question={r.kind === "chat" ? t.forgetConfirm : tm.deleteConfirm} sure={r.kind === "chat" ? t.forgetSure : tm.delete} onconfirm={() => remove(r)} />
+                  </span>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="faint none">{t.noMatch}</p>
+        {/each}
       {/if}
-      <ChatLog />
     </div>
   </div>
 
   <div class="dock">
-    <div class="column" class:chat={!empty}><Composer mic big autofocus /></div>
+    <Composer mic conversation="new" />
   </div>
 </section>
 
 <style>
-  .talk {
-    position: relative;
+  .home {
     display: flex;
     flex-direction: column;
     height: 100%;
     min-height: 0;
   }
-  .column {
+  .scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .page {
+    padding-bottom: 24px;
+  }
+  .rec {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--wrong);
+  }
+  .cards {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 40px;
+    padding: 0 8px 0 14px;
+    border: 1px solid var(--rim-2);
+    border-radius: 999px;
+    background: var(--field);
+    color: var(--dusk);
+    transition: border-color 160ms;
+  }
+  .search:focus-within {
+    border-color: var(--pearl-deep);
+  }
+  .search input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .search input::-webkit-search-cancel-button {
+    display: none;
+  }
+  kbd {
+    padding: 2px 6px;
+    border: 1px solid var(--rim-2);
+    border-radius: 6px;
+    color: var(--dusk);
+    font: 500 var(--fs-small)/1.2 var(--sans);
+  }
+  .day {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 28px 0 8px;
+    font: 600 var(--fs-body)/1.3 var(--sans);
+    color: var(--pearl);
+  }
+  .day span {
+    color: var(--dusk);
+    font-weight: 400;
+    font-size: var(--fs-meta);
+  }
+  .rows {
+    list-style: none;
+    margin: 0 -10px;
+    padding: 0;
+  }
+  .rows li {
     position: relative;
-    max-width: 760px;
-    margin: 0 auto;
-    padding: 0 36px;
   }
-  /* Room on the left for Yoru beside the newest line. */
-  .column.chat {
-    max-width: 800px;
-    padding-left: 76px;
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: none;
+    color: var(--pearl);
+    text-align: left;
+    cursor: pointer;
+    transition: background 140ms;
   }
-  /* Yoru on his own: the sphere without the board's black disc around it. */
+  .row:hover,
+  .row:focus-visible {
+    background: var(--hover);
+  }
+  /* A document's icon, as Pocket draws a recording: a small sheet. */
+  .kind {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 30px;
+    height: 34px;
+    border: 1px solid var(--rim-2);
+    border-radius: 7px;
+    background: var(--night);
+    color: var(--dusk);
+  }
+  .kind.chat {
+    border-radius: 50%;
+    width: 34px;
+  }
+  .what {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+  .name,
+  .note {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .name {
+    font-size: var(--fs-body);
+    font-weight: 500;
+  }
+  .note {
+    color: var(--dusk);
+    font-size: var(--fs-meta);
+  }
+  time {
+    flex-shrink: 0;
+    font-size: var(--fs-meta);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Delete shows over the time, on the row pointed at. */
+  .remove {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 8px;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 140ms;
+  }
+  .rows li:hover .remove,
+  .remove:focus-within {
+    opacity: 1;
+  }
+  .rows li:hover .row {
+    background: var(--hover);
+  }
+  .rows li.removable:hover time {
+    visibility: hidden;
+  }
+  .none {
+    margin-top: 28px;
+  }
   .mascot {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 48px 36px 8px;
+    padding: 24px 0 8px;
     text-align: center;
   }
   .yoru :global(svg > circle:first-of-type) {
@@ -201,97 +363,26 @@
     stroke: transparent;
   }
   .eyebrow {
-    margin-top: 4px;
     color: var(--haze);
     font-size: var(--fs-meta);
   }
   .said {
-    margin: 4px 0 0;
-    max-width: 480px;
+    margin: 4px 0 6px;
     font: 600 var(--fs-head)/1.35 var(--display);
-    letter-spacing: -0.01em;
-    text-wrap: balance;
-  }
-  .mascot .btn {
-    margin-top: 14px;
-  }
-  .avatar {
-    position: absolute;
-    left: 2px;
-    transition: top 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  /* The chat's head: its title on the left, its tools on the right. */
-  .head {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    height: 52px;
-    padding: 0 12px 0 20px;
-    flex-shrink: 0;
-    border-bottom: 1px solid var(--rim);
-  }
-  .title {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    max-width: 100%;
-    margin-left: -8px;
-    padding: 4px 8px;
-    border: 0;
-    border-radius: 8px;
-    background: none;
-    color: var(--pearl);
-    font: 600 var(--fs-body)/1.3 var(--sans);
-    cursor: text;
-    transition: background 140ms;
-  }
-  .title span:first-child {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .title:hover {
-    background: var(--ink-2);
-  }
-  .pen {
-    color: var(--dusk);
-    opacity: 0;
-    transition: opacity 140ms;
-  }
-  .title:hover .pen,
-  .title:focus-visible .pen {
-    opacity: 1;
-  }
-  .rename {
-    width: min(420px, 100%);
-    min-height: 30px;
-    margin-left: -8px;
-    padding: 4px 8px;
-    font-weight: 600;
-  }
-  .tools {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    flex-shrink: 0;
-  }
-  .log {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 24px 0 8px;
-    mask-image: linear-gradient(transparent, #000 24px);
   }
   .suggestions {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
     gap: 8px;
-    margin: 0 0 20px;
+    margin-top: 18px;
+  }
+  .mascot > .btn {
+    margin-top: 14px;
   }
   .dock {
+    width: min(560px, calc(100% - 48px));
+    margin: 0 auto;
     padding: 8px 0 20px;
   }
 </style>

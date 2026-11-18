@@ -7,6 +7,7 @@
 
 import { call, inPreview, on, why } from "./api";
 import { BUNDLED_VERSION } from "./bundled";
+import { tabs } from "./tabs.svelte";
 import { changelog, updateFor, type Update } from "./updates";
 import type {
   ActiveAgent,
@@ -17,6 +18,8 @@ import type {
   BridgeEvent,
   ChatLine,
   ChatTitle,
+  ChatSummary,
+  Conversations,
   Confirmation,
   DeviceInfo,
   ConnectorStatus,
@@ -98,6 +101,10 @@ class Store {
   inbox = $state<Notification[]>([]);
   chat = $state<ChatLine[]>([]);
   chatTitle = $state<ChatTitle | null>(null);
+  /** Every conversation with a line, newest first. */
+  conversations = $state<ChatSummary[]>([]);
+  /** The one Yoru is in: what's said to the board or the notch goes there. */
+  currentChat = $state("");
   /** What the user is saying, written so far, while they speak; gone once the line is in the chat. */
   hearing = $state("");
   #hearingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -127,6 +134,8 @@ class Store {
   recordingError = $state<{ message: string; code?: string } | null>(null);
   /** The last recording that finished, or meeting that got its transcript, for the Meetings page to pick up. */
   recorded = $state<Meeting | null>(null);
+  /** Every meeting, newest first, for the Home's list and the tabs. */
+  meetings = $state<Meeting[]>([]);
   /** How far each meeting's transcript is, 0 to 1, while it is made. */
   transcribing = $state<Record<string, number>>({});
   /** Why a meeting's transcript failed. */
@@ -175,6 +184,7 @@ class Store {
       this.hearing = "";
     });
     on<ChatTitle>("chat_title", (title) => (this.chatTitle = title));
+    on<Conversations>("conversations", (c) => this.#applyConversations(c));
     on<string>("hearing", (text) => {
       this.hearing = text;
       // No line came (nothing to answer, an error): the draft doesn't stay.
@@ -204,6 +214,9 @@ class Store {
     if (inbox) this.inbox = inbox;
     if (chat) this.chat = chat;
     this.chatTitle = (await quiet(call<ChatTitle>("chat_title"))) ?? null;
+    const conversations = await quiet(call<Conversations>("conversations"));
+    if (conversations) this.#applyConversations(conversations);
+    void this.refreshMeetings();
     if (confirmations) this.confirmations = confirmations;
     if (onboarding) this.onboarding = onboarding;
     void this.refreshPermissions();
@@ -217,6 +230,45 @@ class Store {
       this.transcribing = Object.fromEntries(ids.filter((id) => !id.startsWith("summary:")).map((id) => [id, 0]));
       this.summarizing = Object.fromEntries(ids.filter((id) => id.startsWith("summary:")).map((id) => [id.slice(8), 0]));
     }, () => {});
+  }
+
+  #applyConversations(c: Conversations) {
+    this.conversations = c.list;
+    this.currentChat = c.current;
+    // A conversation deleted (or a new one left empty) closes its tab.
+    tabs.prune((t) => t.kind === "chat" && t.id !== c.current && !c.list.some((x) => x.id === t.id));
+  }
+
+  /** A meeting recorded, transcribed or summarized: the list follows. */
+  #recorded(m: Meeting) {
+    this.recorded = m;
+    this.meetings = [m, ...this.meetings.filter((x) => x.id !== m.id)].sort((a, b) => b.id.localeCompare(a.id));
+  }
+
+  async refreshMeetings() {
+    try {
+      this.meetings = await call<Meeting[]>("meetings_list");
+      tabs.prune((t) => t.kind === "meeting" && !this.meetings.some((m) => m.id === t.id));
+    } catch {
+      // The list stays as it was.
+    }
+  }
+
+  // Conversations.
+
+  /** A new conversation in a tab of its own (the one in use, if nothing was said in it yet). */
+  async newChat() {
+    const id = await call<string>("new_conversation");
+    this.currentChat = id;
+    tabs.open({ kind: "chat", id });
+    return id;
+  }
+
+  /** `text` as the start of a new conversation, in a new tab. */
+  async askNew(text: string) {
+    if (!text.trim() || this.asking) return;
+    const id = await this.newChat();
+    await this.ask(text, false, id);
   }
 
   #onMeeting(e: MeetingEvent) {
@@ -233,7 +285,7 @@ class Store {
       const { [id]: _, ...rest } = this.transcribing;
       this.transcribing = rest;
       if (e.kind === "failed") this.transcribeErrors = { ...this.transcribeErrors, [id]: e.message };
-      else this.recorded = e.meeting;
+      else this.#recorded(e.meeting);
     } else if (e.kind === "model") this.modelDownload = e.fraction;
     else if (e.kind === "summarizing") {
       this.summarizing = { ...this.summarizing, [e.id]: e.fraction };
@@ -245,14 +297,14 @@ class Store {
       this.summarizing = rest;
       if (e.kind === "summary_failed") this.summaryErrors = { ...this.summaryErrors, [id]: e.message };
       else {
-        this.recorded = e.meeting;
+        this.#recorded(e.meeting);
         this.summarized = { id, summary: e.summary };
       }
     }
     else {
       this.recording = null;
       this.levels = {};
-      this.recorded = e.meeting;
+      this.#recorded(e.meeting);
     }
   }
 
@@ -328,6 +380,7 @@ class Store {
 
   go(page: Page) {
     this.page = page;
+    tabs.page();
   }
 
   #onMac(e: MacEvent) {
@@ -366,13 +419,15 @@ class Store {
   // The assistant.
 
   /** `notch`: typed in the notch, whose tools it then uses instead of the board's. */
-  async ask(text: string, notch = false) {
+  /** `conversation`: the one it goes on (Yoru's current one when left out). */
+  async ask(text: string, notch = false, conversation?: string) {
     text = text.trim();
     if (!text || this.asking) return;
     this.asking = text;
     this.askError = "";
+    if (conversation) this.currentChat = conversation;
     try {
-      await call("ask", { text, notch });
+      await call("ask", { text, notch, conversation: conversation ?? null });
     } catch (e) {
       this.askError = why(e);
     } finally {

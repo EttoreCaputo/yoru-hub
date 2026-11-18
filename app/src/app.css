@@ -454,12 +454,18 @@ label.stack {
 }
 .page-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 26px;
   padding-bottom: 22px;
   border-bottom: 1px dashed var(--rim-2);
+}
+/* The title keeps its room; the buttons go under it when it's narrow. */
+.page-head > :first-child {
+  flex: 1 1 300px;
+  min-width: 0;
 }
 .page-head h1 {
   font: 700 var(--fs-title)/1.1 var(--display);

@@ -1,6 +1,6 @@
 <!--
   A Yoru, mirrored: one round 466 × 466 AMOLED with Yoru's figure
-  (yoru/docs/CONCEPT.md) in the black. A matte sphere, two dark
+  (yoru/docs/CONCEPT.md) in the black. A white matte sphere, two dark
   pill eyes that slide towards the pointer, two floating hands that pop out
   for a gesture, a tint in its lower half and a halo for what the voice is
   doing, and a badge (a card waiting for you). With no board it drifts
@@ -117,9 +117,9 @@
   <svg viewBox="0 0 {D} {D}" role="img" aria-label="Yoru">
     <defs>
       <radialGradient id="{uid}-body" cx="0.36" cy="0.32" r="0.75">
-        <stop offset="0" stop-color="#eeebf8" />
-        <stop offset="0.55" stop-color="#c3bedb" />
-        <stop offset="1" stop-color="#6e6890" />
+        <stop offset="0" stop-color="#ffffff" />
+        <stop offset="0.6" stop-color="#f6f5fb" />
+        <stop offset="1" stop-color="#dedbea" />
       </radialGradient>
       <linearGradient id="{uid}-tint" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0.45" stop-color={tint ?? "transparent"} stop-opacity="0" />
@@ -148,10 +148,9 @@
     >
       {#key reaction?.at}
         <g class="squash" class:poked={!!playing}>
-          <circle cx={C} cy={C} r={R} fill="url(#{uid}-body)" />
+          <!-- White and matte: no shade on it, only a hairline edge so it shows on a white page. -->
+          <circle cx={C} cy={C} r={R} fill="url(#{uid}-body)" stroke="rgba(26,24,44,.10)" stroke-width="1.5" />
           <rect class="tint" x={C - R} y={C - R} width={R * 2} height={R * 2} fill="url(#{uid}-tint)" clip-path="url(#{uid}-sphere)" opacity={tint ? 1 : 0} />
-          <!-- A soft shadow towards the bottom edge, never a gloss. -->
-          <circle cx={C} cy={C + R * 0.55} r={R * 0.9} fill="#000" opacity="0.12" clip-path="url(#{uid}-sphere)" />
           <g class="eyes" style:transform="translate({eyeX}px, {eyeY}px) scaleX({narrow})">
             <g class:glance={!!playing && GLANCING.has(playing)}>
             {#each [-1, 1] as side (side)}
@@ -168,7 +167,7 @@
         <!-- The hands: tucked behind the body until a gesture needs them. -->
         {#each [-1, 1] as side (side)}
           <g class="hand {gesture ?? 'rest'} {side < 0 ? 'left' : 'right'}">
-            <ellipse cx={C + side * R * 0.62} cy={C + R * 0.25} rx="20" ry="15" fill="url(#{uid}-body)" />
+            <ellipse cx={C + side * R * 0.62} cy={C + R * 0.25} rx="20" ry="15" fill="url(#{uid}-body)" stroke="rgba(26,24,44,.10)" stroke-width="1.5" />
           </g>
         {/each}
       {/key}
