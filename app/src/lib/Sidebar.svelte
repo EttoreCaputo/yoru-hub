@@ -9,12 +9,13 @@
   import { PAGE_ICONS } from "./icons/pages";
   import { look } from "./look.svelte";
   import { store, type Page } from "./store.svelte";
+  import Icon from "./ui/Icon.svelte";
 
   const t = $derived(i18n.t);
 
-  const MOON = "M4 13a8 8 0 0 0 15 3.5A8 8 0 0 1 9 5a8 8 0 0 0-5 8Z";
-  // Notifications and Settings are icons in the window bar; Settings opens Services, Spoken and Animations.
-  const MAIN: Page[] = ["home", "tasks", "routines", "memory", "meetings"];
+  // Notifications and Settings are icons in the window bar; Settings opens
+  // Tasks, Routines, Services, Spoken and Animations.
+  const MAIN: Page[] = ["home", "memory", "meetings"];
 
   const tint = $derived(
     store.asking || store.voice === "thinking" ? "think" : store.voice === "speaking" ? "done" : store.confirmations.length ? "wait" : null,
@@ -84,13 +85,13 @@
   <footer>
     {#if quietUntil}
       <div class="dnd on">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MOON} /></svg>
+        <Icon name="moon" size={16} />
         <span>{t.dnd.on(i18n.time(quietUntil))}</span>
         <button class="btn quiet small" onclick={() => store.doNotDisturb(0)}>{t.dnd.end}</button>
       </div>
     {:else}
       <button class="dnd" onclick={() => store.doNotDisturb(60)} title={t.dnd.hour}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MOON} /></svg>
+        <Icon name="moon" size={16} />
         <span>{t.dnd.off}</span>
         <span class="faint hour">{t.dnd.hour}</span>
       </button>
@@ -102,7 +103,7 @@
   {@const b = badge(p)}
   <li>
     <button class:on={store.page === p} aria-current={store.page === p ? "page" : undefined} onclick={() => store.go(p)}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={PAGE_ICONS[p]} /></svg>
+      <Icon name={PAGE_ICONS[p]} />
       <span>{t.nav[p]}</span>
       {#if b?.n}<span class="count">{b.n}</span>{:else if b?.dot}<span class="dot {b.dot}"></span>{/if}
     </button>
@@ -271,16 +272,6 @@
   }
   li span:first-of-type {
     flex: 1;
-  }
-  svg:not(.mini) {
-    width: 18px;
-    height: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    flex-shrink: 0;
   }
   .count {
     min-width: 20px;

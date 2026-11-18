@@ -66,7 +66,7 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 22px;
+    gap: 18px;
   }
   .line {
     max-width: 88%;
@@ -79,8 +79,8 @@
     display: flex;
     gap: 8px;
     align-items: center;
-    font-size: var(--fs-meta);
-    margin-bottom: 4px;
+    font-size: var(--fs-small);
+    margin-bottom: 3px;
   }
   .you .meta {
     justify-content: flex-end;
@@ -90,23 +90,20 @@
     color: var(--haze);
   }
   .text {
-    font-size: var(--fs-head);
+    font-size: var(--fs-body);
     line-height: 1.55;
     white-space: pre-wrap;
     user-select: text;
   }
   .you .text {
     display: inline-block;
-    padding: 9px 14px;
-    border-radius: 18px 18px 4px 18px;
+    padding: 8px 13px;
+    border-radius: 16px 16px 4px 16px;
     background: var(--ink-3);
     text-align: left;
   }
   .live .text {
     opacity: 0.7;
-  }
-  .yoru .text {
-    font-size: var(--fs-head);
   }
   .failed .text {
     color: var(--wrong);
@@ -154,7 +151,7 @@
   .dots {
     display: inline-flex;
     gap: 5px;
-    padding: 10px 0;
+    padding: 18px 0;
   }
   .dots i {
     width: 7px;

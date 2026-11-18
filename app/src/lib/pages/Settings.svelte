@@ -22,6 +22,8 @@
   import Profiles from "../ui/Profiles.svelte";
   import { currentProfile } from "../profiles";
   import { PAGE_ICONS, SETTINGS_PAGES } from "../icons/pages";
+  import Icon from "../ui/Icon.svelte";
+  import type { IconName } from "../icons/lucide";
 
   const t = $derived(i18n.t.settings);
   const s = $derived(store.info?.settings);
@@ -110,15 +112,15 @@
 
   // The parts, wired to Yoru: three on the left, four on the right, top to bottom.
   type Part = "brain" | "voice" | "language" | "keys" | "mac" | "board" | "about";
-  type Wire = { id: Part; side: -1 | 1; color: string; icon: string };
+  type Wire = { id: Part; side: -1 | 1; color: string; icon: IconName };
   const WIRES: Wire[] = [
-    { id: "brain", side: -1, color: "var(--think)", icon: "M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-1.5 5.5A3 3 0 0 0 9 18.5M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 1.5 5.5 3 3 0 0 1-4.5 5.5M12 4v16M9 10h3M12 14h3" },
-    { id: "voice", side: -1, color: "#c58cff", icon: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" },
-    { id: "language", side: -1, color: "#5fd4c8", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5M12 3.5C9.6 5.9 8.5 8.7 8.5 12s1.1 6.1 3.5 8.5" },
-    { id: "keys", side: 1, color: "var(--wait)", icon: "M14.5 9.5a4 4 0 1 0-3.6 3.98L5 19.5V21h3v-2h2v-2h1.5l1.7-1.7M15.5 7.5h.01" },
-    { id: "mac", side: 1, color: "#7fb2ff", icon: "M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1ZM9.5 5.5v1.2a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V5.5M8 20.5h8M12 17v3.5" },
-    { id: "board", side: 1, color: "var(--done)", icon: "M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM9.5 9.5h5v5h-5zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" },
-    { id: "about", side: 1, color: "var(--pearl-mid)", icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5M12 7.6v.1" },
+    { id: "brain", side: -1, color: "var(--think)", icon: "sparkles" },
+    { id: "voice", side: -1, color: "#c58cff", icon: "audio-waveform" },
+    { id: "language", side: -1, color: "#5fd4c8", icon: "languages" },
+    { id: "keys", side: 1, color: "var(--wait)", icon: "key-round" },
+    { id: "mac", side: 1, color: "#7fb2ff", icon: "laptop" },
+    { id: "board", side: 1, color: "var(--done)", icon: "cpu" },
+    { id: "about", side: 1, color: "var(--pearl-mid)", icon: "info" },
   ];
   const PAGES: Part[] = WIRES.map((w) => w.id);
 
@@ -186,7 +188,7 @@
     return { d: `M ${ax} ${ay} H ${bx} L ${ex} ${ey}`, ax, ay, ex, ey };
   }
   // The pages that aren't part of Yoru's wiring, opened from the menu under it.
-  const MORE_COLORS: Record<(typeof SETTINGS_PAGES)[number], string> = { connectors: "var(--think)", spoken: "#c58cff", animations: "var(--done)" };
+  const MORE_COLORS: Record<(typeof SETTINGS_PAGES)[number], string> = { tasks: "var(--wait)", routines: "#7fb2ff", connectors: "var(--think)", spoken: "#c58cff", animations: "var(--done)" };
   const moreDot = (p: (typeof SETTINGS_PAGES)[number]) =>
     p === "connectors" && store.connectors.some((c) => c.enabled && (c.state === "needs_login" || c.state === "error")) ? "wait" : "";
 
@@ -199,10 +201,10 @@
     {@const w = wire(open)}
     <div class="sub" style:--c={w.color} in:fly={{ y: 10, duration: 260 }}>
       <button class="btn quiet small back" onclick={() => ((open = null), readAll())}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6l-6 6 6 6" /></svg>{t.back}
+        <Icon name="chevron-left" size={16} />{t.back}
       </button>
       <div class="sub-head">
-        <span class="glyph big"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={w.icon} /></svg></span>
+        <span class="glyph big"><Icon name={w.icon} size={28} /></span>
         <div>
           <h1>{t.parts[open]}</h1>
           <p class="lede">{t.partLedes[open]}</p>
@@ -262,12 +264,12 @@
           onblur={() => (hover = null)}
           onclick={(e) => pick(w.id, e)}
         >
-          <span class="glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={w.icon} /></svg></span>
+          <span class="glyph"><Icon name={w.icon} size={20} /></span>
           <span class="words">
             <b>{t.parts[w.id]}{#if sum.dot}<span class="dot {sum.dot}"></span>{/if}</b>
             <span class="says" class:error-text={sum.warn} title={sum.text}>{sum.text}</span>
           </span>
-          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6" /></svg>
+          <span class="chev"><Icon name="chevron-right" size={16} /></span>
         </button>
       {/each}
     </div>
@@ -277,12 +279,12 @@
       {#each SETTINGS_PAGES as p (p)}
         {@const dot = moreDot(p)}
         <button style:--c={MORE_COLORS[p]} onclick={() => store.go(p)}>
-          <span class="glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={PAGE_ICONS[p]} /></svg></span>
+          <span class="glyph"><Icon name={PAGE_ICONS[p]} size={20} /></span>
           <span class="words">
             <b>{i18n.t.nav[p]}{#if dot}<span class="dot {dot}"></span>{/if}</b>
             <span class="says">{t.moreNotes[p]}</span>
           </span>
-          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6" /></svg>
+          <span class="chev"><Icon name="chevron-right" size={16} /></span>
         </button>
       {/each}
     </nav>
@@ -619,23 +621,10 @@
     background: color-mix(in srgb, var(--c) 14%, transparent);
     color: var(--c);
   }
-  .glyph svg {
-    width: 20px;
-    height: 20px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
   .glyph.big {
     width: 56px;
     height: 56px;
     box-shadow: 0 0 40px -10px var(--c);
-  }
-  .glyph.big svg {
-    width: 28px;
-    height: 28px;
   }
   .words {
     display: grid;
@@ -660,21 +649,15 @@
     line-height: 1.35;
   }
   .chev {
-    width: 16px;
-    height: 16px;
     flex-shrink: 0;
-    fill: none;
-    stroke: var(--dusk);
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+    color: var(--dusk);
     transition:
       stroke 200ms,
       transform 200ms;
   }
   .menu button:hover .chev,
   .part:hover .chev {
-    stroke: var(--c);
+    color: var(--c);
     transform: translateX(2px);
   }
 
@@ -682,15 +665,6 @@
   .back {
     margin-left: -10px;
     gap: 4px;
-  }
-  .back svg {
-    width: 15px;
-    height: 15px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
   }
   .sub-head {
     display: flex;

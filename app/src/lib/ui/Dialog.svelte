@@ -3,6 +3,7 @@
   button, Escape, or a click outside it.
 -->
 <script lang="ts">
+  import Icon from "./Icon.svelte";
   import type { Snippet } from "svelte";
   import { fade, scale } from "svelte/transition";
   import { i18n } from "../i18n/index.svelte";
@@ -20,7 +21,7 @@
     <header>
       <h2>{title}</h2>
       <button class="close" onclick={onclose} aria-label={i18n.t.home.close} title={i18n.t.home.close}>
-        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3 3 9" /></svg>
+        <Icon name="x" size={16} />
       </button>
     </header>
     <div class="body">{@render children()}</div>
@@ -74,14 +75,6 @@
   .close:hover {
     background: var(--ink-3);
     color: var(--pearl);
-  }
-  .close svg {
-    width: 12px;
-    height: 12px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    stroke-linecap: round;
   }
   .body {
     overflow-y: auto;

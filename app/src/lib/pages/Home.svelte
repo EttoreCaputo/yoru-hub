@@ -1,12 +1,13 @@
 <!--
   Home: Yoru as a mascot, the conversation with him, and the field to type
-  or talk at the bottom. The activity panel (agents, tasks, routines) sits
-  beside it, on the window's frame (App.svelte).
+  or talk at the bottom.
 
   The mascot is his own, not the board's mirror: awake whether or not a
   board is on the desk, he thinks while an answer is on its way, listens
   and talks with the Mac's voice (and the board's), and reacts to what's
-  said in the chat (mood.ts) and to the reactions Yoru plays.
+  said in the chat (mood.ts) and to the reactions Yoru plays. With no
+  conversation he's in the middle with a greeting; in one, he's small, left
+  of the newest line. His eyes follow the pointer.
 -->
 <script lang="ts">
   import { call } from "../api";
@@ -67,114 +68,142 @@
     void store.hearing;
     queueMicrotask(() => log?.scrollTo({ top: log.scrollHeight, behavior: "smooth" }));
   });
+
+  // In the conversation Yoru sits left of the newest line (his answer, your
+  // question, his thinking dots), and moves down with it.
+  let column: HTMLElement | undefined = $state();
+  let avatarTop = $state(0);
+  /** The board's size: the sphere in it is about 40% of that, about 30px. */
+  const AVATAR = 72;
+  const box = AVATAR * 1.15;
+  function place() {
+    const lines = column?.querySelectorAll<HTMLElement>(":scope .log > li");
+    const last = lines?.[lines.length - 1];
+    if (last) avatarTop = last.offsetTop + Math.min(last.offsetHeight, 48) / 2 - box / 2;
+  }
+  $effect(() => {
+    void store.chat.length;
+    void store.asking;
+    void store.hearing;
+    if (!column) return;
+    queueMicrotask(place);
+    const watch = new ResizeObserver(place);
+    watch.observe(column);
+    return () => watch.disconnect();
+  });
 </script>
 
 <section class="talk">
-    <div class="mascot" class:small={!empty}>
+  {#if empty}
+    <div class="mascot">
       <div class="yoru">
-        <YoruBoard board="live" size={empty ? 210 : 116} {voice} gaze={store.gaze} {badge} {reaction} onpoke={() => play("happy")} />
+        <YoruBoard board="live" size={150} {voice} {badge} {reaction} follow onpoke={() => play("happy")} />
       </div>
-      <div class="words">
-        <p class="eyebrow">{greeting}</p>
-        <h1 class="said">{line}</h1>
-        {#if !ready}<button class="btn primary" onclick={() => store.go("settings")}>{t.noKeyAction}</button>{/if}
-      </div>
-      {#if store.chat.length}
-        <div class="forget">
-          <ConfirmButton label={t.forget} question={t.forgetConfirm} sure={t.forgetSure} onconfirm={() => call("forget_conversation")} />
+      <p class="eyebrow">{greeting}</p>
+      <h1 class="said">{line}</h1>
+      {#if !ready}<button class="btn primary" onclick={() => store.go("settings")}>{t.noKeyAction}</button>{/if}
+    </div>
+  {:else}
+    <div class="forget">
+      <ConfirmButton label={t.forget} question={t.forgetConfirm} sure={t.forgetSure} onconfirm={() => call("forget_conversation")} />
+    </div>
+  {/if}
+
+  <div class="log" bind:this={log}>
+    <div class="column" class:chat={!empty} bind:this={column}>
+      {#if empty && ready}
+        <div class="suggestions">
+          {#each t.suggestions as s (s)}
+            <button class="btn" onclick={() => store.ask(s)}>{s}</button>
+          {/each}
         </div>
       {/if}
+      {#if !empty}
+        <div class="avatar yoru" style:top="{avatarTop}px">
+          <YoruBoard board="live" size={AVATAR} {voice} {badge} {reaction} follow onpoke={() => play("happy")} />
+        </div>
+      {/if}
+      <ChatLog />
     </div>
+  </div>
 
-    <div class="log" bind:this={log}>
-      <div class="column">
-        {#if empty && ready}
-          <div class="suggestions">
-            {#each t.suggestions as s (s)}
-              <button class="btn" onclick={() => store.ask(s)}>{s}</button>
-            {/each}
-          </div>
-        {/if}
-        <ChatLog />
-      </div>
-    </div>
-
-    <div class="dock">
-      <div class="column"><Composer mic big autofocus /></div>
-    </div>
+  <div class="dock">
+    <div class="column" class:chat={!empty}><Composer mic big autofocus /></div>
+  </div>
 </section>
 
 <style>
   .talk {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
     min-height: 0;
   }
   .column {
+    position: relative;
     max-width: 760px;
     margin: 0 auto;
     padding: 0 36px;
   }
+  /* Room on the left for Yoru beside the newest line. */
+  .column.chat {
+    max-width: 800px;
+    padding-left: 76px;
+  }
   /* Yoru on his own: the sphere without the board's black disc around it. */
   .mascot {
-    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 40px 36px 10px;
+    padding: 48px 36px 8px;
     text-align: center;
-    transition: padding 300ms;
-  }
-  .mascot.small {
-    flex-direction: row;
-    justify-content: center;
-    gap: 16px;
-    padding-top: 22px;
-    text-align: left;
   }
   .yoru :global(svg > circle:first-of-type) {
     fill: transparent;
     stroke: transparent;
   }
   .eyebrow {
+    margin-top: 4px;
     color: var(--haze);
-    font-size: var(--fs-body);
+    font-size: var(--fs-meta);
   }
   .said {
-    margin: 6px 0 0;
-    font: 560 var(--fs-title)/1.15 var(--display);
-    letter-spacing: -0.015em;
-    max-width: 560px;
+    margin: 4px 0 0;
+    max-width: 480px;
+    font: 600 var(--fs-head)/1.35 var(--display);
+    letter-spacing: -0.01em;
     text-wrap: balance;
   }
-  .small .said {
-    font-size: 21px;
+  .mascot .btn {
+    margin-top: 14px;
   }
-  .words .btn {
-    margin-top: 16px;
+  .avatar {
+    position: absolute;
+    left: 2px;
+    transition: top 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
   .forget {
     position: absolute;
-    right: 24px;
-    bottom: 6px;
+    top: 10px;
+    right: 14px;
+    z-index: 2;
   }
   .log {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 18px 0 8px;
-    mask-image: linear-gradient(transparent, #000 24px);
+    padding: 40px 0 8px;
+    mask-image: linear-gradient(transparent, #000 32px);
   }
   .suggestions {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
     gap: 8px;
-    margin: 6px 0 20px;
+    margin: 0 0 20px;
   }
   .dock {
-    padding: 8px 0 22px;
+    padding: 8px 0 20px;
   }
 </style>

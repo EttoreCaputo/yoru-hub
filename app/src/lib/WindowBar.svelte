@@ -3,14 +3,14 @@
   behind the page (its own buttons sit at the top left), so this strip is
   where the window is dragged from. Next to the Mac's buttons, the one that
   folds the sidebar away; on the right, Notifications and Settings, a click
-  away from every page, and on the Home the one that folds the activity
-  panel.
+  away from every page, and the one that folds the activity panel.
 -->
 <script lang="ts">
   import { i18n } from "./i18n/index.svelte";
   import { PAGE_ICONS, SETTINGS_PAGES } from "./icons/pages";
   import { look } from "./look.svelte";
   import { store } from "./store.svelte";
+  import Icon from "./ui/Icon.svelte";
 
   const nav = $derived(i18n.t.nav);
   const tw = $derived(i18n.t.window);
@@ -30,24 +30,22 @@
 
 <div class="bar chrome" data-tauri-drag-region>
   <button class="side" class:on={!look.sidebar} aria-label={sideLabel} title={sideLabel} onclick={() => look.toggleSidebar()}>
-    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="3" /><path d="M9.5 5v14" /></svg>
+    <Icon name="panel-left" />
   </button>
 
   <div class="end">
     <button class:on={store.page === "inbox"} aria-label={nav.inbox} title={nav.inbox} onclick={() => store.go("inbox")}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={PAGE_ICONS.inbox} /></svg>
+      <Icon name={PAGE_ICONS.inbox} />
       {#if store.unread}<span class="count">{store.unread > 99 ? "99+" : store.unread}</span>{/if}
     </button>
     <button class:on={inSettings} aria-label={nav.settings} title={nav.settings} onclick={() => store.go("settings")}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={PAGE_ICONS.settings} /></svg>
+      <Icon name={PAGE_ICONS.settings} />
       {#if settingsDot}<span class="dot {settingsDot}"></span>{/if}
     </button>
-    {#if store.page === "home"}
-      <button aria-label={panelLabel} title={panelLabel} aria-pressed={look.activity} onclick={() => look.toggleActivity()}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="3" /><path d="M14.5 5v14" /></svg>
-        {#if !look.activity && store.working}<span class="dot think"></span>{/if}
-      </button>
-    {/if}
+    <button aria-label={panelLabel} title={panelLabel} aria-pressed={look.activity} onclick={() => look.toggleActivity()}>
+      <Icon name="panel-right" />
+      {#if !look.activity && store.working}<span class="dot think"></span>{/if}
+    </button>
   </div>
 </div>
 
@@ -85,15 +83,6 @@
   button.on {
     background: var(--rim);
     color: var(--pearl);
-  }
-  svg {
-    width: 18px;
-    height: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
   }
   .count {
     position: absolute;

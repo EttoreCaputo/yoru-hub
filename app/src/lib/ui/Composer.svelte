@@ -7,6 +7,7 @@
 <script lang="ts">
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
+  import Icon from "./Icon.svelte";
 
   let { autofocus = false, big = false, mic = false }: { autofocus?: boolean; big?: boolean; mic?: boolean } = $props();
   const t = $derived(i18n.t.composer);
@@ -54,9 +55,9 @@
       title={speaking ? t.hush : listening ? t.micStop : t.micStart}
     >
       {#if speaking}
-        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="1.5" /></svg>
+        <Icon name="square" size={16} stroke={2} />
       {:else}
-        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7.5" y="2.5" width="5" height="9" rx="2.5" /><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5" /></svg>
+        <Icon name="mic" size={17} />
       {/if}
     </button>
   {/if}
@@ -73,7 +74,7 @@
     {#if store.asking}
       <span class="spin" aria-hidden="true"></span>
     {:else}
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5M5.5 9.5 10 5l4.5 4.5" /></svg>
+      <Icon name="arrow-up" size={16} stroke={2.25} />
     {/if}
   </button>
 </form>
@@ -138,17 +139,11 @@
     background: var(--ink-3);
     cursor: default;
   }
-  svg {
-    width: 16px;
-    height: 16px;
-    fill: none;
-    stroke: var(--eye);
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+  .send {
+    color: var(--eye);
   }
-  .send:disabled svg {
-    stroke: var(--dusk);
+  .send:disabled {
+    color: var(--dusk);
   }
   .mic {
     display: grid;
@@ -165,19 +160,19 @@
       background 160ms,
       box-shadow 80ms;
   }
-  .mic svg {
-    stroke: var(--haze);
+  .mic {
+    color: var(--haze);
   }
-  .mic:hover svg {
-    stroke: var(--pearl);
+  .mic:hover {
+    color: var(--pearl);
   }
   /* On: green, with a ring as loud as the voice it hears. */
   .mic.on {
     background: var(--done);
     box-shadow: 0 0 0 calc(2px + var(--level, 0) * 8px) color-mix(in srgb, var(--done) 30%, transparent);
   }
-  .mic.on svg {
-    stroke: var(--eye);
+  .mic.on {
+    color: var(--eye);
   }
   .mic:disabled {
     cursor: default;

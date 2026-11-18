@@ -8,6 +8,7 @@
   brain): what was said, decided, left to do and left open. The meetings' settings are a panel of this page.
 -->
 <script lang="ts">
+  import Icon from "../ui/Icon.svelte";
   import { tick, untrack } from "svelte";
   import { call, inPreview, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
@@ -473,7 +474,7 @@
         </div>
         <div class="tiles-row" role="radiogroup" aria-label={t.played}>
           <button class="source" class:on={played === "system"} role="radio" aria-checked={played === "system"} onclick={() => (played = "system")}>
-            <span class="glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H4zM9 20h6M12 16v4" /></svg></span>
+            <span class="glyph"><Icon name="monitor" size={24} stroke={1.6} /></span>
             <span class="label">{t.everything}</span>
           </button>
           {#each sources?.apps ?? [] as app (app.id)}
@@ -488,7 +489,7 @@
             </button>
           {/each}
           <button class="source" class:on={played === "none"} role="radio" aria-checked={played === "none"} onclick={() => (played = "none")}>
-            <span class="glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM6 6l12 12" /></svg></span>
+            <span class="glyph"><Icon name="ban" size={24} stroke={1.6} /></span>
             <span class="label">{t.nothing}</span>
           </button>
         </div>
@@ -904,15 +905,6 @@
     border-radius: 11px;
     background: var(--ink-3);
     color: var(--pearl-mid);
-  }
-  .glyph svg {
-    width: 24px;
-    height: 24px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.6;
-    stroke-linecap: round;
-    stroke-linejoin: round;
   }
   .letter {
     font: 600 21px/1 var(--display);

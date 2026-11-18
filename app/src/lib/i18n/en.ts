@@ -729,6 +729,8 @@ const en = {
     themes: { system: "Like the Mac", light: "Light", dark: "Dark" },
     more: "Also here",
     moreNotes: {
+      tasks: "The jobs you give Yoru, once or on a schedule.",
+      routines: "The morning recap, quiet hours and what Yoru keeps an eye on.",
       connectors: "The services Yoru reads and acts on for you.",
       spoken: "What Yoru said with a cloud voice, to hear again or export.",
       animations: "Every animation of Yoru's eyes, to try on the board.",

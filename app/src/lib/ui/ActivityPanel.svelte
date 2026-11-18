@@ -1,7 +1,7 @@
 <!--
-  The Home's right side, on the window's frame next to the page and only as
-  tall as what it lists; the window bar's button folds it away entirely
-  (App.svelte shows it). It lists the coding agents at work, the
+  The window's right side on every page, on the frame next to the page and
+  only as tall as what it lists; the window bar's button folds it away
+  entirely (App.svelte shows it). It lists the coding agents at work, the
   tasks Yoru does on his own and his routines (the morning recap, the
   watchers), each a line with what it is and how it stands. A line opens
   its detail in a dialog in the middle of the window.

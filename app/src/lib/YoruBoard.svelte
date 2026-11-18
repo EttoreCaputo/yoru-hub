@@ -8,6 +8,9 @@
 
   The mirror only plays what it is given: `reaction` is a name from
   `YORU_REACTIONS`, and `at` restarts it when the same one comes again.
+  With `follow`, the eyes follow the pointer while it's in the window
+  (unless `gaze` says where to look), and come back to the middle when it
+  leaves.
 -->
 <script lang="ts">
   import type { BoardState, Gaze, VoiceState } from "./types";
@@ -22,6 +25,7 @@
     badge = null,
     dancing = false,
     reaction = null,
+    follow = false,
     onpoke,
   }: {
     board: BoardState;
@@ -31,8 +35,21 @@
     badge?: Badge | null;
     dancing?: boolean;
     reaction?: { name: string; at: number } | null;
+    follow?: boolean;
     onpoke?: () => void;
   } = $props();
+
+  // Where the pointer is from the sphere, −1 to 1 each way, about a few
+  // sizes away reaching the edge.
+  let root: HTMLDivElement | undefined = $state();
+  let pointer = $state<Gaze | null>(null);
+  function track(e: PointerEvent) {
+    if (!follow || !root) return;
+    const r = root.getBoundingClientRect();
+    const reach = Math.max(160, r.width * 3);
+    pointer = { x: (e.clientX - (r.left + r.width / 2)) / reach, y: (e.clientY - (r.top + r.height / 2)) / reach, movedAt: Date.now() };
+  }
+  const seen = $derived(gaze ?? (follow ? pointer : null));
 
   const uid = $props.id();
   const D = 466;
@@ -87,14 +104,16 @@
   );
 
   // The eyes slide over the surface towards the pointer, and narrow near the edge.
-  const look = $derived(gaze && !asleep && gesture !== "cover" ? { x: Math.max(-1, Math.min(1, gaze.x)), y: Math.max(-1, Math.min(1, gaze.y)) } : { x: 0, y: 0 });
+  const look = $derived(seen && !asleep && gesture !== "cover" ? { x: Math.max(-1, Math.min(1, seen.x)), y: Math.max(-1, Math.min(1, seen.y)) } : { x: 0, y: 0 });
   const eyeX = $derived(look.x * R * 0.38);
   const eyeY = $derived(R * 0.12 + look.y * R * 0.22 + (gesture === "think" ? -R * 0.18 : 0) + (eyes === "low" ? R * 0.1 : 0));
   const narrow = $derived(1 - Math.abs(look.x) * 0.3);
   const eyeH = $derived(eyes === "closed" ? 4 : eyes === "wide" ? 40 : eyes === "low" ? 18 : eyes === "narrow" ? 14 : 32);
 </script>
 
-<div class="yoru" class:asleep class:dancing={gesture === "sway"} style:width="{size * 1.15}px" style:height="{size * 1.15}px">
+<svelte:window onpointermove={track} onmouseout={(e) => !e.relatedTarget && (pointer = null)} onblur={() => (pointer = null)} />
+
+<div class="yoru" bind:this={root} class:asleep class:dancing={gesture === "sway"} style:width="{size * 1.15}px" style:height="{size * 1.15}px">
   <svg viewBox="0 0 {D} {D}" role="img" aria-label="Yoru">
     <defs>
       <radialGradient id="{uid}-body" cx="0.36" cy="0.32" r="0.75">

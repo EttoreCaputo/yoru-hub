@@ -727,6 +727,8 @@ const it: Messages = {
     themes: { system: "Come il Mac", light: "Chiaro", dark: "Scuro" },
     more: "Anche qui",
     moreNotes: {
+      tasks: "I lavori che affidi a Yoru, una volta o a orari fissi.",
+      routines: "Il riepilogo del mattino, le ore di silenzio e ciò che Yoru tiene d'occhio.",
       connectors: "I servizi che Yoru legge e su cui agisce per te.",
       spoken: "Quello che Yoru ha detto con una voce cloud, da riascoltare o esportare.",
       animations: "Tutte le animazioni degli occhi di Yoru, da provare sulla scheda.",

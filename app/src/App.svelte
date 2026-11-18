@@ -18,6 +18,7 @@
   import { SETTINGS_PAGES } from "./lib/icons/pages";
   import { look } from "./lib/look.svelte";
   import ActivityPanel from "./lib/ui/ActivityPanel.svelte";
+  import Icon from "./lib/ui/Icon.svelte";
 
   store.start();
   i18n.start();
@@ -25,7 +26,7 @@
 
   const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
-  // Services, Spoken and Animations are opened from Settings, and lead back to it.
+  // Tasks, Routines, Services, Spoken and Animations are opened from Settings, and lead back to it.
   const fromSettings = $derived((SETTINGS_PAGES as readonly string[]).includes(store.page));
   let main: HTMLElement | undefined = $state();
   // Each page starts at its top.
@@ -36,7 +37,7 @@
 </script>
 
 <!-- The frame: the bar on top, the sidebar on the left, the page as a card,
-     and on the Home the activity panel on the right. -->
+     and the activity panel on the right, on every page. -->
 <div class="app" class:folded={!look.sidebar}>
   <WindowBar />
   <Sidebar />
@@ -45,13 +46,13 @@
     {#if fromSettings}
       <div class="back">
         <button class="btn quiet small" onclick={() => store.go("settings")}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6l-6 6 6 6" /></svg>{i18n.t.settings.back}
+          <Icon name="chevron-left" size={16} />{i18n.t.settings.back}
         </button>
       </div>
     {/if}
     <Page />
   </main>
-  {#if store.page === "home" && look.activity}<ActivityPanel />{/if}
+  {#if look.activity}<ActivityPanel />{/if}
   <!-- The first run asks for the permissions itself; after it, the gate
        waits for the microphone if it was taken away. -->
   {#if store.onboarding && !store.onboarding.done}<Setup />{:else if store.micMissing}<PermissionGate />{/if}
@@ -90,21 +91,12 @@
   }
   /* Lined up with the page under it, which then starts a little higher. */
   .back {
-    max-width: 920px;
+    max-width: 880px;
     margin: 16px auto -26px;
     padding: 0 40px;
   }
   .back button {
     margin-left: -10px;
     gap: 4px;
-  }
-  .back svg {
-    width: 15px;
-    height: 15px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
   }
 </style>
