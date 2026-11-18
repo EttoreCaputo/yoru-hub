@@ -1,7 +1,7 @@
 <!--
   Home: Yoru as a mascot, the conversation with him, and the field to type
-  or talk at the bottom; on the right, the activity panel (agents, tasks,
-  routines), which folds away.
+  or talk at the bottom. The activity panel (agents, tasks, routines) sits
+  beside it, on the window's frame (App.svelte).
 
   The mascot is his own, not the board's mirror: awake whether or not a
   board is on the desk, he thinks while an answer is on its way, listens
@@ -14,14 +14,12 @@
   import { reactionFor } from "../mood";
   import { store } from "../store.svelte";
   import type { VoiceState } from "../types";
-  import ActivityPanel from "../ui/ActivityPanel.svelte";
   import ChatLog from "../ui/ChatLog.svelte";
   import Composer from "../ui/Composer.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
   import YoruBoard from "../YoruBoard.svelte";
 
   const t = $derived(i18n.t.home);
-  const PANEL_KEY = "yoru.activity";
 
   const greeting = $derived.by(() => {
     const h = new Date(store.now).getHours();
@@ -60,22 +58,6 @@
     return () => clearTimeout(hello);
   });
 
-  let panelOpen = $state(read());
-  function read() {
-    try {
-      return localStorage.getItem(PANEL_KEY) !== "closed";
-    } catch {
-      return true;
-    }
-  }
-  $effect(() => {
-    try {
-      localStorage.setItem(PANEL_KEY, panelOpen ? "open" : "closed");
-    } catch {
-      // The panel just opens next time.
-    }
-  });
-
   // Down to the newest line whenever one comes, or a card, or the wait.
   let log: HTMLElement | undefined = $state();
   $effect(() => {
@@ -87,8 +69,7 @@
   });
 </script>
 
-<div class="home">
-  <section class="talk">
+<section class="talk">
     <div class="mascot" class:small={!empty}>
       <div class="yoru">
         <YoruBoard board="live" size={empty ? 210 : 116} {voice} gaze={store.gaze} {badge} {reaction} onpoke={() => play("happy")} />
@@ -121,20 +102,13 @@
     <div class="dock">
       <div class="column"><Composer mic big autofocus /></div>
     </div>
-  </section>
-
-  <ActivityPanel bind:open={panelOpen} />
-</div>
+</section>
 
 <style>
-  .home {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    height: 100%;
-  }
   .talk {
     display: flex;
     flex-direction: column;
+    height: 100%;
     min-height: 0;
   }
   .column {
@@ -149,7 +123,7 @@
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    padding: 46px 36px 10px;
+    padding: 40px 36px 10px;
     text-align: center;
     transition: padding 300ms;
   }
@@ -157,7 +131,7 @@
     flex-direction: row;
     justify-content: center;
     gap: 16px;
-    padding-top: 40px;
+    padding-top: 22px;
     text-align: left;
   }
   .yoru :global(svg > circle:first-of-type) {

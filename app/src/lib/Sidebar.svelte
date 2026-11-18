@@ -7,6 +7,7 @@
 <script lang="ts">
   import { i18n } from "./i18n/index.svelte";
   import { PAGE_ICONS } from "./icons/pages";
+  import { look } from "./look.svelte";
   import { store, type Page } from "./store.svelte";
 
   const t = $derived(i18n.t);
@@ -36,7 +37,7 @@
   };
 </script>
 
-<nav class="side chrome" aria-label="Yoru">
+<nav class="side chrome" class:gone={!look.sidebar} aria-label="Yoru" inert={!look.sidebar}>
   <header data-tauri-drag-region>
     <svg class="mini {tint ?? ''}" viewBox="0 0 40 40" aria-hidden="true">
       <defs>
@@ -109,20 +110,29 @@
 {/snippet}
 
 <style>
+  /* On the window's frame, under its bar: no box of its own. Folded, it
+     slides under the page (App.svelte narrows its column to nothing). */
   .side {
+    grid-column: 1;
+    grid-row: 2;
     display: flex;
     flex-direction: column;
-    height: 100%;
+    width: 220px;
+    min-height: 0;
     padding: 0 10px 12px;
-    background: var(--ink);
-    border-right: 1px solid var(--rim);
+    transition:
+      opacity 200ms,
+      visibility 200ms;
+  }
+  .side.gone {
+    opacity: 0;
+    visibility: hidden;
   }
   header {
     display: flex;
     align-items: center;
     gap: 10px;
-    /* Room above for macOS's own window buttons (tauri.conf.json's trafficLightPosition). */
-    padding: 52px 8px 22px;
+    padding: 6px 8px 22px;
   }
   .mini {
     width: 40px;
@@ -206,11 +216,11 @@
   }
   .boards button:hover {
     color: var(--pearl);
-    background: var(--ink-2);
+    background: var(--rim);
   }
   .boards button.on {
     color: var(--pearl);
-    background: var(--ink-2);
+    background: var(--rim);
     border-color: var(--rim-2);
   }
   .bname {
@@ -245,7 +255,7 @@
     border-radius: 10px;
     background: none;
     color: var(--haze);
-    font: 500 13.5px/1 var(--sans);
+    font: 500 14px/1 var(--sans);
     cursor: pointer;
     text-align: left;
     transition:
@@ -254,11 +264,12 @@
   }
   li button:hover {
     color: var(--pearl);
-    background: var(--ink-2);
+    background: var(--rim);
   }
   li button.on {
     color: var(--pearl);
-    background: var(--ink-3);
+    font-weight: 600;
+    background: var(--rim);
   }
   li span:first-of-type {
     flex: 1;
@@ -268,7 +279,7 @@
     height: 18px;
     fill: none;
     stroke: currentColor;
-    stroke-width: 1.6;
+    stroke-width: 1.5;
     stroke-linecap: round;
     stroke-linejoin: round;
     flex-shrink: 0;
@@ -295,7 +306,7 @@
     padding: 0 10px;
     border-radius: 10px;
     border: 1px solid var(--rim);
-    background: none;
+    background: var(--night);
     color: var(--haze);
     font: 500 12.5px/1.2 var(--sans);
     cursor: pointer;
@@ -312,7 +323,7 @@
     cursor: default;
     color: var(--pearl);
     border-color: var(--rim-2);
-    background: var(--ink-2);
+    background: var(--night);
     padding-right: 4px;
   }
   .dnd.on span {

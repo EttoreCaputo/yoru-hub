@@ -96,6 +96,10 @@ const it: Messages = {
     stop: "Ferma",
   },
 
+  window: {
+    hideSidebar: "Nascondi la barra laterale",
+    showSidebar: "Mostra la barra laterale",
+  },
   home: {
     greeting: { morning: "Buongiorno", afternoon: "Buon pomeriggio", evening: "Buonasera", night: "Ancora sveglio?" },
     quietLine: "Niente di nuovo. Tengo d'occhio le cose.",
@@ -717,6 +721,9 @@ const it: Messages = {
     boardOff: "Non collegata",
     aboutSummary: "Dati e prima configurazione",
     back: "Impostazioni",
+    look: "Aspetto",
+    lookNote: "Chiaro, scuro, o come il Mac.",
+    themes: { system: "Come il Mac", light: "Chiaro", dark: "Scuro" },
     more: "Anche qui",
     moreNotes: {
       connectors: "I servizi che Yoru legge e su cui agisce per te.",

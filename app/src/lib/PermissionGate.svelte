@@ -27,7 +27,7 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgba(0, 0, 0, 0.82);
+    background: var(--scrim);
     backdrop-filter: blur(6px);
   }
   .sheet {
@@ -40,7 +40,7 @@
     border-radius: 24px;
     background: var(--ink);
     border: 1px solid var(--rim-2);
-    box-shadow: 0 40px 120px -40px rgba(195, 190, 219, 0.25);
+    box-shadow: var(--shadow);
   }
   h1 {
     font: 600 24px/1.15 var(--display);

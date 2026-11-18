@@ -36,7 +36,7 @@
     display: grid;
     place-items: center;
     padding: 40px;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--scrim);
     backdrop-filter: blur(3px);
   }
   .dialog {
@@ -47,7 +47,7 @@
     border-radius: var(--r-lg);
     border: 1px solid var(--rim-2);
     background: var(--ink);
-    box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8);
+    box-shadow: var(--shadow);
     outline: none;
   }
   header {

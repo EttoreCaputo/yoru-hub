@@ -87,8 +87,9 @@
     gap: 8px;
     padding: 6px 6px 6px 16px;
     border-radius: 22px;
-    background: var(--ink-2);
+    background: var(--field);
     border: 1px solid var(--rim);
+    box-shadow: var(--lift);
     transition: border-color 200ms;
   }
   .composer:focus-within {
@@ -127,6 +128,9 @@
     cursor: pointer;
     background: radial-gradient(circle at 32% 28%, #fff, var(--pearl) 45%, var(--pearl-mid));
     flex-shrink: 0;
+  }
+  :global(:root[data-theme="light"]) .send:not(:disabled) {
+    background: var(--pearl);
   }
   .send:disabled {
     background: var(--ink-3);

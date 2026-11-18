@@ -16,9 +16,12 @@
   import { store } from "./lib/store.svelte";
   import WindowBar from "./lib/WindowBar.svelte";
   import { SETTINGS_PAGES } from "./lib/icons/pages";
+  import { look } from "./lib/look.svelte";
+  import ActivityPanel from "./lib/ui/ActivityPanel.svelte";
 
   store.start();
   i18n.start();
+  look.start();
 
   const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
@@ -32,9 +35,12 @@
   });
 </script>
 
-<div class="app">
+<!-- The frame: the bar on top, the sidebar on the left, the page as a card,
+     and on the Home the activity panel on the right. -->
+<div class="app" class:folded={!look.sidebar}>
+  <WindowBar />
   <Sidebar />
-  <!-- The Home fills the window and scrolls inside; the other pages scroll here. -->
+  <!-- The Home fills the card and scrolls inside; the other pages scroll here. -->
   <main bind:this={main} class:fill={store.page === "home"}>
     {#if fromSettings}
       <div class="back">
@@ -45,7 +51,7 @@
     {/if}
     <Page />
   </main>
-  <WindowBar />
+  {#if store.page === "home" && look.activity}<ActivityPanel />{/if}
   <!-- The first run asks for the permissions itself; after it, the gate
        waits for the microphone if it was taken away. -->
   {#if store.onboarding && !store.onboarding.done}<Setup />{:else if store.micMissing}<PermissionGate />{/if}
@@ -55,13 +61,28 @@
   .app {
     position: relative;
     display: grid;
-    grid-template-columns: 228px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr) auto;
+    grid-template-rows: 48px minmax(0, 1fr);
     height: 100vh;
+    transition: grid-template-columns 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .app.folded {
+    grid-template-columns: 0 minmax(0, 1fr) auto;
   }
   main {
+    grid-column: 2;
+    grid-row: 2;
     position: relative;
     overflow-y: auto;
-    padding-top: 18px;
+    margin: 0 10px 10px 0;
+    padding-top: 8px;
+    border-radius: 14px;
+    background: var(--night);
+    box-shadow: var(--card-shadow);
+    transition: margin 240ms;
+  }
+  .folded main {
+    margin-left: 10px;
   }
   main.fill {
     padding-top: 0;

@@ -3,6 +3,11 @@
   window is the board's screen grown up: black where nothing is, pearl for
   what matters, and the firmware's four state tints only where they mean
   something (thinking, done, waiting, wrong).
+
+  Two themes (lib/look.svelte.ts sets html[data-theme]): dark, the board's,
+  and light, paper white. The names stay the dark theme's: --night is the
+  page, --ink the cards on it, --pearl the text, --eye what's written on
+  pearl. The window is a frame (--frame) holding the page as a card.
 */
 :root {
   --night: #000000;
@@ -27,9 +32,51 @@
   --sans: "Figtree Variable", system-ui, "PingFang SC", "Hiragino Sans", "Noto Sans CJK SC", sans-serif;
   --mono: "JetBrains Mono Variable", ui-monospace, monospace;
 
+  --frame: #101016;
+  --frame-glow: radial-gradient(120% 80% at 0% 0%, rgba(110, 104, 144, 0.16), transparent 60%),
+    radial-gradient(90% 70% at 100% 100%, rgba(255, 159, 67, 0.05), transparent 60%);
+  --card-rim: rgba(236, 233, 245, 0.07);
+  --card-shadow: 0 0 0 1px var(--card-rim);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8);
+  --field: var(--ink-2);
+  --lift: 0 10px 30px -14px rgba(0, 0, 0, 0.7);
+
   --r: 12px;
   --r-lg: 18px;
   color-scheme: dark;
+}
+
+/* Light: white pages on a frame tinted like morning sky, ink for text. */
+:root[data-theme="light"] {
+  --night: #ffffff;
+  --ink: #f7f7fa;
+  --ink-2: #f0f0f4;
+  --ink-3: #e8e7ee;
+  --rim: rgba(26, 24, 44, 0.08);
+  --rim-2: rgba(26, 24, 44, 0.14);
+  --pearl: #1c1b22;
+  --pearl-mid: #8a85a6;
+  --pearl-deep: #b9b5cc;
+  --haze: #6a6878;
+  --dusk: #9896a6;
+  --eye: #ffffff;
+
+  --think: #2f80ed;
+  --done: #1fa463;
+  --wait: #ea8a1c;
+  --wrong: #e5484d;
+
+  --frame: #eef1f6;
+  --frame-glow: radial-gradient(110% 80% at 0% 0%, #e6edf8, transparent 65%),
+    radial-gradient(90% 80% at 100% 100%, #fbe9ec, transparent 65%);
+  --card-rim: rgba(26, 24, 44, 0.06);
+  --card-shadow: 0 1px 2px rgba(26, 24, 44, 0.04), 0 0 0 1px var(--card-rim);
+  --scrim: rgba(238, 241, 246, 0.6);
+  --shadow: 0 30px 80px -24px rgba(26, 24, 44, 0.28);
+  --field: #ffffff;
+  --lift: 0 10px 30px -12px rgba(26, 24, 44, 0.16), 0 0 0 4px rgba(230, 237, 248, 0.5);
+  color-scheme: light;
 }
 
 * {
@@ -40,7 +87,7 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--night);
+  background: var(--frame-glow), var(--frame);
   color: var(--pearl);
   font: 400 14px/1.5 var(--sans);
   -webkit-font-smoothing: antialiased;
@@ -86,7 +133,7 @@ a {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(236, 233, 245, 0.08);
+  background: var(--rim-2);
   border-radius: 10px;
   border: 3px solid transparent;
   background-clip: padding-box;
@@ -130,6 +177,15 @@ a {
 }
 .btn.primary:hover:not(:disabled) {
   background: radial-gradient(120% 140% at 30% 20%, #fff 0%, #f3f1f9 45%, var(--pearl-mid) 100%);
+}
+:root[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+:root[data-theme="light"] .btn.primary {
+  background: var(--pearl);
+}
+:root[data-theme="light"] .btn.primary:hover:not(:disabled) {
+  background: #36343f;
 }
 .btn.quiet {
   border-color: transparent;

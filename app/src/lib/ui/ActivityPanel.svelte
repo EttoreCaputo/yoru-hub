@@ -1,5 +1,7 @@
 <!--
-  The Home's right side, which folds away: the coding agents at work, the
+  The Home's right side, on the window's frame next to the page and only as
+  tall as what it lists; the window bar's button folds it away entirely
+  (App.svelte shows it). It lists the coding agents at work, the
   tasks Yoru does on his own and his routines (the morning recap, the
   watchers), each a line with what it is and how it stands. A line opens
   its detail in a dialog in the middle of the window.
@@ -11,8 +13,6 @@
   import type { ActiveAgent, TaskEntry, WatchEntry } from "../types";
   import Dialog from "./Dialog.svelte";
   import { ago } from "./when";
-
-  let { open = $bindable(true) }: { open?: boolean } = $props();
 
   const t = $derived(i18n.t.home);
   const ta = $derived(i18n.t.agents);
@@ -69,16 +69,9 @@
   }
 </script>
 
-<aside class="activity" class:open aria-label={t.panel}>
-  <header>
-    {#if open}<h2>{t.panel}</h2>{/if}
-    <button class="fold" onclick={() => (open = !open)} aria-label={open ? t.hidePanel : t.showPanel} title={open ? t.hidePanel : t.showPanel}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5" /><path d="M14.5 5v14" />{#if open}<path d="M8.5 10l2 2-2 2" />{:else}<path d="M10.5 10l-2 2 2 2" />{/if}</svg>
-    </button>
-  </header>
-
-  {#if open}
-    <div class="scroll">
+<aside class="activity" aria-label={t.panel}>
+  <h2>{t.panel}</h2>
+  <div class="scroll">
       <section>
         <h3 class="section-title">{ta.title}{#if store.working}<span class="n">{store.working}</span>{/if}</h3>
         {#if store.agents.length}
@@ -143,8 +136,7 @@
           <p class="none">{t.noRoutines}</p>
         {/if}
       </section>
-    </div>
-  {/if}
+  </div>
 </aside>
 
 {#if detail?.kind === "agent" && agent}
@@ -216,59 +208,23 @@
 
 <style>
   .activity {
+    grid-column: 3;
+    grid-row: 2;
+    align-self: start;
     display: flex;
     flex-direction: column;
+    width: 280px;
+    max-height: 100%;
     min-height: 0;
-    width: 52px;
-    border-left: 1px solid var(--rim);
-    background: var(--ink);
-    transition: width 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .activity.open {
-    width: 290px;
-  }
-  header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    /* Under the window bar's icons. */
-    padding: 52px 10px 6px 18px;
-  }
-  .activity:not(.open) header {
-    padding-left: 10px;
+    padding: 6px 12px 12px 2px;
   }
   h2 {
-    flex: 1;
-    font: 600 15px/1 var(--display);
-    white-space: nowrap;
-  }
-  .fold {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 28px;
-    border: 0;
-    border-radius: 7px;
-    background: none;
-    color: var(--haze);
-    cursor: pointer;
-  }
-  .fold:hover {
-    background: var(--ink-3);
-    color: var(--pearl);
-  }
-  svg {
-    width: 18px;
-    height: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.6;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+    padding: 0 8px 4px;
+    font: 600 16px/1.3 var(--display);
   }
   .scroll {
     overflow-y: auto;
-    padding: 0 10px 20px;
+    min-height: 0;
   }
   section {
     margin-top: 10px;
@@ -309,7 +265,7 @@
     cursor: pointer;
   }
   li button:hover {
-    background: var(--ink-2);
+    background: var(--rim);
   }
   li .dot {
     margin-top: 6px;

@@ -40,8 +40,18 @@
     border-color: transparent;
     background: var(--pearl-deep);
   }
+:global(:root[data-theme="light"]) .on {
+    background: var(--pearl);
+  }
+  :global(:root[data-theme="light"]) .knob {
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
   .on .knob {
     transform: translateX(16px);
     background: radial-gradient(circle at 35% 30%, #fff, var(--pearl-mid));
+  }
+  :global(:root[data-theme="light"]) .on .knob {
+    background: #fff;
   }
 </style>

@@ -98,6 +98,10 @@ const en = {
     stop: "Stop",
   },
 
+  window: {
+    hideSidebar: "Hide the sidebar",
+    showSidebar: "Show the sidebar",
+  },
   home: {
     greeting: { morning: "Good morning", afternoon: "Good afternoon", evening: "Good evening", night: "Still up?" },
     quietLine: "Nothing new. I'm keeping an eye on things.",
@@ -719,6 +723,9 @@ const en = {
     boardOff: "Not connected",
     aboutSummary: "Data and first setup",
     back: "Settings",
+    look: "Appearance",
+    lookNote: "Light, dark, or as the Mac is.",
+    themes: { system: "Like the Mac", light: "Light", dark: "Dark" },
     more: "Also here",
     moreNotes: {
       connectors: "The services Yoru reads and acts on for you.",
