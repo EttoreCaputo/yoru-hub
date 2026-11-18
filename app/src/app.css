@@ -161,7 +161,7 @@ a {
   padding: 0 14px;
   border-radius: 999px;
   border: 1px solid var(--rim-2);
-  background: transparent;
+  background: var(--field);
   color: var(--pearl);
   font: 550 var(--fs-body)/1 var(--sans);
   cursor: pointer;
@@ -198,6 +198,7 @@ a {
 }
 .btn.quiet {
   border-color: transparent;
+  background: transparent;
   color: var(--haze);
 }
 .btn.quiet:hover:not(:disabled) {
@@ -205,7 +206,11 @@ a {
 }
 .btn.danger {
   color: var(--wrong);
-  border-color: color-mix(in srgb, var(--wrong) 35%, transparent);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--wrong) 10%, transparent);
+}
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--wrong) 16%, transparent);
 }
 .btn.small {
   height: 26px;
@@ -225,8 +230,8 @@ select {
   min-height: 36px;
   padding: 8px 12px;
   border-radius: var(--r);
-  border: 1px solid var(--rim);
-  background: var(--ink-2);
+  border: 1px solid var(--rim-2);
+  background: var(--field);
   color: var(--pearl);
   font: 400 var(--fs-body)/1.4 var(--sans);
   transition: border-color 160ms;
@@ -258,27 +263,119 @@ label.stack {
   font-size: var(--fs-meta);
 }
 
-/* A page. */
+/* A page. Every page has the same width and the same head: its title and
+   one line on the left, its own buttons on the right, a dashed line under
+   them (Pocket's layout). */
 .page {
-  max-width: 920px;
+  max-width: 880px;
   margin: 0 auto;
   padding: 34px 40px 60px;
 }
 .page-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 26px;
+  padding-bottom: 22px;
+  border-bottom: 1px dashed var(--rim-2);
 }
 .page-head h1 {
-  font: 600 var(--fs-title)/1.1 var(--display);
-  letter-spacing: -0.01em;
+  font: 700 var(--fs-title)/1.1 var(--display);
+  letter-spacing: -0.015em;
 }
 .page-head .lede {
   margin-top: 6px;
   color: var(--haze);
   max-width: 580px;
+}
+.page-head .actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* A group's head: its name and a line on the left, its button on the right. */
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 32px 0 12px;
+}
+.section-head .section-title {
+  margin: 0;
+}
+.section-head p {
+  margin-top: 3px;
+  color: var(--haze);
+}
+
+/* A list (Pocket's to-dos): open rows on the page, a dashed line between
+   them, a soft grey under the one pointed at; never a card per item. A row:
+   its head (state dot, name, tags, switch), a line of what it does, a faint
+   line of when, and its buttons. */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.list > li {
+  padding: 14px 12px;
+  margin: 0 -12px;
+  border-radius: var(--r);
+  transition: background 140ms;
+}
+.list > li:hover {
+  background: var(--ink-2);
+}
+.list > li + li {
+  position: relative;
+}
+.list > li + li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  border-top: 1px dashed var(--rim-2);
+}
+.list > li:hover::before,
+.list > li:hover + li::before {
+  opacity: 0;
+}
+.item-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.item-head h3 {
+  font: 600 var(--fs-body)/1.3 var(--sans);
+}
+.item-head .spacer {
+  flex: 1;
+}
+.item-text {
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+.item-meta {
+  margin-top: 4px;
+  color: var(--dusk);
+  font-size: var(--fs-meta);
+}
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+}
+.list > li.off h3,
+.list > li.off .item-text {
+  color: var(--haze);
 }
 
 /* A group of settings or items: ink on black, no hard boxes. */
@@ -295,7 +392,7 @@ label.stack {
    first: a card after a grid of tiles, a note or an error, and a note after
    a card. One class's weight: stronger than the reset, weaker than any
    margin a page sets itself. */
-:where(.panel, .tiles, p, ol, details, .test) + :is(.panel, .tiles) {
+:where(.panel, .tiles, .list, p, ol, details, .test) + :is(.panel, .tiles, .list) {
   margin-top: 14px;
 }
 :where(.panel, .tiles) + :is(p, ol, .test) {
@@ -357,7 +454,7 @@ details.more > summary:hover {
   padding: 12px 0;
 }
 .setting + .setting {
-  border-top: 1px solid var(--rim);
+  border-top: 1px dashed var(--rim-2);
 }
 .panel > .setting:first-child {
   padding-top: 2px;
@@ -417,6 +514,80 @@ details.more > summary:hover {
   color: var(--pearl);
   font: 600 var(--fs-head)/1.3 var(--display);
   margin-bottom: 4px;
+}
+
+/* Two to four views of one thing (Pocket's Notes / Source): a pill with the
+   one shown lifted inside it. */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--rim);
+  background: var(--ink-2);
+}
+.seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--haze);
+  font: 550 var(--fs-meta)/1 var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 140ms,
+    color 140ms;
+}
+.seg button:hover {
+  color: var(--pearl);
+}
+.seg button.on {
+  background: var(--night);
+  color: var(--pearl);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+/* Filters and choices (Pocket's All / Messages / Tasks): outlined pills,
+   the one picked solid. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--rim-2);
+  background: var(--field);
+  color: var(--haze);
+  font: 550 var(--fs-meta)/1 var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 140ms,
+    color 140ms,
+    border-color 140ms;
+}
+.chip:hover {
+  color: var(--pearl);
+}
+.chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chip.on {
+  border-color: transparent;
+  background: var(--pearl);
+  color: var(--eye);
 }
 
 /* A state dot, in the firmware's tints. */

@@ -174,9 +174,6 @@
 </div>
 
 <style>
-  .animations {
-    max-width: 820px;
-  }
   .small {
     font-size: var(--fs-meta);
   }

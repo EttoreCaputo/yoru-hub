@@ -106,10 +106,10 @@
     </section>
   {/if}
 
-  <div class="watch-head">
+  <div class="section-head">
     <div>
       <h2 class="section-title">{t.watchers}</h2>
-      <p class="dim hint">{t.watchersHint}</p>
+      <p>{t.watchersHint}</p>
     </div>
     {#if !editing}<button class="btn primary" onclick={() => (editing = fresh())}>{t.addWatcher}</button>{/if}
   </div>
@@ -119,22 +119,22 @@
   {/if}
 
   {#if store.watchers.length}
-    <ul class="watchers">
+    <ul class="list">
       {#each store.watchers as { watcher: w, state } (w.id)}
-        <li class="panel" class:off={!w.enabled}>
-          <div class="w-head">
+        <li class:off={!w.enabled}>
+          <div class="item-head">
             <span class="dot {state.last_error ? 'wrong' : w.enabled ? 'done' : ''}"></span>
             <h3>{w.name}</h3>
             <span class="tag" class:tool={w.kind === "tool"}>{w.kind === "tool" ? w.tool : i18n.t.watcher.task}</span>
             <span class="spacer"></span>
             <Toggle checked={w.enabled} label={i18n.t.watcher.enabled} onchange={(on) => toggle(w, on)} />
           </div>
-          {#if w.kind === "task"}<p class="dim task">{w.task}</p>{/if}
-          <p class="facts faint">
+          {#if w.kind === "task"}<p class="item-text">{w.task}</p>{/if}
+          <p class="item-meta">
             {t.every(w.every_min)} · {state.last_run ? t.lastRun(ago(state.last_run, store.now)) : t.never} · {t.told(state.told)}
           </p>
           {#if state.last_error || runErrors[w.id]}<p class="error-text">{runErrors[w.id] ?? state.last_error}</p>{/if}
-          <div class="row actions">
+          <div class="item-actions">
             <button class="btn small" disabled={running.has(w.id) || !store.info?.ready} onclick={() => runNow(w.id)}>{running.has(w.id) ? t.running : t.runNow}</button>
             <button class="btn quiet small" onclick={() => (editing = structuredClone($state.snapshot(w)) as Watcher)}>{t.edit}</button>
             <ConfirmButton small label={t.remove} question={t.removeConfirm(w.name)} sure={t.removeSure} onconfirm={() => store.removeWatcher(w.id)} />
@@ -179,62 +179,14 @@
     border-top: 1px solid var(--rim);
     font-size: var(--fs-meta);
   }
-  .watch-head {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 14px;
-  }
-  .watch-head .section-title {
-    margin-bottom: 6px;
-  }
-  .hint {
-    font-size: var(--fs-body);
-  }
-  .watchers {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .watchers li.off h3 {
-    color: var(--haze);
-  }
-  .w-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .w-head h3 {
-    font: 600 var(--fs-head)/1.2 var(--sans);
-  }
-  .w-head .tag {
+  .item-head .tag {
     max-width: 260px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .w-head .tag.tool {
+  .item-head .tag.tool {
     font-family: var(--mono);
     font-weight: 400;
-    max-width: 260px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .spacer {
-    flex: 1;
-  }
-  .task {
-    margin-top: 8px;
-    font-size: var(--fs-body);
-  }
-  .facts {
-    margin-top: 6px;
-    font-size: var(--fs-meta);
-  }
-  .actions {
-    margin-top: 10px;
-    gap: 4px;
   }
   .log {
     list-style: none;

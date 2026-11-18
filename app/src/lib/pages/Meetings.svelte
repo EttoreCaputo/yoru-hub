@@ -367,9 +367,9 @@
       <h1>{t.title}</h1>
       <p class="lede">{t.lede}</p>
     </div>
-    <div class="head-actions">
-      <button class="btn small" disabled={importing} onclick={() => bringIn()}>{importing ? t.importing : t.import}</button>
-      <button class="btn small quiet" class:on={showSettings} aria-expanded={showSettings} onclick={() => (showSettings = !showSettings)}>{t.settings}</button>
+    <div class="actions">
+      <button class="btn" disabled={importing} onclick={() => bringIn()}>{importing ? t.importing : t.import}</button>
+      <button class="btn" class:on={showSettings} aria-expanded={showSettings} onclick={() => (showSettings = !showSettings)}>{t.settings}</button>
     </div>
   </div>
 
@@ -381,10 +381,10 @@
       </div>
       <div class="setting">
         <div class="what"><b>{t.when}</b><span>{t.whenHint}</span></div>
-        <div class="how choices" role="radiogroup" aria-label={t.when}>
+        <div class="how chips" role="radiogroup" aria-label={t.when}>
           {#each [["after", t.whenAfter], ["live", t.whenLive], ["manual", t.whenManual]] as [id, label] (id)}
             <button
-              class="choice"
+              class="chip"
               class:on={settings.transcribe === id}
               role="radio"
               aria-checked={settings.transcribe === id}
@@ -669,43 +669,14 @@
 </div>
 
 <style>
-  .meetings {
-    max-width: 820px;
-  }
   .small {
     font-size: var(--fs-meta);
-  }
-  .head-actions {
-    display: flex;
-    gap: 8px;
   }
   .btn.on {
     background: var(--ink-3);
   }
   .settings {
     margin-bottom: 14px;
-  }
-  .choices {
-    gap: 4px;
-  }
-  .choice {
-    height: 30px;
-    padding: 0 12px;
-    border-radius: 999px;
-    border: 1px solid var(--rim);
-    background: transparent;
-    color: var(--haze);
-    font: 500 var(--fs-meta)/1 var(--sans);
-    cursor: pointer;
-  }
-  .choice.on {
-    background: var(--ink-3);
-    border-color: var(--rim-2);
-    color: var(--pearl);
-  }
-  .choice:disabled {
-    opacity: 0.45;
-    cursor: default;
   }
   .drop {
     position: fixed;

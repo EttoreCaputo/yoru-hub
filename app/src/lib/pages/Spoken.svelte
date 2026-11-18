@@ -220,9 +220,6 @@
 </div>
 
 <style>
-  .spoken {
-    max-width: 820px;
-  }
   .small {
     font-size: var(--fs-meta);
   }
@@ -241,7 +238,6 @@
     align-items: center;
     gap: 14px;
     padding-bottom: 14px;
-    border-bottom: 1px solid var(--rim);
     margin-bottom: 4px;
   }
   .bar input {

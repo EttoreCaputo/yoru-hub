@@ -41,7 +41,7 @@
     background: var(--pearl-deep);
   }
 :global(:root[data-theme="light"]) .on {
-    background: var(--think);
+    background: var(--done);
   }
   :global(:root[data-theme="light"]) .knob {
     background: #fff;

@@ -28,7 +28,7 @@
       </button>
       <button role="tab" aria-selected={show === "all"} class:on={show === "all"} onclick={() => (show = "all")}>{t.all}</button>
     </div>
-    <div class="sources row">
+    <div class="chips sources">
       <button class="chip" class:on={!source} onclick={() => (source = null)}>{t.everySource}</button>
       {#each sources as s (s)}
         <button class="chip" class:on={source === s} onclick={() => (source = source === s ? null : s)}>{s}</button>
@@ -62,32 +62,7 @@
     gap: 14px;
     flex-wrap: wrap;
     padding-bottom: 14px;
-    border-bottom: 1px solid var(--rim);
     margin-bottom: 4px;
-  }
-  .seg {
-    display: flex;
-    padding: 3px;
-    border-radius: 999px;
-    background: var(--ink-2);
-    border: 1px solid var(--rim);
-  }
-  .seg button {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 26px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 999px;
-    background: none;
-    color: var(--haze);
-    font: 550 var(--fs-meta)/1 var(--sans);
-    cursor: pointer;
-  }
-  .seg button.on {
-    background: var(--ink-3);
-    color: var(--pearl);
   }
   .n {
     min-width: 18px;
@@ -99,28 +74,13 @@
     font: 700 var(--fs-small)/18px var(--sans);
     text-align: center;
   }
+  /* The sources on a line of their own, under the views and the buttons. */
   .sources {
-    flex: 1;
-    gap: 4px;
-  }
-  .chip {
-    height: 26px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid transparent;
-    background: none;
-    color: var(--dusk);
-    font: 500 var(--fs-meta)/1 var(--sans);
-    cursor: pointer;
-  }
-  .chip:hover {
-    color: var(--pearl);
-  }
-  .chip.on {
-    color: var(--pearl);
-    border-color: var(--rim-2);
+    order: 3;
+    flex-basis: 100%;
   }
   .end {
     gap: 2px;
+    margin-left: auto;
   }
 </style>

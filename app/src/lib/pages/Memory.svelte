@@ -138,7 +138,7 @@
       <h1>{t.title}</h1>
       <p class="lede">{t.lede}</p>
     </div>
-    <div class="row tools">
+    <div class="actions">
       <div class="seg" role="tablist">
         <button role="tab" aria-selected={mode === "graph"} class:on={mode === "graph"} onclick={() => (mode = "graph")}>{t.graph}</button>
         <button role="tab" aria-selected={mode === "list"} class:on={mode === "list"} onclick={() => (mode = "list")}>{t.list}</button>
@@ -322,9 +322,6 @@
 </div>
 
 <style>
-  .memory {
-    max-width: 1080px;
-  }
   .memory select {
     width: auto;
   }
@@ -455,31 +452,6 @@
   }
   .spacer {
     flex: 0;
-  }
-  .tools {
-    gap: 10px;
-  }
-  .seg {
-    display: flex;
-    padding: 3px;
-    border-radius: 999px;
-    background: var(--ink-2);
-    border: 1px solid var(--rim);
-    margin-right: 6px;
-  }
-  .seg button {
-    height: 26px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 999px;
-    background: none;
-    color: var(--haze);
-    font: 550 var(--fs-meta)/1 var(--sans);
-    cursor: pointer;
-  }
-  .seg button.on {
-    background: var(--ink-3);
-    color: var(--pearl);
   }
   .graph-bar {
     gap: 8px;

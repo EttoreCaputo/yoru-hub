@@ -289,8 +289,8 @@
 
     <h2 class="section-title more-title">{t.look}</h2>
     <div class="panel setting looks">
-      <div class="what"><b>{t.look}</b><span>{t.lookNote}</span></div>
-      <div class="how themes" role="radiogroup" aria-label={t.look}>
+      <div class="what"><b>{t.theme}</b><span>{t.lookNote}</span></div>
+      <div class="how seg" role="radiogroup" aria-label={t.look}>
         {#each THEMES as th (th)}
           <button role="radio" aria-checked={look.theme === th} class:on={look.theme === th} onclick={() => look.setTheme(th)}>{t.themes[th]}</button>
         {/each}
@@ -542,27 +542,6 @@
   }
 
   /* A part: a card wired to Yoru. */
-  .themes {
-    gap: 2px;
-    padding: 3px;
-    border-radius: 999px;
-    background: var(--ink-3);
-  }
-  .themes button {
-    height: 26px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 999px;
-    background: none;
-    color: var(--haze);
-    font: 550 var(--fs-meta)/1 var(--sans);
-    cursor: pointer;
-  }
-  .themes button.on {
-    background: var(--night);
-    color: var(--pearl);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-  }
   .more-title {
     margin-top: 28px;
   }

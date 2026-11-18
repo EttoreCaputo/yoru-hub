@@ -69,9 +69,9 @@
 
   <fieldset>
     <legend class="dim">{t.when}</legend>
-    <div class="seg" role="group" aria-label={t.when}>
+    <div class="chips" role="group" aria-label={t.when}>
       {#each REPEATS as r (r)}
-        <button type="button" class:on={repeat === r} aria-pressed={repeat === r} onclick={() => (repeat = r)}>{t.repeat[r]}</button>
+        <button type="button" class="chip" class:on={repeat === r} aria-pressed={repeat === r} onclick={() => (repeat = r)}>{t.repeat[r]}</button>
       {/each}
     </div>
     <div class="when">
@@ -87,9 +87,9 @@
       {/if}
     </div>
     {#if repeat === "daily"}
-      <div class="days" role="group" aria-label={t.days}>
+      <div class="chips days" role="group" aria-label={t.days}>
         {#each t.weekdays as label, i (i)}
-          <button type="button" class:on={days.includes(i + 1)} aria-pressed={days.includes(i + 1)} onclick={() => toggleDay(i + 1)}>{label}</button>
+          <button type="button" class="chip" class:on={days.includes(i + 1)} aria-pressed={days.includes(i + 1)} onclick={() => toggleDay(i + 1)}>{label}</button>
         {/each}
         <span class="faint">{days.length === 0 || days.length === 7 ? t.everyDay : ""}</span>
       </div>
@@ -137,31 +137,12 @@
     font-size: var(--fs-meta);
     margin-bottom: 6px;
   }
-  .seg,
   .days {
-    display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
   }
-  .seg button,
-  .days button {
-    padding: 6px 12px;
-    border-radius: 999px;
-    border: 1px solid var(--rim);
-    background: var(--ink-2);
-    color: var(--haze);
-    font: 550 var(--fs-meta)/1 var(--sans);
-    cursor: pointer;
-  }
-  .days button {
+  .days .chip {
     min-width: 40px;
-  }
-  .seg button.on,
-  .days button.on {
-    border-color: var(--pearl-mid);
-    background: var(--ink-3);
-    color: var(--pearl);
+    justify-content: center;
   }
   .days .faint {
     font-size: var(--fs-meta);

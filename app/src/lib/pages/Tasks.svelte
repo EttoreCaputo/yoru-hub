@@ -51,7 +51,7 @@
       <h1>{t.title}</h1>
       <p class="lede">{t.lede}</p>
     </div>
-    {#if !editing}<button class="btn primary" onclick={() => (editing = fresh())}>{t.add}</button>{/if}
+    {#if !editing}<div class="actions"><button class="btn primary" onclick={() => (editing = fresh())}>{t.add}</button></div>{/if}
   </div>
 
   {#if editing}
@@ -59,11 +59,11 @@
   {/if}
 
   {#if store.tasks.length}
-    <ul class="tasks">
+    <ul class="list">
       {#each store.tasks as e (e.task.id)}
         {@const task = e.task}
-        <li class="panel" class:off={!task.enabled}>
-          <div class="t-head">
+        <li class:off={!task.enabled}>
+          <div class="item-head">
             <span class="dot {e.running ? 'think' : e.state.last_error ? 'wrong' : task.enabled ? 'done' : ''}"></span>
             <h3>{task.name}</h3>
             <span class="tag">{t.schedule(task)}</span>
@@ -71,15 +71,15 @@
             <span class="spacer"></span>
             <Toggle checked={task.enabled} label={t.enabled} onchange={(on) => toggle(e, on)} />
           </div>
-          <p class="what">{task.what}</p>
-          <p class="facts faint">
+          <p class="item-text">{task.what}</p>
+          <p class="item-meta">
             {e.next ? t.next(when(e.next)) : task.repeat === "once" && e.state.runs ? t.doneOnce : t.off}
             · {e.state.last_run ? t.lastRun(ago(e.state.last_run, store.now)) : t.never}
             {#if e.state.missed}· {t.missed(e.state.missed)}{/if}
           </p>
-          {#if e.state.last_result && !e.state.last_error}<p class="result dim">{e.state.last_result}</p>{/if}
+          {#if e.state.last_result && !e.state.last_error}<p class="item-meta dim">{e.state.last_result}</p>{/if}
           {#if errors[task.id] ?? e.state.last_error}<p class="error-text">{errors[task.id] ?? e.state.last_error}</p>{/if}
-          <div class="row actions">
+          <div class="item-actions">
             <button class="btn small" disabled={running.has(task.id) || e.running || !store.info?.ready} onclick={() => runNow(task.id)}>{running.has(task.id) || e.running ? t.running : t.runNow}</button>
             <button class="btn quiet small" onclick={() => (editing = structuredClone($state.snapshot(task)) as Task)}>{t.edit}</button>
             <ConfirmButton small label={t.remove} question={t.removeConfirm(task.name)} sure={t.removeSure} onconfirm={() => store.removeTask(task.id)} />
@@ -91,45 +91,3 @@
     <div class="panel empty"><b>{t.none}</b><p>{t.noneHint}</p></div>
   {/if}
 </div>
-
-<style>
-  .tasks {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .tasks li.off h3,
-  .tasks li.off .what {
-    color: var(--haze);
-  }
-  .t-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    flex-wrap: wrap;
-  }
-  .t-head h3 {
-    font: 600 var(--fs-head)/1.2 var(--sans);
-  }
-  .spacer {
-    flex: 1;
-  }
-  .what {
-    margin-top: 8px;
-    font-size: var(--fs-body);
-    white-space: pre-wrap;
-  }
-  .facts {
-    margin-top: 6px;
-    font-size: var(--fs-meta);
-  }
-  .result {
-    margin-top: 6px;
-    font-size: var(--fs-meta);
-  }
-  .actions {
-    margin-top: 10px;
-    gap: 4px;
-  }
-</style>

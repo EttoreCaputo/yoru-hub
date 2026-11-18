@@ -722,6 +722,7 @@ const it: Messages = {
     aboutSummary: "Dati e prima configurazione",
     back: "Impostazioni",
     look: "Aspetto",
+    theme: "Tema",
     lookNote: "Chiaro, scuro, o come il Mac.",
     themes: { system: "Come il Mac", light: "Chiaro", dark: "Scuro" },
     more: "Anche qui",

@@ -724,6 +724,7 @@ const en = {
     aboutSummary: "Data and first setup",
     back: "Settings",
     look: "Appearance",
+    theme: "Theme",
     lookNote: "Light, dark, or as the Mac is.",
     themes: { system: "Like the Mac", light: "Light", dark: "Dark" },
     more: "Also here",
