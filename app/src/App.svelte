@@ -61,7 +61,7 @@
   .app {
     position: relative;
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) auto;
+    grid-template-columns: 236px minmax(0, 1fr) auto;
     grid-template-rows: 48px minmax(0, 1fr);
     height: 100vh;
     transition: grid-template-columns 240ms cubic-bezier(0.2, 0.8, 0.2, 1);

@@ -530,7 +530,7 @@
   }
   .rel {
     fill: var(--haze);
-    font: 500 10.5px var(--sans);
+    font: 500 var(--fs-small) var(--sans);
     text-anchor: middle;
     paint-order: stroke;
     stroke: var(--ink);
@@ -584,7 +584,7 @@
   }
   .name {
     fill: var(--pearl);
-    font: 600 12px var(--sans);
+    font: 600 var(--fs-meta) var(--sans);
     text-anchor: middle;
     paint-order: stroke;
     stroke: var(--ink);
@@ -593,7 +593,7 @@
   }
   .label {
     fill: var(--haze);
-    font: 500 10.5px var(--sans);
+    font: 500 var(--fs-small) var(--sans);
     text-anchor: middle;
     paint-order: stroke;
     stroke: var(--ink);
@@ -609,7 +609,7 @@
     backdrop-filter: blur(8px);
     border: 1px solid var(--rim);
     color: var(--pearl);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     line-height: 1.35;
     pointer-events: none;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -623,7 +623,7 @@
   }
   .tip span {
     display: block;
-    font-size: 11px;
+    font-size: var(--fs-small);
     margin-bottom: 2px;
   }
   .legend {
@@ -633,7 +633,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px 12px;
-    font-size: 11.5px;
+    font-size: var(--fs-small);
     color: var(--haze);
     pointer-events: none;
   }

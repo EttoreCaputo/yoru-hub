@@ -284,7 +284,7 @@
 <style>
   .hint {
     margin: -4px 0 12px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     max-width: 620px;
   }
   .cards {
@@ -315,7 +315,7 @@
     padding: 4px 8px;
     border-color: transparent;
     background: none;
-    font: 600 15px/1.2 var(--sans);
+    font: 600 var(--fs-head)/1.2 var(--sans);
   }
   input.bname:hover:not(:disabled) {
     border-color: var(--rim);
@@ -325,14 +325,14 @@
     flex-wrap: wrap;
     gap: 4px 12px;
     color: var(--haze);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .star {
     padding: 0;
     border: 0;
     background: none;
     color: var(--dusk);
-    font: 500 12.5px/1.4 var(--sans);
+    font: 500 var(--fs-meta)/1.4 var(--sans);
     cursor: pointer;
   }
   .star:hover:not(:disabled) {
@@ -345,7 +345,7 @@
     margin: 36px 0 0;
     padding-top: 22px;
     border-top: 1px solid var(--rim);
-    font: 650 18px/1.2 var(--display);
+    font: 650 var(--fs-head)/1.2 var(--display);
   }
   .section-title.sub {
     margin-top: 16px;
@@ -375,7 +375,7 @@
   }
   .news {
     margin-top: 8px;
-    font-size: 13px;
+    font-size: var(--fs-body);
   }
   .news summary {
     cursor: pointer;
@@ -383,7 +383,7 @@
   }
   .news h3 {
     margin: 12px 0 4px;
-    font-size: 12px;
+    font-size: var(--fs-meta);
     color: var(--pearl-mid);
   }
   .news ul {

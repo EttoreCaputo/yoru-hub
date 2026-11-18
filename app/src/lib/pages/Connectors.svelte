@@ -243,10 +243,10 @@
     min-width: 0;
   }
   .name h3 {
-    font: 600 14.5px/1.2 var(--sans);
+    font: 600 var(--fs-body)/1.2 var(--sans);
   }
   .name span {
-    font-size: 11.5px;
+    font-size: var(--fs-small);
   }
   /* The "another server" tile: a dashed moon. */
   .plus {
@@ -257,12 +257,12 @@
     border-radius: 50%;
     border: 1px dashed var(--rim-2);
     color: var(--pearl-mid);
-    font: 650 17px/1 var(--display);
+    font: 650 var(--fs-head)/1 var(--display);
     flex-shrink: 0;
   }
   .section-hint {
     margin: -4px 0 12px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .advanced {
     align-self: flex-start;
@@ -282,7 +282,7 @@
   }
   .notes {
     margin-top: 10px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     line-height: 1.45;
   }
   /* The whole story once it's open; three lines while browsing. */

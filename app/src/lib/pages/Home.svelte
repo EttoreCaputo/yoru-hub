@@ -140,11 +140,11 @@
   }
   .eyebrow {
     color: var(--haze);
-    font-size: 13.5px;
+    font-size: var(--fs-body);
   }
   .said {
     margin: 6px 0 0;
-    font: 560 30px/1.15 var(--display);
+    font: 560 var(--fs-title)/1.15 var(--display);
     letter-spacing: -0.015em;
     max-width: 560px;
     text-wrap: balance;

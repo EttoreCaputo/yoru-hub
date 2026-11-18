@@ -82,7 +82,7 @@
     border-radius: 999px;
     background: none;
     color: var(--haze);
-    font: 550 12.5px/1 var(--sans);
+    font: 550 var(--fs-meta)/1 var(--sans);
     cursor: pointer;
   }
   .seg button.on {
@@ -96,7 +96,7 @@
     border-radius: 999px;
     background: var(--pearl);
     color: var(--eye);
-    font: 700 10.5px/18px var(--sans);
+    font: 700 var(--fs-small)/18px var(--sans);
     text-align: center;
   }
   .sources {
@@ -110,7 +110,7 @@
     border: 1px solid transparent;
     background: none;
     color: var(--dusk);
-    font: 500 12.5px/1 var(--sans);
+    font: 500 var(--fs-meta)/1 var(--sans);
     cursor: pointer;
   }
   .chip:hover {

@@ -59,7 +59,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .who {
     font-weight: 600;
@@ -72,12 +72,12 @@
   }
   .left {
     margin-left: auto;
-    font-size: 12px;
+    font-size: var(--fs-meta);
     font-variant-numeric: tabular-nums;
   }
   .what {
     margin: 8px 0 4px;
-    font-size: 14px;
+    font-size: var(--fs-body);
     user-select: text;
   }
   .more {

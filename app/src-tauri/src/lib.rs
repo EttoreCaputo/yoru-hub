@@ -34,8 +34,6 @@ mod meeting_watch;
 mod meetings;
 mod notch;
 
-/// The main window's page zoom (the notch keeps its own size).
-const MAIN_ZOOM: f64 = 1.08;
 mod permissions;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -1936,10 +1934,6 @@ pub fn run() {
             // released and the whisper-server sidecar stopped.
             let quitter = handle.clone();
             let _ = ctrlc::set_handler(move || quitter.exit(0));
-            // A little larger than the web's default: easier to read at a desk.
-            if let Some(main) = app.get_webview_window("main") {
-                let _ = main.set_zoom(MAIN_ZOOM);
-            }
             std::thread::spawn(permissions::log_state);
             let notch_on = app.state::<AppState>().settings.lock().unwrap().notch;
             notch::apply(handle, notch_on);

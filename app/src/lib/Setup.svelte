@@ -194,7 +194,7 @@
     padding: 20px 28px;
     list-style: none;
     border-bottom: 1px solid var(--rim);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     color: var(--dusk);
   }
   .steps li {
@@ -215,7 +215,7 @@
     height: 20px;
     border-radius: 50%;
     border: 1px solid currentColor;
-    font: 600 10.5px/1 var(--sans);
+    font: 600 var(--fs-small)/1 var(--sans);
   }
   .on .n {
     border-color: transparent;
@@ -238,7 +238,7 @@
     stroke: transparent;
   }
   h1 {
-    font: 600 26px/1.15 var(--display);
+    font: 600 var(--fs-title)/1.15 var(--display);
     letter-spacing: -0.01em;
   }
   .status {
@@ -279,7 +279,7 @@
   }
   .service span {
     color: var(--haze);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .service.done {
     border-color: color-mix(in srgb, var(--done) 40%, transparent);
@@ -304,7 +304,7 @@
   }
   .choice .what span {
     color: var(--haze);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   footer {
     display: flex;

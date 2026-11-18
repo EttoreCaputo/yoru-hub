@@ -117,7 +117,7 @@
     grid-row: 2;
     display: flex;
     flex-direction: column;
-    width: 220px;
+    width: 236px;
     min-height: 0;
     padding: 0 10px 12px;
     transition:
@@ -164,7 +164,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font: 650 19px/1 var(--display);
+    font: 650 var(--fs-head)/1 var(--display);
     letter-spacing: -0.01em;
   }
   .preview {
@@ -172,7 +172,7 @@
     border-radius: 6px;
     background: var(--ink-3);
     color: var(--haze);
-    font: 600 9.5px/1 var(--sans);
+    font: 600 var(--fs-small)/1 var(--sans);
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
@@ -182,7 +182,7 @@
     gap: 6px;
     margin-top: 6px;
     color: var(--haze);
-    font-size: 12px;
+    font-size: var(--fs-meta);
     white-space: nowrap;
   }
   .boards {
@@ -194,10 +194,8 @@
   }
   .boards .label {
     padding: 0 10px 6px;
-    color: var(--dusk);
-    font: 600 10.5px/1 var(--sans);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    color: var(--haze);
+    font: 600 var(--fs-meta)/1 var(--sans);
   }
   .boards button {
     display: flex;
@@ -210,7 +208,7 @@
     border-radius: 10px;
     background: none;
     color: var(--haze);
-    font: 500 13px/1 var(--sans);
+    font: 500 var(--fs-body)/1 var(--sans);
     cursor: pointer;
     text-align: left;
   }
@@ -231,11 +229,11 @@
   }
   .star {
     color: var(--wait);
-    font-size: 11px;
+    font-size: var(--fs-small);
   }
   .via {
     color: var(--dusk);
-    font-size: 11px;
+    font-size: var(--fs-small);
   }
   ul {
     list-style: none;
@@ -255,7 +253,7 @@
     border-radius: 10px;
     background: none;
     color: var(--haze);
-    font: 500 14px/1 var(--sans);
+    font: 500 var(--fs-body)/1 var(--sans);
     cursor: pointer;
     text-align: left;
     transition:
@@ -291,7 +289,7 @@
     border-radius: 999px;
     background: var(--pearl);
     color: var(--eye);
-    font: 700 11px/20px var(--sans);
+    font: 700 var(--fs-small)/20px var(--sans);
     text-align: center;
   }
   footer {
@@ -308,16 +306,19 @@
     border: 1px solid var(--rim);
     background: var(--night);
     color: var(--haze);
-    font: 500 12.5px/1.2 var(--sans);
+    font: 500 var(--fs-meta)/1.2 var(--sans);
     cursor: pointer;
     text-align: left;
   }
   .dnd:hover {
     color: var(--pearl);
   }
+  .dnd span {
+    white-space: nowrap;
+  }
   .dnd .hour {
     margin-left: auto;
-    font-size: 11.5px;
+    font-size: var(--fs-small);
   }
   .dnd.on {
     cursor: default;

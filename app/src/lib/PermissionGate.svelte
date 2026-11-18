@@ -43,7 +43,7 @@
     box-shadow: var(--shadow);
   }
   h1 {
-    font: 600 24px/1.15 var(--display);
+    font: 600 var(--fs-title)/1.15 var(--display);
     letter-spacing: -0.01em;
   }
 </style>

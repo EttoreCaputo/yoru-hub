@@ -33,7 +33,7 @@
 
 <style>
   .sure {
-    font-size: 12px;
+    font-size: var(--fs-meta);
     align-self: center;
   }
 </style>

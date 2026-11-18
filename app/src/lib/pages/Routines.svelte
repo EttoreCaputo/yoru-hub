@@ -172,12 +172,12 @@
     align-items: center;
     gap: 8px;
     margin-right: 14px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .foot {
     padding-top: 12px;
     border-top: 1px solid var(--rim);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .watch-head {
     display: flex;
@@ -190,7 +190,7 @@
     margin-bottom: 6px;
   }
   .hint {
-    font-size: 13px;
+    font-size: var(--fs-body);
   }
   .watchers {
     list-style: none;
@@ -207,7 +207,7 @@
     min-width: 0;
   }
   .w-head h3 {
-    font: 600 15px/1.2 var(--sans);
+    font: 600 var(--fs-head)/1.2 var(--sans);
   }
   .w-head .tag {
     max-width: 260px;
@@ -226,11 +226,11 @@
   }
   .task {
     margin-top: 8px;
-    font-size: 13px;
+    font-size: var(--fs-body);
   }
   .facts {
     margin-top: 6px;
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .actions {
     margin-top: 10px;
@@ -240,7 +240,7 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    font-size: 13px;
+    font-size: var(--fs-body);
   }
   .log li {
     display: flex;
@@ -250,7 +250,7 @@
   }
   .log time {
     margin-left: auto;
-    font-size: 12px;
+    font-size: var(--fs-meta);
     white-space: nowrap;
   }
 </style>

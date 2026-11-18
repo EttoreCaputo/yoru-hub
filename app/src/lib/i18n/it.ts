@@ -161,7 +161,7 @@ const it: Messages = {
 
   inbox: {
     title: "Notifiche",
-    lede: "Quello che Yoru pensa tu voglia sapere. Le urgenti arrivano anche sulla scheda e, fuori dalle ore di silenzio, le dice a voce.",
+    lede: "Quello che Yoru pensa tu voglia sapere.",
     unread: "Da leggere",
     all: "Tutte",
     everySource: "Ogni fonte",
@@ -185,7 +185,7 @@ const it: Messages = {
 
   connectors: {
     title: "Servizi",
-    lede: "I servizi che Yoru può leggere per te, e su cui può agire quando glielo permetti. I token restano nel portachiavi di sistema.",
+    lede: "Quello che Yoru può leggere e fare per te.",
     yours: "Servizi collegati",
     catalog: "Aggiungi un servizio",
     none: "Ancora nessun servizio",
@@ -242,7 +242,7 @@ const it: Messages = {
 
   tasks: {
     title: "Compiti",
-    lede: "Lavori che dai a Yoru da fare da solo, una volta o con una cadenza: li fa quando è ora e ti dice com'è andata.",
+    lede: "Lavori che Yoru fa da solo, una volta o con una cadenza.",
     add: "Assegna un compito",
     new: "Nuovo compito",
     editTitle: "Modifica il compito",
@@ -295,7 +295,7 @@ const it: Messages = {
 
   routines: {
     title: "Routine",
-    lede: "Quello che Yoru fa da solo: il riepilogo del mattino, le ore di silenzio e le cose che tiene d'occhio.",
+    lede: "Il riepilogo del mattino, le ore di silenzio e quello che Yoru tiene d'occhio.",
     recap: "Riepilogo del mattino",
     recapHint: "Posta, calendario e cose in sospeso, in poche righe, una volta al mattino.",
     at: "Alle",
@@ -357,7 +357,7 @@ const it: Messages = {
 
   memory: {
     title: "Memoria",
-    lede: "Quello che Yoru sa: di te, delle persone e delle cose della tua vita, e cosa è vero di ciascuna. Impara mentre parlate e mentre riposa dopo una conversazione; qui lo correggi. Clicca una riga per cambiarla.",
+    lede: "Quello che Yoru sa di te e del tuo mondo. Clicca una riga per correggerla.",
     history: "Storico",
     graph: "Grafo",
     list: "Elenco",
@@ -409,7 +409,7 @@ const it: Messages = {
 
   meetings: {
     title: "Riunioni",
-    lede: "Registra una chiamata, un video o un intervento, o porta un file: quello che suona il computer e quello che sente il tuo microfono, ognuno su una traccia, trascritti su questo computer, riconoscendo chi parla, e riassunti.",
+    lede: "Registra una chiamata o porta un file: Yoru la trascrive e la riassume.",
     played: "Quello che suona il computer",
     playedHint: "Tutto, o solo l'audio di un'app.",
     playingNow: "Suona adesso",
@@ -504,7 +504,7 @@ const it: Messages = {
   },
   spoken: {
     title: "Parlato",
-    lede: "Quello che Yoru ha detto con una voce cloud, ogni fonte per conto suo: il testo e l'audio. Restano finché non li elimini; esportali in uno zip per conservarli o per addestrare una voce.",
+    lede: "Quello che Yoru ha detto con una voce cloud, da riascoltare o esportare.",
     sources: { elevenlabs: "ElevenLabs", "gemini-live": "Gemini Live" } as Record<string, string>,
     about: {
       elevenlabs: "Una frase alla volta: il testo inviato, tag audio compresi, e l'audio che è tornato.",
@@ -533,7 +533,7 @@ const it: Messages = {
 
   animations: {
     title: "Animazioni",
-    lede: "Tutte le animazioni che conoscono gli occhi di Yoru, come le ha la scheda. Avviane una per vederla sulla scheda; quelle in loop continuano finché non le fermi.",
+    lede: "Tutte le animazioni degli occhi di Yoru, da provare sulla scheda.",
     count: (n: number) => (n === 1 ? "1 animazione" : `${n} animazioni`),
     mirror: "Specchia",
     service: "Colori di",

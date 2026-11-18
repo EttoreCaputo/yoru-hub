@@ -77,6 +77,13 @@
 </article>
 
 <style>
+  /* Only Open stays in sight; the rest shows on the line you point at. */
+  .note:not(:hover, :focus-within) .actions .quiet {
+    opacity: 0;
+  }
+  .actions .quiet {
+    transition: opacity 140ms;
+  }
   .note {
     display: grid;
     grid-template-columns: 14px minmax(0, 1fr);
@@ -116,7 +123,7 @@
     display: flex;
     gap: 8px;
     align-items: baseline;
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .source {
     color: var(--haze);
@@ -129,7 +136,7 @@
   .title {
     display: block;
     margin: 2px 0 0;
-    font: 500 14.5px/1.35 var(--sans);
+    font: 500 var(--fs-body)/1.35 var(--sans);
     color: var(--haze);
     text-align: left;
   }
@@ -151,7 +158,7 @@
   .text {
     margin-top: 3px;
     color: var(--haze);
-    font-size: 13.5px;
+    font-size: var(--fs-body);
     user-select: text;
   }
   .compact .text {
@@ -167,6 +174,6 @@
   }
   .note-line {
     margin-top: 6px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
 </style>

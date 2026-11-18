@@ -68,7 +68,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   form {
     flex-wrap: nowrap;
@@ -77,6 +77,6 @@
     flex: 1;
     min-width: 0;
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
 </style>

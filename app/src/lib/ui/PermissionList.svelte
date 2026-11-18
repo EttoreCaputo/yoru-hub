@@ -84,7 +84,7 @@
   }
   .what span {
     color: var(--haze);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .what .off {
     color: var(--wait);
@@ -95,7 +95,7 @@
     border-radius: 999px;
     border: 1px solid var(--rim-2);
     color: var(--pearl);
-    font: 600 10.5px/1.5 var(--sans);
+    font: 600 var(--fs-small)/1.5 var(--sans);
     vertical-align: 1px;
   }
   .ok {
@@ -103,7 +103,7 @@
     align-items: center;
     gap: 7px;
     color: var(--haze);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     white-space: nowrap;
   }
 </style>

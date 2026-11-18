@@ -282,7 +282,7 @@
   }
   .hint {
     margin: -4px 0 10px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .panel.active {
     border-color: color-mix(in srgb, var(--c) 40%, transparent);

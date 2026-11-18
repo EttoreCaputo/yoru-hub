@@ -110,23 +110,23 @@
     flex-wrap: wrap;
   }
   .t-head h3 {
-    font: 600 15px/1.2 var(--sans);
+    font: 600 var(--fs-head)/1.2 var(--sans);
   }
   .spacer {
     flex: 1;
   }
   .what {
     margin-top: 8px;
-    font-size: 13.5px;
+    font-size: var(--fs-body);
     white-space: pre-wrap;
   }
   .facts {
     margin-top: 6px;
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .result {
     margin-top: 6px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .actions {
     margin-top: 10px;

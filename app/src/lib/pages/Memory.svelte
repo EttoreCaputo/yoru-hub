@@ -329,7 +329,7 @@
     width: auto;
   }
   .small {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .split {
     display: grid;
@@ -376,7 +376,7 @@
     grid-row: 1 / span 2;
     grid-column: 2;
     align-self: center;
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .add-entity,
   .add-fact,
@@ -397,7 +397,7 @@
   }
   .card-head .name {
     flex: 1;
-    font: 600 16px/1.3 var(--sans);
+    font: 600 var(--fs-head)/1.3 var(--sans);
   }
   .summary {
     width: 100%;
@@ -441,7 +441,7 @@
     background: transparent;
     color: var(--pearl);
     font: inherit;
-    font-size: 13.5px;
+    font-size: var(--fs-body);
     padding: 2px 0;
     cursor: text;
   }
@@ -474,7 +474,7 @@
     border-radius: 999px;
     background: none;
     color: var(--haze);
-    font: 550 12.5px/1 var(--sans);
+    font: 550 var(--fs-meta)/1 var(--sans);
     cursor: pointer;
   }
   .seg button.on {

@@ -112,10 +112,10 @@
     field-sizing: content;
     /* It wraps: a horizontal scrollbar would only draw a bar under the text. */
     overflow-x: hidden;
-    font-size: 14px;
+    font-size: var(--fs-body);
   }
   .big textarea {
-    font-size: 15px;
+    font-size: var(--fs-head);
   }
   textarea:focus {
     border: 0;

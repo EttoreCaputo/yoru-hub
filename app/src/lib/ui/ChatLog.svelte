@@ -79,7 +79,7 @@
     display: flex;
     gap: 8px;
     align-items: center;
-    font-size: 12px;
+    font-size: var(--fs-meta);
     margin-bottom: 4px;
   }
   .you .meta {
@@ -90,7 +90,7 @@
     color: var(--haze);
   }
   .text {
-    font-size: 15px;
+    font-size: var(--fs-head);
     line-height: 1.55;
     white-space: pre-wrap;
     user-select: text;
@@ -106,14 +106,14 @@
     opacity: 0.7;
   }
   .yoru .text {
-    font-size: 15.5px;
+    font-size: var(--fs-head);
   }
   .failed .text {
     color: var(--wrong);
   }
   .tools {
     margin-top: 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   summary {
     color: var(--dusk);

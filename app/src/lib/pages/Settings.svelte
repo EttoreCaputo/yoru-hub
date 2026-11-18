@@ -555,7 +555,7 @@
     border-radius: 999px;
     background: none;
     color: var(--haze);
-    font: 550 12.5px/1 var(--sans);
+    font: 550 var(--fs-meta)/1 var(--sans);
     cursor: pointer;
   }
   .themes button.on {
@@ -677,7 +677,7 @@
     line-clamp: 2;
     overflow: hidden;
     color: var(--haze);
-    font-size: 12px;
+    font-size: var(--fs-meta);
     line-height: 1.35;
   }
   .chev {
@@ -720,7 +720,7 @@
     margin: 14px 0 18px;
   }
   .sub-head h1 {
-    font: 600 30px/1.1 var(--display);
+    font: 600 var(--fs-title)/1.1 var(--display);
     letter-spacing: -0.01em;
   }
   .sub-head .lede {
@@ -741,7 +741,7 @@
     border: 1px solid var(--rim);
     background: transparent;
     color: var(--haze);
-    font: 550 12px/1 var(--sans);
+    font: 550 var(--fs-meta)/1 var(--sans);
     cursor: pointer;
     transition:
       color 160ms,
@@ -765,7 +765,7 @@
     margin: 10px 0 18px;
   }
   .small {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     margin: -4px 0 10px;
   }
   .panel .small {
@@ -798,7 +798,7 @@
     font-weight: 550;
   }
   .block .what span {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .model {
     width: 220px;
@@ -813,7 +813,7 @@
     align-items: center;
     gap: 6px;
     color: var(--haze);
-    font-size: 12px;
+    font-size: var(--fs-meta);
     margin-right: 4px;
     white-space: nowrap;
   }

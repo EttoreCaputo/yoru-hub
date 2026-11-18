@@ -178,7 +178,7 @@
     max-width: 820px;
   }
   .small {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .bar {
     display: flex;
@@ -194,7 +194,7 @@
     align-items: center;
     gap: 8px;
     color: var(--haze);
-    font-size: 13px;
+    font-size: var(--fs-body);
   }
   .option select {
     width: auto;
@@ -238,13 +238,13 @@
   }
   .name {
     color: var(--pearl);
-    font-size: 14px;
+    font-size: var(--fs-body);
   }
   .facts {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .tag.playing {
     color: var(--done);

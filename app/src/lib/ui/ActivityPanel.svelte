@@ -220,7 +220,7 @@
   }
   h2 {
     padding: 0 8px 4px;
-    font: 600 16px/1.3 var(--display);
+    font: 600 var(--fs-head)/1.3 var(--display);
   }
   .scroll {
     overflow-y: auto;
@@ -240,7 +240,7 @@
     border-radius: 999px;
     background: color-mix(in srgb, var(--think) 25%, transparent);
     color: var(--pearl);
-    font-size: 10.5px;
+    font-size: var(--fs-small);
     letter-spacing: 0;
   }
   ul {
@@ -283,16 +283,16 @@
   }
   .words b {
     font-weight: 550;
-    font-size: 13.5px;
+    font-size: var(--fs-body);
   }
   .words span {
     color: var(--dusk);
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .none {
     padding: 2px 8px 4px;
     color: var(--dusk);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   dl {
     display: grid;
@@ -302,7 +302,7 @@
   }
   dt {
     color: var(--dusk);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     padding-top: 1px;
   }
   dd {

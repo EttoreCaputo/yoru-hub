@@ -127,7 +127,7 @@
     border-color: var(--rim-2);
   }
   h2 {
-    font: 600 17px/1.2 var(--display) !important;
+    font: 600 var(--fs-head)/1.2 var(--display) !important;
   }
   fieldset {
     border: 0;
@@ -135,7 +135,7 @@
     padding: 0;
   }
   legend {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     margin-bottom: 6px;
   }
   .kinds {
@@ -157,7 +157,7 @@
   }
   .kind span {
     color: var(--haze);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     line-height: 1.4;
   }
   .kind.on {
@@ -166,7 +166,7 @@
   }
   .desc {
     margin-top: -6px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .three {
     display: grid;

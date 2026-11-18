@@ -105,7 +105,7 @@
     border-radius: 999px;
     background: var(--pearl);
     color: var(--eye);
-    font: 700 10px/16px var(--sans);
+    font: 700 var(--fs-small)/16px var(--sans);
     text-align: center;
   }
   button .dot {

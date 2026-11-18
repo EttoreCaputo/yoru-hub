@@ -224,7 +224,7 @@
     max-width: 820px;
   }
   .small {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .sources {
     margin-bottom: 8px;
@@ -293,12 +293,12 @@
   header {
     display: flex;
     gap: 10px;
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .text {
     margin-top: 3px;
     color: var(--pearl);
-    font-size: 14px;
+    font-size: var(--fs-body);
     line-height: 1.45;
     user-select: text;
   }

@@ -673,7 +673,7 @@
     max-width: 820px;
   }
   .small {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .head-actions {
     display: flex;
@@ -695,7 +695,7 @@
     border: 1px solid var(--rim);
     background: transparent;
     color: var(--haze);
-    font: 500 12.5px/1 var(--sans);
+    font: 500 var(--fs-meta)/1 var(--sans);
     cursor: pointer;
   }
   .choice.on {
@@ -718,7 +718,7 @@
     pointer-events: none;
   }
   .drop span {
-    font: 600 18px/1.2 var(--display);
+    font: 600 var(--fs-head)/1.2 var(--display);
     color: var(--pearl);
   }
   .summary {
@@ -736,26 +736,24 @@
     gap: 10px;
   }
   .summary-head b {
-    font: 600 15px/1.3 var(--sans);
+    font: 600 var(--fs-head)/1.3 var(--sans);
   }
   .overview {
     margin-top: 6px;
     color: var(--pearl);
-    font-size: 14px;
+    font-size: var(--fs-body);
     line-height: 1.5;
     user-select: text;
   }
   .summary h3 {
     margin: 12px 0 4px;
-    font: 600 11px/1 var(--sans);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--dusk);
+    font: 600 var(--fs-body)/1.3 var(--sans);
+    color: var(--pearl);
   }
   .summary ul {
     padding-left: 18px;
     color: var(--pearl);
-    font-size: 13.5px;
+    font-size: var(--fs-body);
     line-height: 1.5;
     user-select: text;
   }
@@ -799,7 +797,7 @@
     color: var(--pearl);
   }
   .who {
-    font-size: 12px;
+    font-size: var(--fs-meta);
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -819,17 +817,17 @@
     border: 1px solid color-mix(in srgb, var(--tint) 45%, transparent);
     background: color-mix(in srgb, var(--tint) 12%, transparent);
     color: var(--tint);
-    font: 600 12px/1 var(--sans);
+    font: 600 var(--fs-meta)/1 var(--sans);
     cursor: text;
   }
   .person-name {
     height: 26px;
     width: 140px;
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .line p {
     color: var(--pearl);
-    font-size: 14px;
+    font-size: var(--fs-body);
     line-height: 1.5;
     user-select: text;
   }
@@ -876,7 +874,7 @@
     grid-template-columns: minmax(0, 1fr) 220px;
     align-items: center;
     gap: 14px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .bar {
     height: 6px;
@@ -914,7 +912,7 @@
     background: transparent;
     color: var(--haze);
     cursor: pointer;
-    font: 500 11.5px/1.2 var(--sans);
+    font: 500 var(--fs-small)/1.2 var(--sans);
   }
   .source:hover {
     background: var(--ink-2);
@@ -946,7 +944,7 @@
     stroke-linejoin: round;
   }
   .letter {
-    font: 600 20px/1 var(--display);
+    font: 600 21px/1 var(--display);
   }
   .label {
     max-width: 100%;
@@ -965,14 +963,14 @@
     border-radius: 50%;
     background: var(--done);
     color: var(--eye);
-    font-size: 11px;
+    font-size: var(--fs-small);
   }
   .title {
     flex: 1;
     max-width: 360px;
   }
   .note {
-    font-size: 12px;
+    font-size: var(--fs-meta);
     margin-top: 8px;
   }
   .meeting {

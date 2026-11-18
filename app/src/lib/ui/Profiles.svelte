@@ -195,10 +195,10 @@
     font-weight: 550;
   }
   .block .what span {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .uses {
-    font-size: 11.5px;
+    font-size: var(--fs-small);
     margin-top: 2px;
   }
   .test {
@@ -213,7 +213,7 @@
     padding: 0;
     display: grid;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--fs-body);
   }
   .steps li {
     display: flex;

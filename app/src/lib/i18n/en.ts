@@ -163,7 +163,7 @@ const en = {
 
   inbox: {
     title: "Inbox",
-    lede: "What Yoru thought you'd want to know. The urgent ones also go to the board and, outside quiet hours, are said aloud.",
+    lede: "What Yoru thinks you'd want to know.",
     unread: "Unread",
     all: "All",
     everySource: "Every source",
@@ -187,7 +187,7 @@ const en = {
 
   connectors: {
     title: "Connectors",
-    lede: "The services Yoru may read for you, and act on when you allow it. Tokens stay in the system keychain.",
+    lede: "What Yoru can read and act on for you.",
     yours: "Connected services",
     catalog: "Add a service",
     none: "No services yet",
@@ -244,7 +244,7 @@ const en = {
 
   tasks: {
     title: "Tasks",
-    lede: "Jobs you give Yoru to do on his own, once or on a schedule: he does them when it's time and tells you how it went.",
+    lede: "Jobs Yoru does on his own, once or on a schedule.",
     add: "Give a task",
     new: "New task",
     editTitle: "Edit task",
@@ -297,7 +297,7 @@ const en = {
 
   routines: {
     title: "Routines",
-    lede: "What Yoru does on its own: the morning recap, the quiet hours and the things it keeps an eye on.",
+    lede: "The morning recap, quiet hours, and what Yoru keeps an eye on.",
     recap: "Morning recap",
     recapHint: "Mail, calendar and what's pending, in a few lines, once a morning.",
     at: "At",
@@ -359,7 +359,7 @@ const en = {
 
   memory: {
     title: "Memory",
-    lede: "What Yoru knows: you, the people and things in your life, and what is true of each. It learns as you talk and while it rests after a conversation; here you correct it. Click a line to change it.",
+    lede: "What Yoru knows about you and your world. Click a line to fix it.",
     history: "History",
     graph: "Graph",
     list: "List",
@@ -411,7 +411,7 @@ const en = {
 
   meetings: {
     title: "Meetings",
-    lede: "Record a call, a video or a talk, or bring in a file: what the computer plays and what your microphone hears, each as a track of its own, transcribed on this computer, with who speaks told apart, and summarized.",
+    lede: "Record a call or bring in a file: Yoru transcribes and sums it up.",
     played: "What the computer plays",
     playedHint: "All of it, or only one app's sound.",
     playingNow: "Playing now",
@@ -506,7 +506,7 @@ const en = {
   },
   spoken: {
     title: "Spoken",
-    lede: "What Yoru said with a cloud voice, each source on its own: the text and the sound. They stay until you delete them; export them as a zip to keep or train with.",
+    lede: "What Yoru said with a cloud voice, to listen to or export.",
     sources: { elevenlabs: "ElevenLabs", "gemini-live": "Gemini Live" } as Record<string, string>,
     about: {
       elevenlabs: "A sentence at a time: the text it sent, audio tags included, and the sound that came back.",
@@ -535,7 +535,7 @@ const en = {
 
   animations: {
     title: "Animations",
-    lede: "Every animation Yoru's eyes know, as the board has them. Play one to see it on the board; looping ones go on until you stop them.",
+    lede: "Every animation of Yoru's eyes, to play on the board.",
     count: (n: number) => (n === 1 ? "1 animation" : `${n} animations`),
     mirror: "Mirror",
     service: "Colours of",

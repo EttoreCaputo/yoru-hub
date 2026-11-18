@@ -124,7 +124,7 @@
     border-color: var(--rim-2);
   }
   h2 {
-    font: 600 17px/1.2 var(--display) !important;
+    font: 600 var(--fs-head)/1.2 var(--display) !important;
   }
   fieldset {
     border: 0;
@@ -134,7 +134,7 @@
     gap: 10px;
   }
   legend {
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     margin-bottom: 6px;
   }
   .seg,
@@ -151,7 +151,7 @@
     border: 1px solid var(--rim);
     background: var(--ink-2);
     color: var(--haze);
-    font: 550 12.5px/1 var(--sans);
+    font: 550 var(--fs-meta)/1 var(--sans);
     cursor: pointer;
   }
   .days button {
@@ -164,7 +164,7 @@
     color: var(--pearl);
   }
   .days .faint {
-    font-size: 12px;
+    font-size: var(--fs-meta);
     margin-left: 4px;
   }
   .when {
@@ -195,7 +195,7 @@
   }
   .kind span {
     color: var(--haze);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     line-height: 1.4;
   }
   .kind.on {
@@ -206,7 +206,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   @media (max-width: 640px) {
     .kinds {

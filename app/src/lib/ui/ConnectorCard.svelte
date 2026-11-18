@@ -106,11 +106,11 @@
     min-width: 0;
   }
   h3 {
-    font: 600 15px/1.2 var(--sans);
+    font: 600 var(--fs-head)/1.2 var(--sans);
   }
   .target {
     margin-top: 3px;
-    font-size: 11px;
+    font-size: var(--fs-small);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -120,7 +120,7 @@
     align-items: center;
     gap: 7px;
     color: var(--haze);
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     white-space: nowrap;
   }
   /* Two lines on the card; the whole message on hover. */
@@ -137,14 +137,14 @@
     gap: 4px;
   }
   .sure {
-    font-size: 12px;
+    font-size: var(--fs-meta);
   }
   .spacer {
     flex: 1;
   }
   .hint {
     margin-top: 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .tools {
     list-style: none;
@@ -164,18 +164,18 @@
   }
   .what b {
     font-weight: 600;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
     margin-right: 6px;
   }
   .what p {
     margin-top: 2px;
-    font-size: 12.5px;
+    font-size: var(--fs-meta);
   }
   .opt {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--fs-meta);
     color: var(--haze);
     white-space: nowrap;
   }
