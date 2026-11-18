@@ -193,7 +193,7 @@
     <div class="list">
       {#each list as c (c.id)}
         <article class="clip" class:on={playing === c.id}>
-          <button class="play" onclick={() => play(c.id)} aria-label={playing === c.id ? t.stop : t.play} title={playing === c.id ? t.stop : t.play}>
+          <button class="icon-btn round filled play" class:on={playing === c.id} onclick={() => play(c.id)} aria-label={playing === c.id ? t.stop : t.play} title={playing === c.id ? t.stop : t.play}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               {#if playing === c.id}<rect x="7" y="7" width="10" height="10" rx="1.5" />{:else}<path d="M8 5.5v13l10.5-6.5z" />{/if}
             </svg>
@@ -262,26 +262,6 @@
   }
   .clip + .clip {
     border-top: 1px solid var(--rim);
-  }
-  .play {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 1px solid var(--rim-2);
-    background: var(--ink-2);
-    color: var(--pearl);
-    cursor: pointer;
-  }
-  .play:hover,
-  .on .play {
-    background: var(--ink-3);
-  }
-  .play svg {
-    width: 14px;
-    height: 14px;
-    fill: currentColor;
   }
   .body {
     min-width: 0;

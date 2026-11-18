@@ -14,8 +14,10 @@
   --ink: #0b0b10;
   --ink-2: #13131a;
   --ink-3: #1b1b24;
-  --rim: rgba(236, 233, 245, 0.08);
-  --rim-2: rgba(236, 233, 245, 0.14);
+  --rim: rgba(236, 233, 245, 0.07);
+  --rim-2: rgba(236, 233, 245, 0.11);
+  /* Under what's pointed at or open, on a card or on the frame alike. */
+  --hover: rgba(236, 233, 245, 0.07);
   --pearl: #ece9f5;
   --pearl-mid: #c3bedb;
   --pearl-deep: #6e6890;
@@ -50,8 +52,11 @@
   --field: var(--ink-2);
   --lift: 0 10px 30px -14px rgba(0, 0, 0, 0.7);
 
+  --r-sm: 8px;
+  --r-md: 10px;
   --r: 12px;
   --r-lg: 18px;
+  --r-xl: 24px;
   color-scheme: dark;
 }
 
@@ -62,8 +67,9 @@
   --ink: #ffffff;
   --ink-2: #f5f5f8;
   --ink-3: #ececf1;
-  --rim: rgba(26, 24, 44, 0.08);
-  --rim-2: rgba(26, 24, 44, 0.14);
+  --rim: rgba(26, 24, 44, 0.06);
+  --rim-2: rgba(26, 24, 44, 0.1);
+  --hover: rgba(26, 24, 44, 0.055);
   --pearl: #1c1b22;
   --pearl-mid: #8a85a6;
   --pearl-deep: #b9b5cc;
@@ -79,12 +85,12 @@
   --frame: #eef1f6;
   --frame-glow: radial-gradient(110% 80% at 0% 0%, #e6edf8, transparent 65%),
     radial-gradient(90% 80% at 100% 100%, #fbe9ec, transparent 65%);
-  --card-rim: rgba(26, 24, 44, 0.06);
+  --card-rim: rgba(26, 24, 44, 0.05);
   --card-shadow: 0 1px 2px rgba(26, 24, 44, 0.04), 0 0 0 1px var(--card-rim);
   --scrim: rgba(238, 241, 246, 0.6);
   --shadow: 0 30px 80px -24px rgba(26, 24, 44, 0.28);
   --field: #ffffff;
-  --lift: 0 10px 30px -12px rgba(26, 24, 44, 0.16), 0 0 0 4px rgba(230, 237, 248, 0.5);
+  --lift: 0 8px 24px -14px rgba(26, 24, 44, 0.14);
   color-scheme: light;
 }
 
@@ -217,6 +223,150 @@ a {
   padding: 0 10px;
   font-size: var(--fs-meta);
 }
+/* A button that reads as a link: words only, inside a line of text. */
+.btn.link {
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--haze);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--rim-2);
+  text-underline-offset: 3px;
+}
+.btn.link:hover:not(:disabled) {
+  background: none;
+  color: var(--pearl);
+}
+
+/* An icon alone, as a button: the window's bar, a card's corner, the chat's
+   head. Its name goes in aria-label and title. `.on` while what it opens is open. */
+.icon-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--haze);
+  cursor: pointer;
+  transition:
+    background 140ms,
+    color 140ms;
+}
+.icon-btn:hover:not(:disabled),
+.icon-btn.on {
+  background: var(--hover);
+  color: var(--pearl);
+}
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* A solid glyph (play, stop) drawn in the button's colour. */
+.icon-btn > svg:not(.icon) {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+.icon-btn.small > svg:not(.icon) {
+  width: 12px;
+  height: 12px;
+}
+.icon-btn.small {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+/* Round: a control of its own (play, stop, the composer's mic and send). */
+.icon-btn.round {
+  border-radius: 50%;
+}
+.icon-btn.filled {
+  background: var(--ink-2);
+  box-shadow: inset 0 0 0 1px var(--rim);
+  color: var(--pearl);
+}
+.icon-btn.filled:hover:not(:disabled),
+.icon-btn.filled.on {
+  background: var(--ink-3);
+}
+.icon-btn.outline {
+  box-shadow: inset 0 0 0 1px var(--rim-2);
+}
+.icon-btn.primary {
+  background: var(--pearl);
+  color: var(--eye);
+}
+.icon-btn.primary:hover:not(:disabled) {
+  background: var(--pearl);
+  color: var(--eye);
+  opacity: 0.88;
+}
+.icon-btn.primary:disabled {
+  background: var(--ink-3);
+  color: var(--dusk);
+  opacity: 1;
+}
+/* A number on an icon (the inbox's unread) or beside a name. */
+.count {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--pearl);
+  color: var(--eye);
+  font: 700 var(--fs-small)/18px var(--sans);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.count.small {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 16px;
+}
+.icon-btn > .count {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+}
+.icon-btn > .dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+}
+
+/* A row that opens something: the sidebar's pages, the activity panel's
+   items, a menu. Full width, its icon and words on the left. */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--pearl);
+  font: 500 var(--fs-body)/1.3 var(--sans);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms, color 140ms;
+}
+.nav-row:hover,
+.nav-row.on {
+  background: var(--hover);
+}
 
 /* Fields. */
 input[type="text"],
@@ -244,6 +394,37 @@ select:focus {
 }
 textarea {
   resize: vertical;
+}
+select {
+  width: auto;
+  min-width: 160px;
+  max-width: 100%;
+}
+label.stack select {
+  width: 100%;
+}
+/* A smaller field, in a row of small controls. */
+:is(input, select).compact {
+  min-height: 28px;
+  padding: 3px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-meta);
+}
+/* Text edited in place: looks like the text until it's pointed at. */
+:is(input, textarea).bare {
+  min-height: 0;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-color: transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+}
+:is(input, textarea).bare:hover {
+  background: var(--ink-2);
+}
+:is(input, textarea).bare:focus {
+  border-color: var(--rim-2);
+  background: var(--field);
 }
 input[type="time"],
 input[type="number"] {
@@ -339,7 +520,7 @@ label.stack {
   top: 0;
   left: 12px;
   right: 12px;
-  border-top: 1px dashed var(--rim-2);
+  border-top: 1px dashed var(--rim);
 }
 .list > li:hover::before,
 .list > li:hover + li::before {
@@ -385,9 +566,53 @@ label.stack {
   border-radius: var(--r-lg);
   padding: 18px 20px;
 }
-.panel + .panel {
+/* Stacked panels keep room between them; in a grid or a flex row with a
+   gap (a catalog of cards), no margin: the gap does it. */
+:where(.panel) + .panel {
   margin-top: 14px;
 }
+.grid > .panel {
+  margin-top: 0;
+}
+/* A panel lit in its part's colour (--c): the one in use. */
+.panel.active {
+  border-color: color-mix(in srgb, var(--c, var(--pearl-mid)) 40%, transparent);
+  box-shadow: 0 0 36px -16px var(--c, var(--pearl-mid));
+}
+/* A panel being edited (a task, a watcher): one step above the page. */
+.panel.raised {
+  border-color: var(--rim-2);
+  box-shadow: var(--lift);
+}
+/* An inset box inside a card or a line: a tool's output, a log, details. */
+.well {
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--rim);
+  background: var(--ink-2);
+}
+/* A sheet over the window (the first run, the permission gate, a dialog),
+   on a veil that dims what's under it. */
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--scrim);
+  backdrop-filter: blur(6px);
+}
+.sheet {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--rim);
+  background: var(--ink);
+  box-shadow: var(--shadow);
+}
+
 /* Blocks stacked on a page always keep room between them, whatever comes
    first: a card after a grid of tiles, a note or an error, and a note after
    a card. One class's weight: stronger than the reset, weaker than any
@@ -454,7 +679,7 @@ details.more > summary:hover {
   padding: 12px 0;
 }
 .setting + .setting {
-  border-top: 1px dashed var(--rim-2);
+  border-top: 1px dashed var(--rim);
 }
 .panel > .setting:first-child {
   padding-top: 2px;
@@ -508,6 +733,9 @@ details.more > summary:hover {
   padding: 36px 20px;
   text-align: center;
   color: var(--haze);
+}
+.empty .btn {
+  margin-top: 16px;
 }
 .empty b {
   display: block;
@@ -589,6 +817,16 @@ details.more > summary:hover {
   background: var(--pearl);
   color: var(--eye);
 }
+.chip.small {
+  height: 26px;
+  padding: 0 11px;
+}
+/* A chip in its own colour (--c): a part of Settings, a speaker. */
+.chip.tint.on {
+  color: var(--c);
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+}
 
 /* A state dot, in the firmware's tints. */
 .dot {
@@ -626,6 +864,18 @@ details.more > summary:hover {
   color: var(--haze);
   font: 550 var(--fs-small)/1 var(--sans);
   white-space: nowrap;
+}
+.tag.think {
+  color: var(--think);
+  background: color-mix(in srgb, var(--think) 14%, transparent);
+}
+.tag.done {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, transparent);
+}
+.tag.outline {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--rim-2);
 }
 .tag.acts {
   color: var(--wait);
@@ -683,9 +933,40 @@ details.more > summary:hover {
 .tile:disabled:hover {
   background: var(--ink);
 }
+.tile.inset {
+  border-radius: var(--r);
+  background: var(--ink-2);
+}
+.tile.inset b {
+  font: 600 var(--fs-body)/1.3 var(--sans);
+}
+.tile.inset:hover {
+  background: var(--ink-3);
+}
+.tile.inset.on {
+  border-color: var(--pearl-mid);
+  background: var(--ink-3);
+  box-shadow: none;
+}
 .tile .tag.dim {
   color: var(--haze);
   background: var(--ink-3);
+}
+
+/* How far something is: a thin bar, --p from 0 to 1. */
+.meter {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--ink-3);
+  overflow: hidden;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  width: calc(var(--p, 0) * 100%);
+  border-radius: inherit;
+  background: var(--c, var(--pearl-mid));
+  transition: width 300ms;
 }
 
 @media (prefers-reduced-motion: reduce) {

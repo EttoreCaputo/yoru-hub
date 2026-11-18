@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use yoru_core::assistant::memory;
 use yoru_core::assistant::tasks::{self, Task, TaskEntry};
 use yoru_core::assistant::watchers::{self, ScheduleEvent, WatchEntry, Watcher};
-use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, Confirmations, Host, Notification, Reply, Settings, TaskHost};
+use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, ChatTitle, Confirmations, Host, Notification, Reply, Settings, TaskHost};
 use yoru_core::cloud::{self, KeySource, Provider};
 use yoru_core::connectors::catalog::{self, Preset};
 use yoru_core::connectors::{ConnectorConfig, ConnectorEvent, ConnectorStatus, Connectors};
@@ -105,8 +105,18 @@ pub fn start(app: &AppHandle) {
     }
     {
         let app = app.clone();
+        let named = a.clone();
         a.on_chat(Arc::new(move |lines| {
             let _ = app.emit("chat", lines);
+            // After Yoru answers, the conversation may be due a (new) title: asked off this thread.
+            if lines.last().is_some_and(|l| l.from == "yoru") {
+                let (app, named) = (app.clone(), named.clone());
+                std::thread::spawn(move || {
+                    if let Some(title) = named.retitle() {
+                        let _ = app.emit("chat_title", title);
+                    }
+                });
+            }
         }));
     }
     {
@@ -307,8 +317,23 @@ pub fn chat(state: State<AppState>) -> Vec<ChatLine> {
 }
 
 #[tauri::command]
-pub fn forget_conversation(state: State<AppState>) {
+pub fn forget_conversation(app: AppHandle, state: State<AppState>) {
     state.assistant.forget_conversation();
+    let _ = app.emit("chat_title", state.assistant.titles.get());
+}
+
+/// The conversation's title.
+#[tauri::command]
+pub fn chat_title(state: State<AppState>) -> ChatTitle {
+    state.assistant.titles.get()
+}
+
+/// The user's title for the conversation; an empty one lets Yoru name it again.
+#[tauri::command]
+pub fn set_chat_title(app: AppHandle, state: State<AppState>, text: String) -> ChatTitle {
+    let title = state.assistant.set_title(&text);
+    let _ = app.emit("chat_title", &title);
+    title
 }
 
 // Tasks.

@@ -43,6 +43,7 @@ pub mod memory;
 pub mod routines;
 pub mod select;
 pub mod tasks;
+pub mod title;
 pub mod watchers;
 mod written_calls;
 
@@ -66,6 +67,7 @@ pub use external::{Errand, ErrandListener, ExternalTool, ExternalTools};
 pub use inbox::{Inbox, InboxChange, Notification, Urgency};
 pub use memory::Memory;
 pub use tasks::{TaskEntry, Tasks};
+pub use title::ChatTitle;
 
 /// Claude's model, unless the settings say otherwise.
 pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
@@ -338,6 +340,8 @@ pub struct Assistant {
     /// One turn at a time.
     turn: Mutex<()>,
     log: Mutex<Vec<ChatLine>>,
+    /// The conversation's title ([`title`]).
+    pub titles: title::Titles,
     listeners: Mutex<Vec<ChatListener>>,
     /// "Do not disturb" until then (Unix ms), on top of the quiet hours; not
     /// kept across launches, on purpose.
@@ -386,6 +390,7 @@ impl Assistant {
             conversation: Mutex::default(),
             turn: Mutex::default(),
             log: Mutex::new(log),
+            titles: title::Titles::open(file("conversation_title.json")),
             listeners: Mutex::default(),
             quiet_until: Mutex::default(),
             language: Mutex::default(),
@@ -488,7 +493,31 @@ impl Assistant {
         *self.conversation.lock().unwrap() = Conversation::default();
         self.memory.end_episode();
         self.log.lock().unwrap().clear();
+        self.titles.clear();
         self.log_changed();
+    }
+
+    /// Name the conversation, or name it again, if it is due ([`title`]):
+    /// the new title, or `None` when it kept its own. It asks the brain, so
+    /// it is called off the turn's thread.
+    pub fn retitle(&self) -> Option<ChatTitle> {
+        let log = self.chat();
+        if !self.titles.due(log.len(), log.last().map(|l| l.from.as_str())) {
+            return None;
+        }
+        let code = self.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
+        let prompt = title::prompt(&log, language_name(&code), &self.titles.get().text);
+        let answer = self.complete_json(&prompt, &title::schema());
+        if let Err(e) = &answer {
+            eprintln!("naming the conversation: {e}");
+        }
+        let found = answer.ok().and_then(|a| title::parse(&a));
+        self.titles.named(found.as_deref(), log.len(), self.log.lock().unwrap().len())
+    }
+
+    /// The user's title for the conversation (empty: Yoru names it).
+    pub fn set_title(&self, text: &str) -> ChatTitle {
+        self.titles.set_by_user(text, self.log.lock().unwrap().len())
     }
 
     /// Reply in `language` (`it`, `en`) whatever the user speaks; `None`

@@ -16,11 +16,11 @@
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onclose()} />
 
-<div class="backdrop" transition:fade={{ duration: 140 }} onclick={(e) => e.target === e.currentTarget && onclose()} role="presentation">
-  <div class="dialog" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" bind:this={box} transition:scale={{ start: 0.96, duration: 180 }}>
+<div class="veil backdrop" transition:fade={{ duration: 140 }} onclick={(e) => e.target === e.currentTarget && onclose()} role="presentation">
+  <div class="sheet dialog" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" bind:this={box} transition:scale={{ start: 0.96, duration: 180 }}>
     <header>
       <h2>{title}</h2>
-      <button class="close" onclick={onclose} aria-label={i18n.t.home.close} title={i18n.t.home.close}>
+      <button class="icon-btn small" onclick={onclose} aria-label={i18n.t.home.close} title={i18n.t.home.close}>
         <Icon name="x" size={16} />
       </button>
     </header>
@@ -31,24 +31,15 @@
 
 <style>
   .backdrop {
-    position: fixed;
-    inset: 0;
     z-index: 50;
-    display: grid;
-    place-items: center;
     padding: 40px;
-    background: var(--scrim);
-    backdrop-filter: blur(3px);
   }
   .dialog {
-    width: min(560px, 100%);
     max-height: min(640px, 100%);
     display: flex;
     flex-direction: column;
+    overflow: hidden;
     border-radius: var(--r-lg);
-    border: 1px solid var(--rim-2);
-    background: var(--ink);
-    box-shadow: var(--shadow);
     outline: none;
   }
   header {
@@ -60,21 +51,6 @@
   h2 {
     flex: 1;
     font: 600 19px/1.3 var(--display);
-  }
-  .close {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    border: 0;
-    border-radius: 8px;
-    background: none;
-    color: var(--dusk);
-    cursor: pointer;
-  }
-  .close:hover {
-    background: var(--ink-3);
-    color: var(--pearl);
   }
   .body {
     overflow-y: auto;

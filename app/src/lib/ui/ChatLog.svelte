@@ -26,7 +26,7 @@
       {#if l.actions?.length}
         <details class="tools">
           <summary>{t.used(l.actions.length)}</summary>
-          <ul>
+          <ul class="well">
             {#each l.actions as a, j (j)}
               <li>
                 <span class="dot {a.ok ? 'done' : 'wrong'}"></span>
@@ -131,9 +131,6 @@
     list-style: none;
     margin: 8px 0 0;
     padding: 8px 12px;
-    border-radius: 10px;
-    background: var(--ink);
-    border: 1px solid var(--rim);
     display: grid;
     gap: 6px;
   }

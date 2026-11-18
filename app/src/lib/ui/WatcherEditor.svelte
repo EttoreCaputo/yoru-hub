@@ -59,7 +59,7 @@
   }
 </script>
 
-<form class="panel editor" onsubmit={(e) => (e.preventDefault(), save())}>
+<form class="panel raised editor" onsubmit={(e) => (e.preventDefault(), save())}>
   <h2>{isNew ? t.new : t.edit}</h2>
 
   <label class="stack">{t.name}<input type="text" bind:value={name} placeholder={t.namePlaceholder} /></label>
@@ -67,10 +67,10 @@
   <fieldset>
     <legend class="dim">{t.kind}</legend>
     <div class="kinds">
-      <button type="button" class="kind" class:on={kind === "tool"} aria-pressed={kind === "tool"} onclick={() => (kind = "tool")}>
+      <button type="button" class="tile inset kind" class:on={kind === "tool"} aria-pressed={kind === "tool"} onclick={() => (kind = "tool")}>
         <b>{t.tool}</b><span>{t.toolHint}</span>
       </button>
-      <button type="button" class="kind" class:on={kind === "task"} aria-pressed={kind === "task"} onclick={() => (kind = "task")}>
+      <button type="button" class="tile inset kind" class:on={kind === "task"} aria-pressed={kind === "task"} onclick={() => (kind = "task")}>
         <b>{t.task}</b><span>{t.taskHint}</span>
       </button>
     </div>
@@ -124,7 +124,6 @@
     display: grid;
     gap: 14px;
     margin-bottom: 14px;
-    border-color: var(--rim-2);
   }
   h2 {
     font: 600 var(--fs-head)/1.2 var(--display) !important;
@@ -142,27 +141,6 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
-  }
-  .kind {
-    display: grid;
-    gap: 4px;
-    padding: 12px 14px;
-    border-radius: var(--r);
-    border: 1px solid var(--rim);
-    background: var(--ink-2);
-    color: var(--pearl);
-    text-align: left;
-    cursor: pointer;
-    font: inherit;
-  }
-  .kind span {
-    color: var(--haze);
-    font-size: var(--fs-meta);
-    line-height: 1.4;
-  }
-  .kind.on {
-    border-color: var(--pearl-mid);
-    background: var(--ink-3);
   }
   .desc {
     margin-top: -6px;

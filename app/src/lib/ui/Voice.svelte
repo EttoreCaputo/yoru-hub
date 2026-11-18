@@ -284,13 +284,7 @@
     margin: -4px 0 10px;
     font-size: var(--fs-meta);
   }
-  .panel.active {
-    border-color: color-mix(in srgb, var(--c) 40%, transparent);
-    box-shadow: 0 0 36px -16px var(--c);
-  }
   select {
-    width: auto;
-    min-width: 180px;
     max-width: 340px;
   }
   input[type="range"] {

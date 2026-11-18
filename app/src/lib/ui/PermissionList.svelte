@@ -40,7 +40,7 @@
     {#if state !== "unsupported"}
       <li class:granted={state === "granted"}>
         <div class="what">
-          <b>{t[kind].name}{#if kind === "microphone"}<span class="req">{t.required}</span>{/if}</b>
+          <b>{t[kind].name}{#if kind === "microphone"}<span class="tag outline req">{t.required}</span>{/if}</b>
           <span>{t[kind].why}</span>
           {#if state === "denied" || state === "restricted"}<span class="off">{t.denied}</span>{/if}
         </div>
@@ -91,11 +91,6 @@
   }
   .req {
     margin-left: 8px;
-    padding: 1px 7px;
-    border-radius: 999px;
-    border: 1px solid var(--rim-2);
-    color: var(--pearl);
-    font: 600 var(--fs-small)/1.5 var(--sans);
     vertical-align: 1px;
   }
   .ok {

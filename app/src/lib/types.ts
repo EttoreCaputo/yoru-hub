@@ -33,6 +33,8 @@ export type ActiveAgent = {
   now: string | null;
 };
 export type ChatLine = { from: "you" | "yoru"; text: string; channel: Channel; actions?: Action[]; at: number };
+/** The conversation's title: named by Yoru as it goes on, unless the user typed one. */
+export type ChatTitle = { text: string; by_user: boolean; lines: number };
 export type Reply = { text: string; actions: Action[]; model: string; elapsed_ms: number };
 
 export type Routines = {

@@ -31,7 +31,7 @@
         {#if a.now && a.state === "working"}<p class="meta step">{a.now}</p>{/if}
       </div>
       {#if a.run !== null && a.state === "working"}
-        <button class="stop" title={t.stop} aria-label={t.stop} onclick={() => store.stopAgent(a.run!)}>
+        <button class="icon-btn round small outline stop" title={t.stop} aria-label={t.stop} onclick={() => store.stopAgent(a.run!)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
         </button>
       {/if}
@@ -87,26 +87,6 @@
       opacity: 0.35;
     }
   }
-  .stop {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-    border: 1px solid var(--rim);
-    border-radius: 50%;
-    background: none;
-    color: var(--haze);
-    cursor: pointer;
-  }
-  .stop:hover {
-    color: var(--pearl);
-  }
-  .stop svg {
-    width: 12px;
-    height: 12px;
-    fill: currentColor;
-  }
   .dark li {
     padding: 6px 0;
   }
@@ -123,7 +103,11 @@
     font-size: 11px;
   }
   .dark .stop {
-    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
     color: rgba(255, 255, 255, 0.7);
+  }
+  .dark .stop:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
   }
 </style>

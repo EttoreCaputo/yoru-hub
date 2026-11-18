@@ -13,7 +13,7 @@
     width: 38px;
     height: 22px;
     border-radius: 999px;
-    border: 1px solid var(--rim-2);
+    border: 1px solid var(--rim);
     background: var(--ink-3);
     cursor: pointer;
     padding: 0;

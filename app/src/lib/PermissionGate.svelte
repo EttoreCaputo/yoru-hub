@@ -20,27 +20,10 @@
 </div>
 
 <style>
-  .veil {
-    position: fixed;
-    inset: 0;
-    z-index: 20;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: var(--scrim);
-    backdrop-filter: blur(6px);
-  }
   .sheet {
     display: grid;
     gap: 12px;
-    width: min(560px, 100%);
-    max-height: 100%;
-    overflow: auto;
     padding: 28px;
-    border-radius: 24px;
-    background: var(--ink);
-    border: 1px solid var(--rim-2);
-    box-shadow: var(--shadow);
   }
   h1 {
     font: 600 var(--fs-title)/1.15 var(--display);

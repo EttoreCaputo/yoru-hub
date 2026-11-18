@@ -127,7 +127,7 @@
             <span class="dot {boardDot(b.link)}"></span>
             <input
               type="text"
-              class="bname"
+              class="bare bname"
               value={b.name ?? ""}
               placeholder={store.boardName({ ...b, name: null })}
               maxlength="24"
@@ -144,9 +144,9 @@
           </div>
           <div class="main">
             {#if b.primary}
-              <button class="star on" title={tb.primary} onclick={() => store.setPrimary(null)}>★ {tb.main}</button>
+              <button class="btn link star on" title={tb.primary} onclick={() => store.setPrimary(null)}>★ {tb.main}</button>
             {:else}
-              <button class="star" title={tb.primary} disabled={!b.id} onclick={() => store.setPrimary(b)}>☆ {tb.makeMain}</button>
+              <button class="btn link star" title={tb.primary} disabled={!b.id} onclick={() => store.setPrimary(b)}>☆ {tb.makeMain}</button>
             {/if}
           </div>
         </section>
@@ -179,7 +179,7 @@
       </div>
     </div>
     {#if store.job === "flash"}
-      <div class="bar"><span style:width="{store.flashPercent}%"></span></div>
+      <div class="meter flash" style:--p={store.flashPercent / 100} style:--c="var(--think)"><span></span></div>
     {/if}
     {#if overWifi && store.job !== "idle"}<p class="dim">{t.overWifi}</p>{/if}
     {#if store.flashedAt && store.job === "idle"}<p class="dim">{t.flashed}</p>{/if}
@@ -277,7 +277,7 @@
       </div>
     </section>
     <h3 class="section-title">{t.logs}</h3>
-    <pre class="mono log">{store.logs.length ? store.logs.slice(-120).join("\n") : t.noLogs}</pre>
+    <pre class="well mono log">{store.logs.length ? store.logs.slice(-120).join("\n") : t.noLogs}</pre>
   </details>
 </div>
 
@@ -311,14 +311,7 @@
   input.bname {
     flex: 1;
     min-width: 0;
-    min-height: 30px;
-    padding: 4px 8px;
-    border-color: transparent;
-    background: none;
     font: 600 var(--fs-head)/1.2 var(--sans);
-  }
-  input.bname:hover:not(:disabled) {
-    border-color: var(--rim);
   }
   .facts {
     display: flex;
@@ -328,12 +321,7 @@
     font-size: var(--fs-meta);
   }
   .star {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--dusk);
-    font: 500 var(--fs-meta)/1.4 var(--sans);
-    cursor: pointer;
+    font-size: var(--fs-meta);
   }
   .star:hover:not(:disabled) {
     color: var(--pearl);
@@ -356,22 +344,8 @@
   .sub {
     margin-bottom: 4px;
   }
-  select {
-    width: auto;
-    min-width: 200px;
-  }
-  .bar {
-    height: 4px;
-    border-radius: 4px;
-    background: var(--ink-3);
-    overflow: hidden;
+  .flash {
     margin: 4px 0 10px;
-  }
-  .bar span {
-    display: block;
-    height: 100%;
-    background: var(--think);
-    transition: width 300ms;
   }
   .news {
     margin-top: 8px;
@@ -417,9 +391,6 @@
     padding: 14px 16px;
     max-height: 280px;
     overflow: auto;
-    border-radius: var(--r);
-    background: var(--ink);
-    border: 1px solid var(--rim);
     color: var(--haze);
     white-space: pre-wrap;
     user-select: text;

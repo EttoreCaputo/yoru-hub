@@ -130,7 +130,7 @@
       </label>
       <label class="option">
         <span>{t.service}</span>
-        <select bind:value={source} aria-label={t.service}>
+        <select class="compact" bind:value={source} aria-label={t.service}>
           <option value="">{t.none}</option>
           {#each SERVICES as s (s)}<option value={s}>{s}</option>{/each}
         </select>
@@ -152,12 +152,12 @@
       <div class="list">
         {#each clips as c (c.name)}
           <article class="clip" class:on={current === c.name}>
-            <button class="play" onclick={() => playOne(c)} aria-label={t.play} title={t.play}>
+            <button class="icon-btn round filled play" class:on={current === c.name} onclick={() => playOne(c)} aria-label={t.play} title={t.play}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" /></svg>
             </button>
             <span class="name">{readable(c.name)}</span>
             <span class="facts">
-              {#if current === c.name}<span class="tag playing">{t.playing}</span>{/if}
+              {#if current === c.name}<span class="tag done">{t.playing}</span>{/if}
               {#if c.loop}<span class="tag">{t.loops}</span>{/if}
               <span class="faint">{c.seconds.toFixed(1)} s</span>
             </span>
@@ -193,11 +193,6 @@
     color: var(--haze);
     font-size: var(--fs-body);
   }
-  .option select {
-    width: auto;
-    min-height: 30px;
-    padding: 4px 10px;
-  }
   .end {
     display: flex;
     gap: 8px;
@@ -213,26 +208,6 @@
   .clip + .clip {
     border-top: 1px solid var(--rim);
   }
-  .play {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 1px solid var(--rim-2);
-    background: var(--ink-2);
-    color: var(--pearl);
-    cursor: pointer;
-  }
-  .play:hover,
-  .on .play {
-    background: var(--ink-3);
-  }
-  .play svg {
-    width: 14px;
-    height: 14px;
-    fill: currentColor;
-  }
   .name {
     color: var(--pearl);
     font-size: var(--fs-body);
@@ -242,9 +217,5 @@
     align-items: center;
     gap: 8px;
     font-size: var(--fs-meta);
-  }
-  .tag.playing {
-    color: var(--done);
-    background: color-mix(in srgb, var(--done) 12%, transparent);
   }
 </style>

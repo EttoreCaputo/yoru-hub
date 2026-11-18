@@ -18,6 +18,7 @@
   import ChatLog from "../ui/ChatLog.svelte";
   import Composer from "../ui/Composer.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
+  import Icon from "../ui/Icon.svelte";
   import YoruBoard from "../YoruBoard.svelte";
 
   const t = $derived(i18n.t.home);
@@ -34,6 +35,22 @@
   const voice = $derived<VoiceState>(
     store.asking ? "thinking" : store.talking ? "listening" : store.macVoice !== "idle" ? store.macVoice : store.voice,
   );
+  // The conversation's title: Yoru names it as it goes on; a click renames it.
+  const title = $derived(store.chatTitle?.text ?? "");
+  let renaming = $state(false);
+  let renamed = false;
+  function rename(text: string) {
+    if (renamed || !renaming) return;
+    renamed = true;
+    renaming = false;
+    if (text.trim() !== title) void call("set_chat_title", { text: text.trim() });
+    queueMicrotask(() => (renamed = false));
+  }
+  function renameKey(e: KeyboardEvent) {
+    if (e.key === "Enter") rename((e.currentTarget as HTMLInputElement).value);
+    else if (e.key === "Escape") renaming = false;
+  }
+
   const badge = $derived(store.confirmations.length ? "wait" : null);
 
   // A reaction for each new line of the chat, and for each one Yoru plays.
@@ -104,9 +121,29 @@
       {#if !ready}<button class="btn primary" onclick={() => store.go("settings")}>{t.noKeyAction}</button>{/if}
     </div>
   {:else}
-    <div class="forget">
-      <ConfirmButton label={t.forget} question={t.forgetConfirm} sure={t.forgetSure} onconfirm={() => call("forget_conversation")} />
-    </div>
+    <header class="head">
+      {#if renaming}
+        <input
+          class="rename"
+          type="text"
+          value={store.chatTitle?.text ?? ""}
+          placeholder={t.untitled}
+          title={t.renameHint}
+          aria-label={t.rename}
+          {@attach (el: HTMLInputElement) => (el.focus(), el.select())}
+          onkeydown={renameKey}
+          onblur={(e) => rename(e.currentTarget.value)}
+        />
+      {:else}
+        <button class="title" onclick={() => (renaming = true)} title={t.rename}>
+          <span class:faint={!title}>{title || t.untitled}</span>
+          <span class="pen"><Icon name="pencil" size={13} /></span>
+        </button>
+      {/if}
+      <div class="tools">
+        <ConfirmButton icon="rotate-ccw" label={t.forget} question={t.forgetConfirm} sure={t.forgetSure} onconfirm={() => call("forget_conversation")} />
+      </div>
+    </header>
   {/if}
 
   <div class="log" bind:this={log}>
@@ -183,18 +220,69 @@
     left: 2px;
     transition: top 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
-  .forget {
-    position: absolute;
-    top: 10px;
-    right: 14px;
-    z-index: 2;
+  /* The chat's head: its title on the left, its tools on the right. */
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 52px;
+    padding: 0 12px 0 20px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--rim);
+  }
+  .title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    margin-left: -8px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--pearl);
+    font: 600 var(--fs-body)/1.3 var(--sans);
+    cursor: text;
+    transition: background 140ms;
+  }
+  .title span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .title:hover {
+    background: var(--ink-2);
+  }
+  .pen {
+    color: var(--dusk);
+    opacity: 0;
+    transition: opacity 140ms;
+  }
+  .title:hover .pen,
+  .title:focus-visible .pen {
+    opacity: 1;
+  }
+  .rename {
+    width: min(420px, 100%);
+    min-height: 30px;
+    margin-left: -8px;
+    padding: 4px 8px;
+    font-weight: 600;
+  }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    flex-shrink: 0;
   }
   .log {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 40px 0 8px;
-    mask-image: linear-gradient(transparent, #000 32px);
+    padding: 24px 0 8px;
+    mask-image: linear-gradient(transparent, #000 24px);
   }
   .suggestions {
     display: flex;

@@ -302,7 +302,7 @@
         {#each [user(), ...others].filter((e) => !!e) as e (e!.id)}
           {@const x = e!}
           <li>
-            <button class="who" class:on={x.id === selected} onclick={() => (selected = x.id)}>
+            <button class="nav-row who" class:on={x.id === selected} onclick={() => (selected = x.id)}>
               <b>{x.is_user ? t.you(x.name) : x.name}</b>
               <span class="faint small">
                 {x.label ?? (x.kind === "person" ? "" : t.kinds[x.kind] ?? x.kind)}
@@ -322,9 +322,6 @@
 </div>
 
 <style>
-  .memory select {
-    width: auto;
-  }
   .small {
     font-size: var(--fs-meta);
   }
@@ -348,20 +345,6 @@
   .who {
     display: grid;
     grid-template-columns: 1fr auto;
-    width: 100%;
-    text-align: left;
-    padding: 7px 10px;
-    border: 0;
-    border-radius: var(--r-md, 8px);
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-  }
-  .who:hover {
-    background: color-mix(in srgb, var(--pearl-mid) 8%, transparent);
-  }
-  .who.on {
-    background: color-mix(in srgb, var(--pearl-mid) 16%, transparent);
   }
   .who b {
     font-weight: 600;

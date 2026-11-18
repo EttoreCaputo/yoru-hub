@@ -120,7 +120,7 @@
 
   <h2 class="section-title">{t.catalog}</h2>
   {#snippet card(p: Preset)}
-    <article class="preset" class:open={opening === p.id}>
+    <article class="panel preset" class:open={opening === p.id}>
       <div class="top">
         <ServiceIcon id={p.id} name={p.name} url={p.url} size={34} />
         <div class="name">
@@ -133,7 +133,7 @@
       </div>
       <p class="notes dim">{p.notes}</p>
       {#if p.registration === "own_client"}
-        <button class="btn quiet small advanced" aria-expanded={opening === p.id} onclick={() => advanced(p)}>
+        <button class="btn link small advanced" aria-expanded={opening === p.id} onclick={() => advanced(p)}>
           <span class="chev" class:down={opening === p.id} aria-hidden="true">›</span>{t.advanced}
         </button>
       {/if}
@@ -141,7 +141,7 @@
         <form class="client" onsubmit={(e) => (e.preventDefault(), connect(p))}>
           <p class="dim">{p.google ? t.googleClient : p.app_client ? t.advancedHint : t.advancedNeeded}</p>
           <p class="dim">{p.setup}</p>
-          <button type="button" class="btn quiet small docs" onclick={() => openDocs(p.docs)}>{t.ownClientHow} ↗</button>
+          <button type="button" class="btn link small docs" onclick={() => openDocs(p.docs)}>{t.ownClientHow} ↗</button>
           {#if !p.google}<p class="mono faint">{t.redirect(redirect(p))}</p>{/if}
           <label class="stack">{p.google ? t.clientIdOrJson : t.clientId}<input type="text" bind:value={clientId} autocomplete="off" spellcheck="false" /></label>
           {#if p.needs_client_secret && !pastedJson}
@@ -162,7 +162,7 @@
       {@render card(p)}
     {/each}
 
-    <article class="preset custom" class:open={customOpen}>
+    <article class="panel preset custom" class:open={customOpen}>
       <div class="top">
         <span class="plus" aria-hidden="true">+</span>
         <div class="name">
@@ -205,7 +205,8 @@
     display: grid;
     gap: 12px;
   }
-  .mine :global(.panel + .panel) {
+  .mine > :global(.panel),
+  .catalog > .preset {
     margin-top: 0;
   }
   .catalog {
@@ -218,9 +219,6 @@
     display: flex;
     flex-direction: column;
     padding: 16px;
-    border-radius: var(--r-lg);
-    background: var(--ink);
-    border: 1px solid var(--rim);
     transition: border-color 160ms;
   }
   .preset:hover,
@@ -267,11 +265,9 @@
   .advanced {
     align-self: flex-start;
     margin-top: auto;
-    padding-top: 6px;
-    padding: 0;
-    height: auto;
     gap: 4px;
     color: var(--dusk);
+    text-decoration: none;
   }
   .chev {
     display: inline-block;
@@ -304,8 +300,6 @@
   }
   .docs {
     justify-self: start;
-    padding: 0;
-    height: auto;
   }
   .two {
     display: grid;

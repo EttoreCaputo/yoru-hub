@@ -16,6 +16,7 @@ import type {
   AssistantInfo,
   BoardClip,
   ChatLine,
+  ChatTitle,
   DeviceInfo,
   Confirmation,
   ConnectorConfig,
@@ -119,6 +120,7 @@ let inbox: Notification[] = [
   { id: "n1", source: "ESP32 news", title: "ESP-IDF 6.1.1 is out", text: "A fix for the USB-JTAG console dropping lines.", urgency: "low", url: "https://github.com/espressif/esp-idf/releases", at: now() - 50 * 60 * MIN, read: true, by: "esp-news" },
 ];
 
+let chatTitle: ChatTitle = { text: "Morning issues", by_user: false, lines: 2 };
 let chat: ChatLine[] = [
   { from: "you", text: "Anything new this morning?", channel: "voice", at: now() - 40 * MIN },
   {
@@ -477,6 +479,11 @@ const emitConnectors = () => emit("connectors", connectors);
 function addChat(line: Omit<ChatLine, "at">) {
   chat = [...chat, { ...line, at: now() }];
   emitChat();
+  // Named after the first answer, as Yoru does.
+  if (line.from === "yoru" && !chatTitle.text && chat.length >= 2) {
+    chatTitle = { text: chat[0].text.split(/\s+/).slice(0, 4).join(" "), by_user: false, lines: chat.length };
+    emit("chat_title", chatTitle);
+  }
 }
 
 /** Yoru answers after a moment; asked to send or create something, it asks first. */
@@ -540,7 +547,14 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   set_do_not_disturb: (a) => ((info.quiet_until = a.minutes ? now() + a.minutes * MIN : null), (info.quiet_now = !!a.minutes), info),
   ask: (a) => ask(a.text),
   chat: () => chat,
-  forget_conversation: () => ((chat = []), emitChat()),
+  forget_conversation: () => ((chat = []), emitChat(), (chatTitle = { text: "", by_user: false, lines: 0 }), emit("chat_title", chatTitle)),
+  chat_title: () => chatTitle,
+  set_chat_title: (p) => {
+    const text = String((p as { text: string }).text).trim();
+    chatTitle = { text, by_user: !!text, lines: chat.length };
+    emit("chat_title", chatTitle);
+    return chatTitle;
+  },
   inbox: () => inbox,
   inbox_read: (a) => ((inbox = inbox.map((n) => (n.id === a.id ? { ...n, read: true } : n))), emitInbox(), true),
   inbox_read_all: () => ((inbox = inbox.map((n) => ({ ...n, read: true }))), emitInbox(), true),

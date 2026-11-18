@@ -137,7 +137,7 @@
         <p class="dim">{t.service.text}</p>
         <div class="services">
           {#each quick as p (p.id)}
-            <button class="service with-mark" class:done={connected.has(p.id)} disabled={!!busy} onclick={() => connect(p.id)}>
+            <button class="tile inset service with-mark" class:done={connected.has(p.id)} disabled={!!busy} onclick={() => connect(p.id)}>
               <ServiceIcon id={p.id} name={p.name} url={p.url} size={30} />
               <b>{p.name}</b>
               <span class="what">{busy === p.id ? i18n.t.connectors.signingIn : connected.has(p.id) ? i18n.t.connectors.state.connected : p.notes}</span>
@@ -167,24 +167,8 @@
 </div>
 
 <style>
-  .veil {
-    position: fixed;
-    inset: 0;
-    z-index: 20;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: var(--scrim);
-    backdrop-filter: blur(6px);
-  }
   .sheet {
     width: min(620px, 100%);
-    max-height: 100%;
-    overflow: auto;
-    border-radius: 24px;
-    background: var(--ink);
-    border: 1px solid var(--rim-2);
-    box-shadow: var(--shadow);
   }
   .steps {
     display: flex;
@@ -254,16 +238,7 @@
     margin-top: 6px;
   }
   .service {
-    display: grid;
     gap: 4px;
-    padding: 14px;
-    border-radius: var(--r);
-    border: 1px solid var(--rim);
-    background: var(--ink-2);
-    color: var(--pearl);
-    text-align: left;
-    font: inherit;
-    cursor: pointer;
   }
   /* The mark beside the name, the notes under the name. */
   .service.with-mark {
@@ -273,13 +248,6 @@
   }
   .with-mark .what {
     grid-column: 2;
-  }
-  .service:hover:not(:disabled) {
-    border-color: var(--rim-2);
-  }
-  .service span {
-    color: var(--haze);
-    font-size: var(--fs-meta);
   }
   .service.done {
     border-color: color-mix(in srgb, var(--done) 40%, transparent);

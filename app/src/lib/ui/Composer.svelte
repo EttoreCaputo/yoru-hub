@@ -45,7 +45,7 @@
 <form class="composer" class:big class:busy={!!store.asking} class:hearing={listening} onsubmit={(e) => (e.preventDefault(), send())}>
   {#if mic}
     <button
-      class="mic"
+      class="icon-btn round mic"
       class:on={listening}
       type="button"
       style:--level={store.macLevel}
@@ -70,7 +70,7 @@
     onkeydown={key}
     aria-label={t.placeholder}
   ></textarea>
-  <button class="send" type="submit" disabled={!text.trim() || !!store.asking || !ready} aria-label={t.send} title={t.send}>
+  <button class="icon-btn round primary send" type="submit" disabled={!text.trim() || !!store.asking || !ready} aria-label={t.send} title={t.send}>
     {#if store.asking}
       <span class="spin" aria-hidden="true"></span>
     {:else}
@@ -121,50 +121,12 @@
   textarea:focus {
     border: 0;
   }
-  .send {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 0;
-    cursor: pointer;
-    background: radial-gradient(circle at 32% 28%, #fff, var(--pearl) 45%, var(--pearl-mid));
-    flex-shrink: 0;
-  }
-  :global(:root[data-theme="light"]) .send:not(:disabled) {
-    background: var(--pearl);
-  }
-  .send:disabled {
-    background: var(--ink-3);
-    cursor: default;
-  }
-  .send {
-    color: var(--eye);
-  }
-  .send:disabled {
-    color: var(--dusk);
-  }
   .mic {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
     margin-left: -10px;
-    border-radius: 50%;
-    border: 0;
     background: var(--ink-3);
-    cursor: pointer;
-    flex-shrink: 0;
     transition:
       background 160ms,
       box-shadow 80ms;
-  }
-  .mic {
-    color: var(--haze);
-  }
-  .mic:hover {
-    color: var(--pearl);
   }
   /* On: green, with a ring as loud as the voice it hears. */
   .mic.on {
@@ -173,10 +135,6 @@
   }
   .mic.on {
     color: var(--eye);
-  }
-  .mic:disabled {
-    cursor: default;
-    opacity: 0.5;
   }
   .spin {
     width: 14px;

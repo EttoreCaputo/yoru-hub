@@ -38,8 +38,8 @@
   </header>
   <p class="what">{card.text}</p>
   {#if card.detail}
-    <button class="btn quiet small more" onclick={() => (open = !open)} aria-expanded={open}>{t.details}</button>
-    {#if open}<pre class="detail mono">{card.detail}</pre>{/if}
+    <button class="btn link small more" onclick={() => (open = !open)} aria-expanded={open}>{t.details}</button>
+    {#if open}<pre class="well detail mono">{card.detail}</pre>{/if}
   {/if}
   <div class="row actions">
     <button class="btn primary" disabled={busy} onclick={() => answer(true)}>{t.allow}</button>
@@ -80,15 +80,8 @@
     font-size: var(--fs-body);
     user-select: text;
   }
-  .more {
-    padding: 0;
-    height: auto;
-  }
   .detail {
     margin: 6px 0 0;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--night);
     color: var(--haze);
     white-space: pre-wrap;
     word-break: break-word;

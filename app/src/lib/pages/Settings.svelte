@@ -159,30 +159,55 @@
     about: { text: t.aboutSummary, dot: "" },
   });
 
-  // The wiring is drawn on a 1000 × 560 stage; the cards take the outer 31%.
-  // Each side's cards are spread around the middle, 140 apart, however many
-  // there are: four fill the height, three sit centred with Yoru.
-  const H = 560;
-  const ROW_STEP = 140;
+  // The cards sit in two columns either side of Yoru, in the page's flow,
+  // so they never overlap; the traces are drawn after, from where the
+  // cards and Yoru really are. Too narrow for that, the cards go in a grid
+  // under Yoru, without traces.
   /** Between two rows' traces where they meet the case. */
-  const ANGLE_STEP = (32 * Math.PI) / 180;
+  const ANGLE_STEP = (30 * Math.PI) / 180;
+  /** The narrowest stage with Yoru between the columns. */
+  const WIRED_MIN = 640;
   /** A card's place on its side, from the middle: −1.5 to 1.5 for four, −1 to 1 for three. */
   function offset(w: Wire) {
     const side = WIRES.filter((x) => x.side === w.side);
     return side.indexOf(w) - (side.length - 1) / 2;
   }
-  const rowY = (w: Wire) => H / 2 + offset(w) * ROW_STEP;
+  let stage: HTMLElement | undefined = $state();
+  let core: HTMLElement | undefined = $state();
   let stageW = $state(840);
-  const yoruSize = $derived(Math.max(110, Math.min(180, stageW * 0.2)));
-  /** The case's radius, in stage units. */
-  const rim = $derived(((yoruSize * 1.15) / 2) * (1000 / stageW) * 0.96);
-  function trace(w: Wire) {
-    const ax = 500 + w.side * 190;
-    const ay = rowY(w);
+  const wired = $derived(stageW >= WIRED_MIN);
+  const yoruSize = $derived(wired ? Math.max(110, Math.min(170, stageW * 0.18)) : 120);
+  type Geo = { w: number; h: number; cx: number; cy: number; r: number; cards: Partial<Record<Part, { x: number; y: number }>> };
+  let geo = $state<Geo | null>(null);
+  function measure() {
+    if (!stage || !core) return;
+    const box = stage.getBoundingClientRect();
+    const c = core.getBoundingClientRect();
+    const cards: Geo["cards"] = {};
+    for (const el of stage.querySelectorAll<HTMLElement>(".part")) {
+      const r = el.getBoundingClientRect();
+      const w = wire(el.dataset.part as Part);
+      cards[w.id] = { x: (w.side < 0 ? r.right : r.left) - box.left, y: r.top + r.height / 2 - box.top };
+    }
+    geo = { w: box.width, h: box.height, cx: c.left + c.width / 2 - box.left, cy: c.top + c.height / 2 - box.top, r: (c.width / 2) * 0.92, cards };
+  }
+  $effect(() => {
+    if (!stage) return;
+    void wired;
+    const watch = new ResizeObserver(() => measure());
+    watch.observe(stage);
+    for (const el of stage.querySelectorAll(".part")) watch.observe(el);
+    measure();
+    return () => watch.disconnect();
+  });
+  function trace(w: Wire, g: Geo) {
+    const card = g.cards[w.id];
+    if (!card) return null;
+    const { x: ax, y: ay } = card;
     /** Where the trace meets the case, from straight up (−90°) to straight down. */
     const a = offset(w) * ANGLE_STEP;
-    const ex = 500 + w.side * rim * Math.cos(a);
-    const ey = H / 2 + rim * Math.sin(a);
+    const ex = g.cx + w.side * g.r * Math.cos(a);
+    const ey = g.cy + g.r * Math.sin(a);
     // Out of the card flat, then in at 45°, as copper runs on a board.
     const bx = w.side < 0 ? Math.max(ax, ex - Math.abs(ey - ay)) : Math.min(ax, ex + Math.abs(ey - ay));
     return { d: `M ${ax} ${ay} H ${bx} L ${ex} ${ey}`, ax, ay, ex, ey };
@@ -212,7 +237,7 @@
       </div>
       <nav class="hop" aria-label={t.title}>
         {#each PAGES as p (p)}
-          <button class:on={open === p} style:--c={wire(p).color} onclick={(e) => pick(p, e)}>{t.parts[p]}</button>
+          <button class="chip small tint" class:on={open === p} style:--c={wire(p).color} onclick={(e) => pick(p, e)}>{t.parts[p]}</button>
         {/each}
       </nav>
       {#if open === "brain"}{@render brainPage()}
@@ -232,45 +257,53 @@
       </div>
     </div>
 
-    <div class="stage" bind:clientWidth={stageW} style:height="{(stageW * H) / 1000}px">
-      <svg class="wires" viewBox="0 0 1000 {H}" aria-hidden="true">
-        {#each WIRES as w, i (w.id)}
-          {@const p = trace(w)}
-          <g class="wire" class:lit={hover === w.id} class:warn={summary[w.id].warn} style:--c={w.color} style:--i={i}>
-            <path class="copper" d={p.d} pathLength="1" />
-            <path class="pulse" d={p.d} pathLength="100" />
-            <circle class="pad" cx={p.ax} cy={p.ay} r="5" />
-            <circle class="pad" cx={p.ex} cy={p.ey} r="4" />
-          </g>
-        {/each}
-      </svg>
+    <div class="stage" class:wired bind:this={stage} bind:clientWidth={stageW}>
+      {#if wired && geo}
+        <svg class="wires" viewBox="0 0 {geo.w} {geo.h}" aria-hidden="true">
+          {#each WIRES as w, i (w.id)}
+            {@const p = trace(w, geo)}
+            {#if p}
+              <g class="wire" class:lit={hover === w.id} class:warn={summary[w.id].warn} style:--c={w.color} style:--i={i}>
+                <path class="copper" d={p.d} pathLength="1" />
+                <path class="pulse" d={p.d} pathLength="100" />
+                <circle class="pad" cx={p.ax} cy={p.ay} r="4.5" />
+                <circle class="pad" cx={p.ex} cy={p.ey} r="3.5" />
+              </g>
+            {/if}
+          {/each}
+        </svg>
+      {/if}
 
-      <div class="yoru">
+      <div class="yoru" bind:this={core}>
         <YoruBoard board={store.boardState === "off" ? "off" : "live"} size={yoruSize} voice={store.voice} {gaze} />
       </div>
 
-      {#each WIRES as w, i (w.id)}
-        {@const sum = summary[w.id]}
-        <button
-          class="part"
-          class:left={w.side < 0}
-          class:warn={sum.warn}
-          style:--c={w.color}
-          style:--i={i}
-          style:top="{(rowY(w) / H) * 100}%"
-          onmouseenter={() => (hover = w.id)}
-          onmouseleave={() => (hover = null)}
-          onfocus={() => (hover = w.id)}
-          onblur={() => (hover = null)}
-          onclick={(e) => pick(w.id, e)}
-        >
-          <span class="glyph"><Icon name={w.icon} size={20} /></span>
-          <span class="words">
-            <b>{t.parts[w.id]}{#if sum.dot}<span class="dot {sum.dot}"></span>{/if}</b>
-            <span class="says" class:error-text={sum.warn} title={sum.text}>{sum.text}</span>
-          </span>
-          <span class="chev"><Icon name="chevron-right" size={16} /></span>
-        </button>
+      {#each [-1, 1] as side (side)}
+        <div class="col" class:left={side < 0}>
+          {#each WIRES.filter((w) => w.side === side) as w (w.id)}
+            {@const sum = summary[w.id]}
+            {@const i = WIRES.indexOf(w)}
+            <button
+              class="tile part"
+              class:warn={sum.warn}
+              data-part={w.id}
+              style:--c={w.color}
+              style:--i={i}
+              onmouseenter={() => (hover = w.id)}
+              onmouseleave={() => (hover = null)}
+              onfocus={() => (hover = w.id)}
+              onblur={() => (hover = null)}
+              onclick={(e) => pick(w.id, e)}
+            >
+              <span class="glyph"><Icon name={w.icon} size={20} /></span>
+              <span class="words">
+                <b>{t.parts[w.id]}{#if sum.dot}<span class="dot {sum.dot}"></span>{/if}</b>
+                <span class="says" class:error-text={sum.warn} title={sum.text}>{sum.text}</span>
+              </span>
+              <span class="chev"><Icon name="chevron-right" size={16} /></span>
+            </button>
+          {/each}
+        </div>
       {/each}
     </div>
 
@@ -475,7 +508,36 @@
   /* The wiring. */
   .stage {
     position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
     margin-top: 8px;
+  }
+  /* Wide enough: Yoru in the middle, a column of cards either side, and
+     room between for the traces. */
+  .stage.wired {
+    grid-template-columns: minmax(200px, 1fr) auto minmax(200px, 1fr);
+    column-gap: clamp(44px, 8%, 96px);
+    align-items: center;
+    min-height: 340px;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+  /* Narrow: every card in one grid under Yoru, rows lined up. */
+  .stage:not(.wired) .col {
+    display: contents;
+  }
+  .stage.wired .col.left {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .stage.wired .col:not(.left) {
+    grid-column: 3;
+    grid-row: 1;
   }
   .wires {
     position: absolute;
@@ -483,6 +545,7 @@
     width: 100%;
     height: 100%;
     overflow: visible;
+    pointer-events: none;
   }
   .copper {
     fill: none;
@@ -537,10 +600,18 @@
   }
 
   .yoru {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
+    position: relative;
+    display: grid;
+    place-items: center;
+    justify-self: center;
+  }
+  .stage:not(.wired) .yoru {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .stage.wired .yoru {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   /* A part: a card wired to Yoru. */
@@ -574,31 +645,17 @@
     outline: none;
   }
   .part {
-    position: absolute;
-    right: 0;
-    width: 31%;
-    min-width: 170px;
-    transform: translateY(-50%);
+    position: relative;
+    z-index: 1;
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 12px;
-    border-radius: var(--r-lg);
-    border: 1px solid var(--rim);
-    background: var(--ink);
-    color: var(--pearl);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
     animation: arrive 480ms cubic-bezier(0.2, 0.8, 0.2, 1) calc(var(--i) * 90ms) backwards;
     transition:
       border-color 200ms,
       background 200ms,
       box-shadow 200ms;
-  }
-  .part.left {
-    right: auto;
-    left: 0;
   }
   .part:hover,
   .part:focus-visible {
@@ -632,11 +689,15 @@
     min-width: 0;
     flex: 1;
   }
+  .words {
+    color: var(--pearl);
+    font-size: var(--fs-body);
+  }
   .words b {
     display: flex;
     align-items: center;
     gap: 7px;
-    font-weight: 600;
+    font: 600 var(--fs-body)/1.3 var(--sans);
   }
   .says {
     display: -webkit-box;
@@ -687,32 +748,6 @@
     flex-wrap: wrap;
     margin-bottom: 22px;
   }
-  .hop button {
-    height: 28px;
-    padding: 0 12px;
-    border-radius: 999px;
-    border: 1px solid var(--rim);
-    background: transparent;
-    color: var(--haze);
-    font: 550 var(--fs-meta)/1 var(--sans);
-    cursor: pointer;
-    transition:
-      color 160ms,
-      border-color 160ms,
-      background 160ms;
-  }
-  .hop button:hover {
-    color: var(--pearl);
-  }
-  .hop button.on {
-    color: var(--c);
-    border-color: color-mix(in srgb, var(--c) 45%, transparent);
-    background: color-mix(in srgb, var(--c) 10%, transparent);
-  }
-  .panel.active {
-    border-color: color-mix(in srgb, var(--c) 40%, transparent);
-    box-shadow: 0 0 36px -16px var(--c);
-  }
 
   .perm-hint {
     margin: 10px 0 18px;
@@ -757,8 +792,6 @@
     width: 220px;
   }
   select {
-    width: auto;
-    min-width: 180px;
     max-width: 340px;
   }
   .state {
@@ -792,7 +825,7 @@
   @keyframes arrive {
     from {
       opacity: 0;
-      transform: translateY(calc(-50% + 8px));
+      transform: translateY(8px);
     }
   }
 </style>

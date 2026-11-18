@@ -24,7 +24,7 @@
   <div class="bar">
     <div class="seg" role="tablist">
       <button role="tab" aria-selected={show === "unread"} class:on={show === "unread"} onclick={() => (show = "unread")}>
-        {t.unread}{#if store.unread}<span class="n">{store.unread}</span>{/if}
+        {t.unread}{#if store.unread}<span class="count small">{store.unread}</span>{/if}
       </button>
       <button role="tab" aria-selected={show === "all"} class:on={show === "all"} onclick={() => (show = "all")}>{t.all}</button>
     </div>
@@ -50,7 +50,7 @@
     <div class="empty">
       <b>{t.emptyAll}</b>
       <p>{t.emptyAllHint}</p>
-      <button class="btn" style="margin-top:16px" onclick={() => store.go("routines")}>{i18n.t.nav.routines}</button>
+      <button class="btn" onclick={() => store.go("routines")}>{i18n.t.nav.routines}</button>
     </div>
   {/if}
 </div>
@@ -63,16 +63,6 @@
     flex-wrap: wrap;
     padding-bottom: 14px;
     margin-bottom: 4px;
-  }
-  .n {
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: 999px;
-    background: var(--pearl);
-    color: var(--eye);
-    font: 700 var(--fs-small)/18px var(--sans);
-    text-align: center;
   }
   /* The sources on a line of their own, under the views and the buttons. */
   .sources {

@@ -61,7 +61,7 @@
   }
 </script>
 
-<form class="panel editor" onsubmit={(e) => (e.preventDefault(), save())}>
+<form class="panel raised editor" onsubmit={(e) => (e.preventDefault(), save())}>
   <h2>{isNew ? t.new : t.editTitle}</h2>
 
   <label class="stack">{t.what}<textarea rows="3" bind:value={what} placeholder={t.whatPlaceholder}></textarea></label>
@@ -100,7 +100,7 @@
     <legend class="dim">{t.acting}</legend>
     <div class="kinds">
       {#each ACTINGS as a (a)}
-        <button type="button" class="kind" class:on={acting === a} aria-pressed={acting === a} onclick={() => (acting = a)}>
+        <button type="button" class="tile inset kind" class:on={acting === a} aria-pressed={acting === a} onclick={() => (acting = a)}>
           <b>{t.actingName[a]}</b><span>{t.actingHint[a]}</span>
         </button>
       {/each}
@@ -121,7 +121,6 @@
     display: grid;
     gap: 14px;
     margin-bottom: 14px;
-    border-color: var(--rim-2);
   }
   h2 {
     font: 600 var(--fs-head)/1.2 var(--display) !important;
@@ -160,28 +159,6 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 10px;
-  }
-  .kind {
-    display: grid;
-    align-content: start;
-    gap: 4px;
-    padding: 12px 14px;
-    border-radius: var(--r);
-    border: 1px solid var(--rim);
-    background: var(--ink-2);
-    color: var(--pearl);
-    text-align: left;
-    cursor: pointer;
-    font: inherit;
-  }
-  .kind span {
-    color: var(--haze);
-    font-size: var(--fs-meta);
-    line-height: 1.4;
-  }
-  .kind.on {
-    border-color: var(--pearl-mid);
-    background: var(--ink-3);
   }
   .inline {
     display: flex;

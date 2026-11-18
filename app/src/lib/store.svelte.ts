@@ -16,6 +16,7 @@ import type {
   BoardState,
   BridgeEvent,
   ChatLine,
+  ChatTitle,
   Confirmation,
   DeviceInfo,
   ConnectorStatus,
@@ -96,6 +97,7 @@ class Store {
   info = $state<AssistantInfo | null>(null);
   inbox = $state<Notification[]>([]);
   chat = $state<ChatLine[]>([]);
+  chatTitle = $state<ChatTitle | null>(null);
   /** What the user is saying, written so far, while they speak; gone once the line is in the chat. */
   hearing = $state("");
   #hearingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -172,6 +174,7 @@ class Store {
       this.chat = lines;
       this.hearing = "";
     });
+    on<ChatTitle>("chat_title", (title) => (this.chatTitle = title));
     on<string>("hearing", (text) => {
       this.hearing = text;
       // No line came (nothing to answer, an error): the draft doesn't stay.
@@ -200,6 +203,7 @@ class Store {
     if (info) this.info = info;
     if (inbox) this.inbox = inbox;
     if (chat) this.chat = chat;
+    this.chatTitle = (await quiet(call<ChatTitle>("chat_title"))) ?? null;
     if (confirmations) this.confirmations = confirmations;
     if (onboarding) this.onboarding = onboarding;
     void this.refreshPermissions();

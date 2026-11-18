@@ -29,20 +29,20 @@
 </script>
 
 <div class="bar chrome" data-tauri-drag-region>
-  <button class="side" class:on={!look.sidebar} aria-label={sideLabel} title={sideLabel} onclick={() => look.toggleSidebar()}>
+  <button class="icon-btn side" class:on={!look.sidebar} aria-label={sideLabel} title={sideLabel} onclick={() => look.toggleSidebar()}>
     <Icon name="panel-left" />
   </button>
 
   <div class="end">
-    <button class:on={store.page === "inbox"} aria-label={nav.inbox} title={nav.inbox} onclick={() => store.go("inbox")}>
+    <button class="icon-btn" class:on={store.page === "inbox"} aria-label={nav.inbox} title={nav.inbox} onclick={() => store.go("inbox")}>
       <Icon name={PAGE_ICONS.inbox} />
-      {#if store.unread}<span class="count">{store.unread > 99 ? "99+" : store.unread}</span>{/if}
+      {#if store.unread}<span class="count small">{store.unread > 99 ? "99+" : store.unread}</span>{/if}
     </button>
-    <button class:on={inSettings} aria-label={nav.settings} title={nav.settings} onclick={() => store.go("settings")}>
+    <button class="icon-btn" class:on={inSettings} aria-label={nav.settings} title={nav.settings} onclick={() => store.go("settings")}>
       <Icon name={PAGE_ICONS.settings} />
       {#if settingsDot}<span class="dot {settingsDot}"></span>{/if}
     </button>
-    <button aria-label={panelLabel} title={panelLabel} aria-pressed={look.activity} onclick={() => look.toggleActivity()}>
+    <button class="icon-btn" aria-label={panelLabel} title={panelLabel} aria-pressed={look.activity} onclick={() => look.toggleActivity()}>
       <Icon name="panel-right" />
       {#if !look.activity && store.working}<span class="dot think"></span>{/if}
     </button>
@@ -63,43 +63,5 @@
     display: flex;
     gap: 2px;
     margin-left: auto;
-  }
-  button {
-    position: relative;
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 30px;
-    border: 0;
-    border-radius: 8px;
-    background: none;
-    color: var(--haze);
-    cursor: pointer;
-    transition:
-      background 140ms,
-      color 140ms;
-  }
-  button:hover,
-  button.on {
-    background: var(--rim);
-    color: var(--pearl);
-  }
-  .count {
-    position: absolute;
-    top: -1px;
-    right: -2px;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 999px;
-    background: var(--pearl);
-    color: var(--eye);
-    font: 700 var(--fs-small)/16px var(--sans);
-    text-align: center;
-  }
-  button .dot {
-    position: absolute;
-    top: 4px;
-    right: 5px;
   }
 </style>

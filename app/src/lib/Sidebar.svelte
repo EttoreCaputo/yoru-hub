@@ -68,7 +68,7 @@
     <div class="boards" role="group" aria-label={t.boards.title}>
       <div class="label">{t.boards.count(store.boards.length)}</div>
       {#each store.boards as b (b.target)}
-        <button class:on={b.current} aria-pressed={b.current} title={t.boards.show(store.boardName(b))} onclick={() => store.showBoard(b)}>
+        <button class="nav-row" class:on={b.current} aria-pressed={b.current} title={t.boards.show(store.boardName(b))} onclick={() => store.showBoard(b)}>
           <span class="dot {boardDot(b.link)}"></span>
           <span class="bname">{store.boardName(b)}</span>
           {#if b.primary}<span class="star" title={t.boards.primary}>★</span>{/if}
@@ -102,7 +102,7 @@
 {#snippet item(p: Page)}
   {@const b = badge(p)}
   <li>
-    <button class:on={store.page === p} aria-current={store.page === p ? "page" : undefined} onclick={() => store.go(p)}>
+    <button class="nav-row" class:on={store.page === p} aria-current={store.page === p ? "page" : undefined} onclick={() => store.go(p)}>
       <Icon name={PAGE_ICONS[p]} />
       <span>{t.nav[p]}</span>
       {#if b?.n}<span class="count">{b.n}</span>{:else if b?.dot}<span class="dot {b.dot}"></span>{/if}
@@ -198,29 +198,17 @@
     color: var(--haze);
     font: 600 var(--fs-meta)/1 var(--sans);
   }
-  .boards button {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    width: 100%;
-    height: 32px;
-    padding: 0 10px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    background: none;
+  /* The sidebar's rows are quiet until pointed at or open. */
+  .nav-row {
     color: var(--haze);
-    font: 500 var(--fs-body)/1 var(--sans);
-    cursor: pointer;
-    text-align: left;
   }
-  .boards button:hover {
+  .nav-row:hover,
+  .nav-row.on {
     color: var(--pearl);
-    background: var(--rim);
   }
-  .boards button.on {
-    color: var(--pearl);
-    background: var(--rim);
-    border-color: var(--rim-2);
+  .boards .nav-row {
+    gap: 9px;
+    min-height: 32px;
   }
   .bname {
     flex: 1;
@@ -243,45 +231,15 @@
     display: grid;
     gap: 2px;
   }
-  li button {
-    display: flex;
-    align-items: center;
+  li .nav-row {
     gap: 11px;
-    width: 100%;
-    height: 36px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: 10px;
-    background: none;
-    color: var(--haze);
-    font: 500 var(--fs-body)/1 var(--sans);
-    cursor: pointer;
-    text-align: left;
-    transition:
-      background 140ms,
-      color 140ms;
+    min-height: 36px;
   }
-  li button:hover {
-    color: var(--pearl);
-    background: var(--rim);
-  }
-  li button.on {
-    color: var(--pearl);
+  li .nav-row.on {
     font-weight: 600;
-    background: var(--rim);
   }
   li span:first-of-type {
     flex: 1;
-  }
-  .count {
-    min-width: 20px;
-    height: 20px;
-    padding: 0 6px;
-    border-radius: 999px;
-    background: var(--pearl);
-    color: var(--eye);
-    font: 700 var(--fs-small)/20px var(--sans);
-    text-align: center;
   }
   footer {
     margin-top: auto;
@@ -293,7 +251,7 @@
     width: 100%;
     min-height: 38px;
     padding: 0 10px;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     border: 1px solid var(--rim);
     background: var(--night);
     color: var(--haze);
@@ -314,7 +272,6 @@
   .dnd.on {
     cursor: default;
     color: var(--pearl);
-    border-color: var(--rim-2);
     background: var(--night);
     padding-right: 4px;
   }

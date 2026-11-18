@@ -73,12 +73,12 @@
   <h2>{t.panel}</h2>
   <div class="scroll">
       <section>
-        <h3 class="section-title">{ta.title}{#if store.working}<span class="n">{store.working}</span>{/if}</h3>
+        <h3 class="section-title">{ta.title}{#if store.working}<span class="tag think">{store.working}</span>{/if}</h3>
         {#if store.agents.length}
           <ul>
             {#each store.agents.slice(0, 6) as a (agentKey(a))}
               <li>
-                <button onclick={() => show({ kind: "agent", key: agentKey(a) })}>
+                <button class="nav-row" onclick={() => show({ kind: "agent", key: agentKey(a) })}>
                   <span class="dot {agentDot(a)}"></span>
                   <span class="words">
                     <b>{a.title}</b>
@@ -99,7 +99,7 @@
           <ul>
             {#each tasks.slice(0, 6) as e (e.task.id)}
               <li>
-                <button onclick={() => show({ kind: "task", id: e.task.id })}>
+                <button class="nav-row" onclick={() => show({ kind: "task", id: e.task.id })}>
                   <span class="dot {taskDot(e)}"></span>
                   <span class="words"><b>{e.task.name}</b><span>{taskLine(e)}</span></span>
                 </button>
@@ -117,7 +117,7 @@
           <ul>
             {#if routines?.recap}
               <li>
-                <button onclick={() => show({ kind: "recap" })}>
+                <button class="nav-row" onclick={() => show({ kind: "recap" })}>
                   <span class="dot done"></span>
                   <span class="words"><b>{t.recapName}</b><span>{recapLine}</span></span>
                 </button>
@@ -125,7 +125,7 @@
             {/if}
             {#each watchers.slice(0, 6) as w (w.watcher.id)}
               <li>
-                <button onclick={() => show({ kind: "watcher", id: w.watcher.id })}>
+                <button class="nav-row" onclick={() => show({ kind: "watcher", id: w.watcher.id })}>
                   <span class="dot {watcherDot(w)}"></span>
                   <span class="words"><b>{w.watcher.name}</b><span>{watcherLine(w)}</span></span>
                 </button>
@@ -235,14 +235,6 @@
     gap: 6px;
     padding: 0 8px;
   }
-  .n {
-    padding: 2px 6px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--think) 25%, transparent);
-    color: var(--pearl);
-    font-size: var(--fs-small);
-    letter-spacing: 0;
-  }
   ul {
     list-style: none;
     margin: 0;
@@ -250,22 +242,10 @@
     display: grid;
     gap: 1px;
   }
-  li button {
-    display: flex;
+  li .nav-row {
     align-items: flex-start;
-    gap: 10px;
-    width: 100%;
     padding: 8px;
-    border: 0;
-    border-radius: 10px;
-    background: none;
-    color: var(--pearl);
     font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  li button:hover {
-    background: var(--rim);
   }
   li .dot {
     margin-top: 6px;

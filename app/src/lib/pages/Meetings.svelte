@@ -462,7 +462,7 @@
         {#each store.recording.tracks as track (track.name)}
           <div class="meter">
             <span class="dim">{track.kind === "mic" ? t.you : t.others} · {track.source}</span>
-            <span class="bar"><span style:width="{Math.round(Math.sqrt(store.levels[track.name] ?? 0) * 100)}%"></span></span>
+            <span class="meter level" style:--p={Math.sqrt(store.levels[track.name] ?? 0)}><span></span></span>
           </div>
         {/each}
       </div>
@@ -473,12 +473,12 @@
           <div class="how"><button class="btn small quiet" onclick={readSources}>{t.refresh}</button></div>
         </div>
         <div class="tiles-row" role="radiogroup" aria-label={t.played}>
-          <button class="source" class:on={played === "system"} role="radio" aria-checked={played === "system"} onclick={() => (played = "system")}>
+          <button class="tile inset source" class:on={played === "system"} role="radio" aria-checked={played === "system"} onclick={() => (played = "system")}>
             <span class="glyph"><Icon name="monitor" size={24} stroke={1.6} /></span>
             <span class="label">{t.everything}</span>
           </button>
           {#each sources?.apps ?? [] as app (app.id)}
-            <button class="source" class:on={played === app.id} role="radio" aria-checked={played === app.id} title={app.name} onclick={() => (played = app.id)}>
+            <button class="tile inset source" class:on={played === app.id} role="radio" aria-checked={played === app.id} title={app.name} onclick={() => (played = app.id)}>
               {#if app.icon}
                 <img src="data:image/png;base64,{app.icon}" alt="" />
               {:else}
@@ -488,7 +488,7 @@
               <span class="label">{app.name}</span>
             </button>
           {/each}
-          <button class="source" class:on={played === "none"} role="radio" aria-checked={played === "none"} onclick={() => (played = "none")}>
+          <button class="tile inset source" class:on={played === "none"} role="radio" aria-checked={played === "none"} onclick={() => (played = "none")}>
             <span class="glyph"><Icon name="ban" size={24} stroke={1.6} /></span>
             <span class="label">{t.nothing}</span>
           </button>
@@ -579,7 +579,7 @@
           {#if open === m.id}
             {@const transcript = transcripts[m.id]}
             {@const summary = summaries[m.id]}
-            <div class="summary">
+            <div class="well summary">
               {#if summary}
                 <header class="summary-head">
                   <b>{summary.title}</b>
@@ -628,7 +628,7 @@
                       {#if naming === `${m.id}/${s.key}`}
                         <!-- svelte-ignore a11y_autofocus -->
                         <input
-                          class="person-name"
+                          class="compact person-name"
                           type="text"
                           bind:value={nameDraft}
                           autofocus
@@ -638,7 +638,7 @@
                           onkeydown={(e) => (e.key === "Enter" ? saveName(m, s) : e.key === "Escape" ? (naming = null) : null)}
                         />
                       {:else}
-                        <button class="person" style:--tint={tint(s)} title={t.nameSpeaker} onclick={() => startNaming(m, s)}>{label(s)}</button>
+                        <button class="chip small person" style:--tint={tint(s)} title={t.nameSpeaker} onclick={() => startNaming(m, s)}>{label(s)}</button>
                       {/if}
                     {/each}
                     <span class="faint small">{t.nameHint}</span>
@@ -648,7 +648,7 @@
                   {@const s = speakerOf(transcript, line)}
                   {@const same = i > 0 && speakerOf(transcript, transcript.lines[i - 1]) === s}
                   <div class="line">
-                    <button class="at mono" title={t.playFrom} onclick={() => seek(m, line)}>{clock(line.start_ms / 1000)}</button>
+                    <button class="btn link at mono" title={t.playFrom} onclick={() => seek(m, line)}>{clock(line.start_ms / 1000)}</button>
                     <span class="who" style:color={tint(s)}>{same ? "" : label(s)}</span>
                     <p>{line.text}</p>
                   </div>
@@ -696,8 +696,6 @@
   .summary {
     margin-top: 12px;
     padding: 14px 16px;
-    border-radius: var(--r);
-    background: var(--ink-2);
   }
   .summary:empty {
     display: none;
@@ -761,9 +759,8 @@
     padding: 5px 0;
   }
   .at {
-    all: unset;
-    cursor: pointer;
     color: var(--dusk);
+    text-decoration: none;
   }
   .at:hover {
     color: var(--pearl);
@@ -783,19 +780,14 @@
     margin-bottom: 10px;
   }
   .person {
-    height: 26px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--tint) 45%, transparent);
+    border-color: color-mix(in srgb, var(--tint) 45%, transparent);
     background: color-mix(in srgb, var(--tint) 12%, transparent);
     color: var(--tint);
-    font: 600 var(--fs-meta)/1 var(--sans);
+    font-weight: 600;
     cursor: text;
   }
   .person-name {
-    height: 26px;
     width: 140px;
-    font-size: var(--fs-meta);
   }
   .line p {
     color: var(--pearl);
@@ -848,17 +840,12 @@
     gap: 14px;
     font-size: var(--fs-meta);
   }
-  .bar {
+  .level {
     height: 6px;
-    border-radius: 999px;
-    background: var(--ink-3);
-    overflow: hidden;
   }
-  .bar span {
-    display: block;
-    height: 100%;
-    background: var(--pearl-mid);
-    transition: width 200ms linear;
+  .level > span {
+    transition-duration: 200ms;
+    transition-timing-function: linear;
   }
   .played {
     padding-bottom: 14px;
@@ -873,26 +860,16 @@
     gap: 8px;
   }
   .source {
-    position: relative;
-    display: grid;
     justify-items: center;
     gap: 6px;
     width: 88px;
     padding: 10px 6px 8px;
-    border-radius: var(--r);
-    border: 1px solid transparent;
+    border-color: transparent;
     background: transparent;
-    color: var(--haze);
-    cursor: pointer;
     font: 500 var(--fs-small)/1.2 var(--sans);
   }
-  .source:hover {
-    background: var(--ink-2);
-  }
   .source.on {
-    background: var(--ink-3);
     border-color: var(--rim-2);
-    color: var(--pearl);
   }
   .source img,
   .glyph {
