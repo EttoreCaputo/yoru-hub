@@ -86,10 +86,13 @@
       // Outside the app: talking will say why.
     }
   }
-  /** macOS's own prompt if it never asked, System Settings once turned down. */
+  /** macOS's own prompt, again after a no; System Settings when that can't help. */
   async function allowMic() {
-    if (mic === "unknown") await call("request_permission", { kind: "microphone" }).catch(() => {});
-    else await call("open_privacy", { kind: "microphone" }).catch(() => {});
+    const before = mic;
+    const after = before === "restricted" ? before : await call<string>("request_permission", { kind: "microphone" }).catch(() => null);
+    if (after === "restricted" || (before === "denied" && after === "denied")) {
+      await call("open_privacy", { kind: "microphone" }).catch(() => {});
+    }
     await checkMic();
   }
   void checkMic();
@@ -262,7 +265,7 @@
         <section class="ask">
           <p class="label"><span class="dot wait"></span>{mic === "unknown" ? t.micAsk : t.micDenied}</p>
           <div class="pills">
-            <button class="pill light" onclick={allowMic}>{mic === "unknown" ? t.micAllow : t.micSettings}</button>
+            <button class="pill light" onclick={allowMic}>{mic === "restricted" ? t.micSettings : t.micAllow}</button>
           </div>
         </section>
       {/if}

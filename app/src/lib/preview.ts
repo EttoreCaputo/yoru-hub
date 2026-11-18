@@ -599,7 +599,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   // Asking says yes, as a user would; a denied one waits for System Settings.
   request_permission: (a) => {
     const kind = a.kind as keyof typeof permissions;
-    if (permissions[kind] === "unknown") permissions[kind] = "granted";
+    if (permissions[kind] === "unknown" || permissions[kind] === "denied") permissions[kind] = "granted";
     return permissions[kind];
   },
   open_privacy: (a) => void (permissions[a.kind as keyof typeof permissions] = "granted"),

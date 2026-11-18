@@ -29,32 +29,44 @@ pub fn permissions() -> Permissions {
     Permissions { microphone: status("microphone"), calendar: status("calendar"), system_audio: status("system_audio") }
 }
 
-/// Ask for one permission and say where it stands after. macOS asks only
-/// once: a permission already answered comes back as it is, and the window
-/// sends the user to System Settings instead.
+/// Ask for one permission and say where it stands after.
+///
+/// macOS prompts only once per app. A permission turned down (or left in a
+/// state that's neither: a record of an older build, a prompt never seen)
+/// is forgotten first, so the click brings the prompt back instead of
+/// sending the user to a System Settings list Yoru may not be on: macOS
+/// lists an app there only once it has answered a prompt, and for the
+/// system audio not always then.
 #[tauri::command]
 pub async fn request_permission(kind: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let before = status(&kind);
-        if before != "unknown" {
-            log(&format!("{kind}: {before}, not asked again"));
+        log(&format!("{kind}: {before}, asking (macOS {})", os_version()));
+        if before == "granted" || before == "restricted" || before == "unsupported" {
             return Ok(before);
         }
+        if before == "denied" {
+            reset(&kind);
+        }
         ask(&kind)?;
-        // No prompt and no answer: macOS can keep a record of an older
-        // build that says neither yes nor no, and then it stays silent.
-        // Forgetting this app's answer for that permission lets it ask.
         if status(&kind) == "unknown" {
             log(&format!("{kind}: no answer, forgetting the old one and asking again"));
             reset(&kind);
             ask(&kind)?;
         }
         let after = status(&kind);
-        log(&format!("{kind}: asked, now {after}"));
+        log(&format!("{kind}: now {after}"));
         Ok(after)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// In `yoru.log` at launch: where each permission stands, so a Mac where a
+/// prompt never comes up can be told apart from one where it was refused.
+pub fn log_state() {
+    let p = permissions();
+    log(&format!("macOS {}: microphone {}, calendar {}, system audio {}", os_version(), p.microphone, p.calendar, p.system_audio));
 }
 
 /// System Settings at one permission's page, for a permission turned down.
@@ -86,7 +98,24 @@ fn reset(kind: &str) {
         "system_audio" => "AudioCapture",
         _ => return,
     };
-    let _ = std::process::Command::new("tccutil").args(["reset", service, BUNDLE_ID]).status();
+    match std::process::Command::new("tccutil").args(["reset", service, BUNDLE_ID]).output() {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => log(&format!("{kind}: tccutil: {}", String::from_utf8_lossy(&out.stderr).trim())),
+        Err(e) => log(&format!("{kind}: tccutil: {e}")),
+    }
+}
+
+/// The macOS version, as `14.2`; empty elsewhere. Read once: the window
+/// asks for the permissions every second.
+fn os_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -94,10 +123,21 @@ fn status(kind: &str) -> String {
     match kind {
         "microphone" => mac::microphone(),
         "calendar" => mac::calendar(),
+        // Core Audio taps and their permission came with macOS 14.2; before,
+        // TCC takes the service for an unknown one and says denied.
+        "system_audio" if !at_least(os_version(), (14, 2)) => "unsupported",
         "system_audio" => mac::system_audio(),
         _ => "unsupported",
     }
     .to_string()
+}
+
+/// Whether a version like `14.2.1` is at least `(major, minor)`.
+#[cfg(target_os = "macos")]
+fn at_least(version: &str, (major, minor): (u32, u32)) -> bool {
+    let mut parts = version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+    let (a, b) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+    (a, b) >= (major, minor)
 }
 
 #[cfg(target_os = "macos")]
@@ -126,6 +166,11 @@ fn ask(_kind: &str) -> Result<(), String> {
 mod mac {
     use std::ffi::{c_char, c_int, c_void};
     use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// A prompt left unanswered this long lets the button go; macOS keeps
+    /// it up, and the list reads the answer when it comes.
+    const WAIT: Duration = Duration::from_secs(120);
 
     use block2::RcBlock;
     use objc2::runtime::Bool;
@@ -155,7 +200,7 @@ mod mac {
             let _ = tx.send(());
         });
         unsafe { AVCaptureDevice::requestAccessForMediaType_completionHandler(audio, &done) };
-        let _ = rx.recv();
+        let _ = rx.recv_timeout(WAIT);
     }
 
     pub fn calendar() -> &'static str {
@@ -175,7 +220,7 @@ mod mac {
             let _ = tx.send(());
         });
         unsafe { store.requestFullAccessToEventsWithCompletion(RcBlock::as_ptr(&done)) };
-        let _ = rx.recv();
+        let _ = rx.recv_timeout(WAIT);
     }
 
     // The system audio (Core Audio taps) has no public call to read or ask
@@ -220,6 +265,6 @@ mod mac {
             let _ = tx.send(());
         });
         unsafe { request(&*service as *const NSString as *const c_void, std::ptr::null(), RcBlock::as_ptr(&done) as *const c_void) };
-        let _ = rx.recv();
+        let _ = rx.recv_timeout(WAIT);
     }
 }

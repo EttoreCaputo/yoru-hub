@@ -452,11 +452,18 @@ class Store {
     return this.permissions;
   }
 
-  /** macOS's prompt if never asked, System Settings if turned down. */
+  /**
+   * macOS's prompt, also for one turned down (the app forgets the old answer
+   * first). System Settings only when that can't help: a profile holds it,
+   * or it was turned down again.
+   */
   async requestPermission(kind: PermissionKind) {
-    const now = this.permissions?.[kind];
-    if (now === "denied" || now === "restricted") await call("open_privacy", { kind }).catch(() => {});
-    else await call<PermissionState>("request_permission", { kind }).catch(() => {});
+    const before = this.permissions?.[kind];
+    const after =
+      before === "restricted" ? before : await call<PermissionState>("request_permission", { kind }).catch(() => null);
+    if (after === "restricted" || (before === "denied" && after === "denied")) {
+      await call("open_privacy", { kind }).catch(() => {});
+    }
     await this.refreshPermissions();
   }
 

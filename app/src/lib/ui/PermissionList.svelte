@@ -1,7 +1,7 @@
 <!--
   The Mac's permissions, one row each: what it's for, where it stands, and
-  the button that asks (macOS's prompt the first time, System Settings once
-  turned down). The microphone is required; the others are for meetings.
+  the button that asks (macOS's prompt, again after a no; System Settings
+  for one a profile holds). The microphone is required; the others are for meetings.
   Read again every second while shown, so a switch flipped in System
   Settings shows here at once.
 -->
@@ -49,7 +49,7 @@
           {#if manage}<button class="btn quiet small" onclick={() => call("open_privacy", { kind }).catch(() => {})}>{t.change}</button>{/if}
         {:else}
           <button class="btn small" class:primary={kind === "microphone"} disabled={!!asking} onclick={() => ask(kind)}>
-            {asking === kind ? t.asking : state === "unknown" ? t.allow : t.openSettings}
+            {asking === kind ? t.asking : state === "restricted" ? t.openSettings : state === "denied" ? t.askAgain : t.allow}
           </button>
         {/if}
       </li>

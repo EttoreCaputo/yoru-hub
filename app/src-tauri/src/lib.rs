@@ -1937,6 +1937,7 @@ pub fn run() {
             if let Some(main) = app.get_webview_window("main") {
                 corners::apply(&main);
             }
+            std::thread::spawn(permissions::log_state);
             let notch_on = app.state::<AppState>().settings.lock().unwrap().notch;
             notch::apply(handle, notch_on);
             let manager = start_bridge(handle, port);
