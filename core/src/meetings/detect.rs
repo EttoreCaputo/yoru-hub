@@ -91,8 +91,8 @@ fn is_browser(id: &str) -> bool {
     BROWSERS.contains(&id)
 }
 
-/// The meetings in Google Calendar's `list_events` answer: timed events
-/// with a call link or other people, not declined.
+/// The meetings in `yoru-audio events`' answer (the Mac's calendar): timed
+/// events with a call link or other people, not declined.
 pub fn meetings_in(answer: &str) -> Vec<CalendarMeeting> {
     let Ok(value) = serde_json::from_str::<Value>(answer) else { return Vec::new() };
     let time = |v: &Value| v.as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|t| t.timestamp_millis());
@@ -126,15 +126,24 @@ pub fn meetings_in(answer: &str) -> Vec<CalendarMeeting> {
 /// How far ahead the calendar is read.
 const LOOK_AHEAD_MIN: i64 = 120;
 
-/// The arguments for `list_events`: what is on from a little while ago to
-/// two hours ahead.
-pub fn calendar_query() -> Value {
-    let now = chrono::Local::now();
-    serde_json::json!({
-        "time_min": (now - chrono::Duration::milliseconds(EARLY_MS)).to_rfc3339(),
-        "time_max": (now + chrono::Duration::minutes(LOOK_AHEAD_MIN)).to_rfc3339(),
-        "max_results": 20,
-    })
+/// The meetings in the Mac's calendar (EventKit, through `yoru-audio
+/// events`) from a little while ago to two hours ahead. The first time,
+/// macOS asks whether Yoru may read the calendar; `Err("denied")` if not.
+pub fn calendar(now_ms: i64) -> Result<Vec<CalendarMeeting>, String> {
+    let from = (now_ms - EARLY_MS).to_string();
+    let to = (now_ms + LOOK_AHEAD_MIN * 60 * 1000).to_string();
+    let out = Command::new(super::helper().map_err(|e| e.to_string())?)
+        .args(["events", &from, &to])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let answer: Value = serde_json::from_str(text.trim()).map_err(|_| format!("yoru-audio events: {}", text.trim()))?;
+    if let Some(error) = answer["error"].as_str().or(answer["message"].as_str()) {
+        return Err(error.to_string());
+    }
+    Ok(meetings_in(&answer.to_string()))
 }
 
 /// `ms` as the local time of day (`10:30`).

@@ -1,5 +1,5 @@
 //! The meeting detection in the app (docs/meetings.md, Detection): every
-//! few seconds, while it is on, [`Detector`] looks at the calendar and at
+//! few seconds, while it is on, [`Detector`] looks at the Mac's calendar and at
 //! the apps on the microphone, and what it decides is done here: the
 //! question on the Allow card (the notch opens for it, the board shows it),
 //! the recording, and its end.
@@ -68,7 +68,7 @@ fn run(app: AppHandle) {
         }
         if calendar_at.is_none_or(|at| at.elapsed() >= CALENDAR_EVERY) {
             calendar_at = Some(Instant::now());
-            if let Some(found) = calendar(&app) {
+            if let Some(found) = calendar() {
                 shared.detector.lock().unwrap().set_meetings(found);
             }
         }
@@ -80,22 +80,10 @@ fn run(app: AppHandle) {
     }
 }
 
-/// The meetings in Google Calendar now and in the next hours; `None`
-/// without the connector (the microphone still works alone).
-fn calendar(app: &AppHandle) -> Option<Vec<CalendarMeeting>> {
-    let external = app.state::<AppState>().assistant.external()?;
-    let tool = external.tools().into_iter().find(|t| t.name.ends_with("__list_events") && t.service.contains("Calendar"))?;
-    match external.call(&tool.name, &detect::calendar_query(), Duration::from_secs(20)) {
-        Ok((text, false)) => Some(detect::meetings_in(&text)),
-        Ok((text, true)) => {
-            log(&format!("detection: the calendar: {}", text.chars().take(200).collect::<String>()));
-            None
-        }
-        Err(e) => {
-            log(&format!("detection: the calendar: {e}"));
-            None
-        }
-    }
+/// The meetings in the Mac's calendar now and in the next hours; `None`
+/// without access to it (the microphone still works alone).
+fn calendar() -> Option<Vec<CalendarMeeting>> {
+    detect::calendar(now_ms()).map_err(|e| log(&format!("detection: the calendar: {e}"))).ok()
 }
 
 /// The words of the questions, in the language Yoru speaks.

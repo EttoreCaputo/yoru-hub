@@ -8,5 +8,7 @@
 	<string>Yoru hears you through the microphone when you talk to him in the notch, and records it when you record a meeting.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Yoru records the sound of your calls and apps when you record a meeting.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Yoru reads your calendar to notice when a meeting is about to start and ask whether to record it.</string>
 </dict>
 </plist>
