@@ -18,6 +18,7 @@
   import { store } from "./lib/store.svelte";
   import { tabs } from "./lib/tabs.svelte";
   import WindowBar from "./lib/WindowBar.svelte";
+  import YoruBubble from "./lib/YoruBubble.svelte";
   import { SETTINGS_PAGES } from "./lib/icons/pages";
   import { look } from "./lib/look.svelte";
   import ActivityPanel from "./lib/ui/ActivityPanel.svelte";
@@ -31,8 +32,10 @@
   const Page = $derived(PAGES[store.page]);
   // Tasks, Routines, Services, Spoken and Animations are opened from Settings, and lead back to it.
   const fromSettings = $derived(!tabs.shown && (SETTINGS_PAGES as readonly string[]).includes(store.page));
-  // The Home and a conversation fill the card and scroll inside; the other pages scroll here.
-  const fill = $derived(tabs.shown ? tabs.shown.kind === "chat" : store.page === "home");
+  // The Home, Memory and a conversation fill the card and scroll inside; the other pages scroll here.
+  const fill = $derived(tabs.shown ? tabs.shown.kind === "chat" : store.page === "home" || store.page === "memory");
+  // Yoru waits at the bottom right of the pages where he isn't already the page.
+  const bubbled = $derived(tabs.shown ? tabs.shown.kind !== "chat" : store.page !== "home");
   let main: HTMLElement | undefined = $state();
   // Each page starts at its top.
   $effect(() => {
@@ -63,6 +66,7 @@
       <Page />
     {/if}
   </main>
+  {#if bubbled && !(store.onboarding && !store.onboarding.done)}<YoruBubble />{/if}
   {#if look.activity}<ActivityPanel />{/if}
   <!-- The first run asks for the permissions itself; after it, the gate
        waits for the microphone if it was taken away. -->

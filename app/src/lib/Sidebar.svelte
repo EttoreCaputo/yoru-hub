@@ -1,8 +1,8 @@
 <!--
-  The sidebar: Yoru's own small presence at the top (lit by what it's doing),
-  with two boards or more the list of them to pick the one shown, the pages
-  (Notifications and Settings are icons in the window bar),
-  and "do not disturb" at the bottom.
+  The sidebar: with two boards or more the list of them to pick the one
+  shown, the pages (Notifications and Settings are icons in the window bar),
+  and at the bottom where the board is and "do not disturb". Yoru himself
+  isn't here: he sits at the bottom right of the pages (YoruBubble.svelte).
 -->
 <script lang="ts">
   import { i18n } from "./i18n/index.svelte";
@@ -18,9 +18,6 @@
   // Tasks, Routines, Services, Spoken and Animations.
   const MAIN: Page[] = ["home", "memory", "meetings"];
 
-  const tint = $derived(
-    store.asking || store.voice === "thinking" ? "think" : store.voice === "speaking" ? "done" : store.confirmations.length ? "wait" : null,
-  );
   const status = $derived.by(() => {
     if (store.boardState === "live") return { dot: "done", text: t.link.live };
     if (store.boardState === "boot") return { dot: "think", text: t.link.boot };
@@ -40,30 +37,7 @@
 </script>
 
 <nav class="side chrome" class:gone={!look.sidebar} aria-label="Yoru" inert={!look.sidebar}>
-  <header data-tauri-drag-region>
-    <svg class="mini {tint ?? ''}" viewBox="0 0 40 40" aria-hidden="true">
-      <defs>
-        <radialGradient id="side-pearl" cx="0.36" cy="0.32" r="0.75">
-          <stop offset="0" stop-color="#f4f2fa" />
-          <stop offset="0.55" stop-color="#c3bedb" />
-          <stop offset="1" stop-color="#6e6890" />
-        </radialGradient>
-        <linearGradient id="side-tint" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0.45" stop-color="currentColor" stop-opacity="0" />
-          <stop offset="1" stop-color="currentColor" stop-opacity="0.8" />
-        </linearGradient>
-      </defs>
-      <circle class="halo" cx="20" cy="20" r="14" fill="currentColor" />
-      <circle cx="20" cy="20" r="11" fill="url(#side-pearl)" />
-      <circle class="tint" cx="20" cy="20" r="11" fill="url(#side-tint)" />
-      <rect class="eye" x="16.6" y="19" width="2.2" height="5" rx="1.1" fill="#17151f" />
-      <rect class="eye" x="21.2" y="19" width="2.2" height="5" rx="1.1" fill="#17151f" />
-    </svg>
-    <div data-tauri-drag-region>
-      <div class="name" data-tauri-drag-region>Yoru{#if store.preview}<span class="preview" title={t.nav.previewTitle}>{t.nav.preview}</span>{/if}</div>
-      <div class="status" data-tauri-drag-region><span class="dot {status.dot}"></span>{status.text}{#if via && store.boardState === "live"}<span class="faint"> · {via}</span>{/if}</div>
-    </div>
-  </header>
+  <div class="top" data-tauri-drag-region></div>
 
   {#if several}
     <div class="boards" role="group" aria-label={t.boards.title}>
@@ -84,6 +58,10 @@
   </ul>
 
   <footer>
+    <div class="status">
+      <span class="dot {status.dot}"></span>{status.text}{#if via && store.boardState === "live"}<span class="faint"> · {via}</span>{/if}
+      {#if store.preview}<span class="preview" title={t.nav.previewTitle}>{t.nav.preview}</span>{/if}
+    </div>
     {#if quietUntil}
       <div class="dnd on">
         <Icon name="moon" size={16} />
@@ -130,45 +108,6 @@
     opacity: 0;
     visibility: hidden;
   }
-  header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 8px 22px;
-  }
-  .mini {
-    width: 40px;
-    height: 40px;
-    color: transparent;
-    flex-shrink: 0;
-    transition: color 400ms;
-  }
-  .mini.think {
-    color: var(--think);
-  }
-  .mini.done {
-    color: var(--done);
-  }
-  .mini.wait {
-    color: var(--wait);
-  }
-  .halo {
-    opacity: 0.35;
-    filter: blur(4px);
-    animation: breathe 2.6s ease-in-out infinite;
-  }
-  .eye {
-    transform-box: fill-box;
-    transform-origin: 50% 50%;
-    animation: blink 4.6s infinite;
-  }
-  .name {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font: 650 var(--fs-head)/1 var(--display);
-    letter-spacing: -0.01em;
-  }
   .preview {
     padding: 3px 6px;
     border-radius: 6px;
@@ -178,11 +117,15 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
+  .top {
+    height: 6px;
+  }
   .status {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    margin-top: 6px;
+    gap: 4px 6px;
+    margin: 0 10px 10px;
     color: var(--haze);
     font-size: var(--fs-meta);
     white-space: nowrap;
@@ -278,20 +221,5 @@
   }
   .dnd.on span {
     flex: 1;
-  }
-  @keyframes breathe {
-    50% {
-      opacity: 0.6;
-    }
-  }
-  @keyframes blink {
-    0%,
-    94%,
-    100% {
-      transform: scaleY(1);
-    }
-    97% {
-      transform: scaleY(0.1);
-    }
   }
 </style>

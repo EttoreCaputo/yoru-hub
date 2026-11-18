@@ -51,7 +51,7 @@
   </button>
 
   <div class="tabs" role="tablist" data-tauri-drag-region>
-    <button class="tab page" role="tab" class:on={tabs.active < 0} aria-selected={tabs.active < 0} onclick={() => tabs.page()}>
+    <button class="tab pagetab" role="tab" class:on={tabs.active < 0} aria-selected={tabs.active < 0} onclick={() => tabs.page()}>
       <Icon name={PAGE_ICONS[store.page]} size={15} />
       <span class="label">{nav[store.page]}</span>
     </button>
@@ -117,7 +117,7 @@
       background 140ms,
       color 140ms;
   }
-  .tab.page {
+  .tab.pagetab {
     flex: 0 0 auto;
     min-width: 0;
     gap: 7px;

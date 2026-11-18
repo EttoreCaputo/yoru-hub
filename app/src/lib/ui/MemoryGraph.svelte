@@ -1,11 +1,11 @@
 <!--
   The memory drawn as a graph (docs/memory.md): the people and things as
-  glowing nodes, their relations as elastic links with light running along
-  them, and each one's facts as small dots around it. A small spring
+  flat round nodes in their kind's colour with their initial, their relations
+  as elastic links, and each one's facts as small dots around it. A small spring
   simulation (no library: a personal memory is a few hundred nodes) keeps it
   alive: nodes float, bounce and spring back. Drag a node to stretch it (fling
   it and it flies back), drag the background to pan, scroll to zoom, click a
-  node to open its card.
+  node (or one of its facts) to open its card, click the background to close it.
 -->
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
@@ -24,32 +24,36 @@
     relationName,
     kindName,
     sectionName,
+    inset = 0,
   }: {
     graph: Graph;
     selected: number | null;
     showFacts: boolean;
-    onselect: (id: number) => void;
+    onselect: (id: number | null, fact?: number) => void;
     youName: (name: string) => string;
     relationName: (kind: string) => string;
     kindName: (kind: string) => string;
     sectionName: (section: string) => string;
+    /** Pixels on the right a card covers: a node is centred in what's left. */
+    inset?: number;
   } = $props();
 
+  // The app's own colours (app.css), so the graph follows the theme.
   const KIND_COLOURS: Record<string, string> = {
-    person: "#4aa3ff",
-    place: "#40e080",
-    project: "#ff9f43",
-    organisation: "#b98cff",
-    app: "#ff6fae",
-    topic: "#f2d14b",
-    thing: "#a19cba",
+    person: "var(--think)",
+    place: "var(--done)",
+    project: "var(--wait)",
+    organisation: "#8b6cf0",
+    app: "#e0559a",
+    topic: "#d4a514",
+    thing: "var(--dusk)",
   };
   const SECTION_COLOURS: Record<string, string> = {
-    about: "#c3bedb",
-    matters: "#40e080",
-    tell: "#4aa3ff",
-    quiet: "#ff5a5a",
-    notes: "#a19cba",
+    about: "var(--pearl-mid)",
+    matters: "var(--done)",
+    tell: "var(--think)",
+    quiet: "var(--wrong)",
+    notes: "var(--dusk)",
   };
 
   type Node = {
@@ -110,7 +114,7 @@
     // The user first, so it blooms first and everything grows out of it.
     for (const e of [...graph.entities].sort((a, b) => Number(b.is_user) - Number(a.is_user))) {
       const key = `e${e.id}`;
-      const r = e.is_user ? 26 : 11 + Math.min(11, Math.sqrt(factCount(e.id)) * 3);
+      const r = e.is_user ? 24 : 14 + Math.min(8, Math.sqrt(factCount(e.id)) * 2.5);
       next.set(key, { ...make(key, undefined, e.is_user ? 0 : 60, r), entity: e });
     }
     const out: Link[] = [];
@@ -171,7 +175,7 @@
     const facts = nodes.filter((n) => n.fact);
     for (let i = 0; i < entities.length; i++) {
       const a = entities[i];
-      for (let j = i + 1; j < entities.length; j++) repel(a, entities[j], 5200);
+      for (let j = i + 1; j < entities.length; j++) repel(a, entities[j], 9000);
       for (const f of facts) if (f.owner !== a.key) repel(a, f, 300);
     }
     const groups = new Map<string, Node[]>();
@@ -244,7 +248,7 @@
         const a = nodes[i];
         const b = nodes[j];
         if (a.fact && b.fact && a.owner !== b.owner) continue;
-        const pad = a.entity && b.entity ? 34 : 4;
+        const pad = a.entity && b.entity ? 48 : 4;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const d = Math.hypot(dx, dy) || 0.01;
@@ -269,10 +273,17 @@
   let svg: SVGSVGElement | undefined = $state();
   let dragging: { node?: Node; startX: number; startY: number; viewX: number; viewY: number; moved: boolean; lastX: number; lastY: number } | null = null;
   let touched = false;
+  let legendHeight = $state(0);
+  // A new size (the window, the card opened beside it): frame it again, unless the user took the camera.
+  $effect(() => {
+    void width;
+    void height;
+    if (!touched && age > 60) fit();
+  });
 
   function glide() {
     // Frame it as it unfolds, unless the user took the camera.
-    if (!touched && (age === 60 || age === 200)) fit();
+    if (!touched && age >= 60 && age <= 480 && age % 60 === 0) fit();
     if (!goal) return;
     const e = 0.1;
     view = { x: view.x + (goal.x - view.x) * e, y: view.y + (goal.y - view.y) * e, k: view.k + (goal.k - view.k) * e };
@@ -319,9 +330,9 @@
     if (d.moved) return;
     const id = d.node?.entity?.id ?? (d.node?.fact ? (d.node.fact.about ?? userId()) : null);
     if (id !== null && id !== undefined) {
-      onselect(id);
+      onselect(id, d.node?.fact?.id);
       centre(`e${id}`);
-    }
+    } else if (!d.node) onselect(null);
   }
 
   function wheel(ev: WheelEvent) {
@@ -337,7 +348,7 @@
   /** Glide so node `key` is in the middle. */
   function centre(key: string) {
     const n = byKey.get(key);
-    if (n) goal = { x: -n.x * view.k, y: -n.y * view.k, k: view.k };
+    if (n) goal = { x: -n.x * view.k - inset / 2, y: -n.y * view.k, k: view.k };
   }
 
   /** Glide to fit everything in view. */
@@ -346,8 +357,10 @@
     const xs = nodes.map((n) => n.x);
     const ys = nodes.map((n) => n.y);
     const [x0, x1, y0, y1] = [Math.min(...xs) - 70, Math.max(...xs) + 70, Math.min(...ys) - 60, Math.max(...ys) + 60];
-    const k = Math.min(1.6, width / (x1 - x0), height / (y1 - y0));
-    goal = { k, x: (-(x0 + x1) / 2) * k, y: (-(y0 + y1) / 2) * k };
+    // The legend takes the top: the graph goes under it.
+    const top = legendHeight + 20;
+    const k = Math.min(1.15, width / (x1 - x0), (height - top) / (y1 - y0));
+    goal = { k, x: (-(x0 + x1) / 2) * k, y: (-(y0 + y1) / 2) * k + top / 2 };
   }
 
   // ---- what to draw ----
@@ -394,7 +407,8 @@
     return { links: ls, nodes: [...nodes].sort((a, b) => (a.fact ? 0 : 1) - (b.fact ? 0 : 1)).map((n) => ({ n, p: at(n) })) };
   });
 
-  const colourOf = (n: Node) => (n.entity ? (n.entity.is_user ? "#ece9f5" : KIND_COLOURS[n.entity.kind] ?? KIND_COLOURS.thing) : SECTION_COLOURS[n.fact!.section] ?? "#a19cba");
+  const colourOf = (n: Node) => (n.entity ? (n.entity.is_user ? "var(--pearl)" : KIND_COLOURS[n.entity.kind] ?? KIND_COLOURS.thing) : SECTION_COLOURS[n.fact!.section] ?? "var(--dusk)");
+  const initial = (e: Entity) => (e.placeholder ? "?" : ([...e.name.trim()][0] ?? "?").toUpperCase());
   const nameOf = (e: Entity) => (e.is_user ? youName(e.name) : e.name);
   const kindsShown = $derived([...new Set(graph.entities.filter((e) => !e.is_user).map((e) => e.kind))]);
   const sectionsShown = $derived(showFacts ? [...new Set(graph.facts.filter((f) => f.to === null).map((f) => f.section))] : []);
@@ -414,17 +428,6 @@
     onpointercancel={() => (dragging = null)}
     onwheel={wheel}
   >
-    <defs>
-      <filter id="mg-glow" x="-100%" y="-100%" width="300%" height="300%">
-        <feGaussianBlur stdDeviation="7" result="blur" />
-        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-      </filter>
-      <radialGradient id="mg-shine" cx="35%" cy="30%" r="70%">
-        <stop offset="0%" stop-color="#fff" stop-opacity="0.55" />
-        <stop offset="45%" stop-color="#fff" stop-opacity="0.08" />
-        <stop offset="100%" stop-color="#000" stop-opacity="0.25" />
-      </radialGradient>
-    </defs>
     <g transform="translate({width / 2 + view.x} {height / 2 + view.y}) scale({view.k})">
       {#each drawn.links as { l, q }, i (i)}
         {@const lit = !near || (near.has(l.a.key) && near.has(l.b.key))}
@@ -449,15 +452,15 @@
         >
           {#if n.entity}
             {#if n.entity.id === selected}
-              <circle r={n.r + 7} class="halo" style:stroke={colourOf(n)} />
+              <circle r={n.r + 5} class="halo" style:stroke={colourOf(n)} />
             {/if}
-            <circle r={n.r} fill={colourOf(n)} class="body" class:placeholder={n.entity.placeholder} class:user={n.entity.is_user} filter={n.entity.placeholder ? undefined : "url(#mg-glow)"} />
-            {#if !n.entity.placeholder}<circle r={n.r} fill="url(#mg-shine)" class="shine" />{/if}
+            <circle r={n.r} class="body" class:placeholder={n.entity.placeholder} class:user={n.entity.is_user} style:--c={colourOf(n)} />
+            <text class="initial" class:user={n.entity.is_user} style:--c={colourOf(n)} style:font-size="{Math.round(n.r * 0.85)}px" dy="0.35em">{initial(n.entity)}</text>
             {#if graph.voices.includes(n.entity.id)}<circle r="4" cx={n.r * 0.72} cy={-n.r * 0.72} class="voice" />{/if}
-            <text class="name" y={n.r + 15}>{nameOf(n.entity)}</text>
-            {#if n.entity.label && !n.entity.is_user}<text class="label" y={n.r + 28}>{n.entity.label}</text>{/if}
+            <text class="name" y={n.r + 16}>{nameOf(n.entity)}</text>
+            {#if n.entity.label && !n.entity.is_user}<text class="label" y={n.r + 29}>{n.entity.label}</text>{/if}
           {:else}
-            <circle r={n.r} fill={colourOf(n)} class="dot" class:private={n.fact?.private} />
+            <circle r={n.r} class="dot" class:private={n.fact?.private} style:fill={colourOf(n)} />
           {/if}
         </g>
       {/each}
@@ -478,8 +481,8 @@
     </div>
   {/if}
 
-  <div class="legend">
-    {#each kindsShown as k}<span><i style:background={KIND_COLOURS[k] ?? KIND_COLOURS.thing} style:box-shadow="0 0 8px {KIND_COLOURS[k] ?? KIND_COLOURS.thing}"></i>{kindName(k)}</span>{/each}
+  <div class="legend" bind:clientHeight={legendHeight}>
+    {#each kindsShown as k}<span><i style:background={KIND_COLOURS[k] ?? KIND_COLOURS.thing}></i>{kindName(k)}</span>{/each}
     {#each sectionsShown as s}<span><i class="small" style:background={SECTION_COLOURS[s]}></i>{sectionName(s)}</span>{/each}
   </div>
 </div>
@@ -487,15 +490,10 @@
 <style>
   .graph {
     position: relative;
-    height: min(62vh, 620px);
-    min-height: 380px;
-    border-radius: var(--r-lg);
-    border: 1px solid var(--rim);
-    /* A faint grid of dots that pans with the graph, under a soft light. */
-    background:
-      radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--pearl-deep) 20%, transparent) 0%, transparent 65%),
-      radial-gradient(circle, color-mix(in srgb, var(--pearl-mid) 13%, transparent) 1px, transparent 1.5px) var(--px) var(--py) / 26px 26px,
-      var(--ink);
+    height: 100%;
+    min-height: 0;
+    /* A faint grid of dots that pans with the graph. */
+    background: radial-gradient(circle, var(--rim-2) 1px, transparent 1.5px) var(--px) var(--py) / 24px 24px, var(--night);
     overflow: hidden;
     user-select: none;
   }
@@ -509,32 +507,32 @@
   }
   .link {
     fill: none;
-    stroke: color-mix(in srgb, var(--pearl-mid) 40%, transparent);
-    stroke-width: 1.5;
+    stroke: color-mix(in srgb, var(--pearl-mid) 45%, transparent);
+    stroke-width: 1.25;
     stroke-linecap: round;
     transition:
       opacity 0.2s,
       stroke 0.2s;
   }
   .link.hot {
-    stroke: color-mix(in srgb, var(--pearl) 75%, transparent);
-    stroke-width: 2;
+    stroke: var(--haze);
+    stroke-width: 1.75;
   }
   .link.loose {
-    stroke: color-mix(in srgb, var(--pearl-mid) 13%, transparent);
-    stroke-dasharray: 2 6;
+    stroke: color-mix(in srgb, var(--pearl-mid) 30%, transparent);
+    stroke-dasharray: 2 5;
   }
   .link.fact {
-    stroke: color-mix(in srgb, var(--pearl-mid) 18%, transparent);
+    stroke: color-mix(in srgb, var(--pearl-mid) 30%, transparent);
     stroke-width: 1;
   }
   .rel {
-    fill: var(--haze);
+    fill: var(--dusk);
     font: 500 var(--fs-small) var(--sans);
     text-anchor: middle;
     paint-order: stroke;
-    stroke: var(--ink);
-    stroke-width: 3px;
+    stroke: var(--night);
+    stroke-width: 4px;
     pointer-events: none;
     transition: opacity 0.2s;
   }
@@ -544,75 +542,79 @@
     transition: opacity 0.25s;
   }
   .dim {
-    opacity: 0.16;
+    opacity: 0.2;
   }
+  /* Flat, like the rest of the app: a soft tint of the kind's colour, its rim, its initial. */
   .body {
-    stroke: color-mix(in srgb, var(--ink) 50%, transparent);
+    fill: color-mix(in srgb, var(--c) 14%, var(--night));
+    stroke: var(--c);
     stroke-width: 1.5;
   }
   .body.user {
-    stroke: color-mix(in srgb, var(--pearl) 35%, transparent);
-    stroke-width: 7;
+    fill: var(--pearl);
+    stroke: none;
   }
   .body.placeholder {
-    fill-opacity: 0.2;
-    stroke: currentColor;
+    fill: var(--night);
     stroke-dasharray: 3 3;
-    color: var(--haze);
-    stroke-width: 1.5;
   }
-  .shine {
+  .initial {
+    fill: var(--c);
+    font-family: var(--display);
+    font-weight: 600;
+    text-anchor: middle;
     pointer-events: none;
+  }
+  .initial.user {
+    fill: var(--night);
   }
   .halo {
     fill: none;
-    stroke-width: 2;
-    opacity: 0.8;
+    stroke-width: 1.5;
+    opacity: 0.45;
   }
   .voice {
     fill: var(--done);
-    stroke: var(--ink);
-    stroke-width: 1.5;
+    stroke: var(--night);
+    stroke-width: 2;
   }
   .dot {
-    stroke: var(--ink);
-    stroke-width: 1;
+    stroke: var(--night);
+    stroke-width: 1.5;
   }
   .dot.private {
     stroke: var(--wrong);
-    stroke-width: 1.5;
   }
   .name {
     fill: var(--pearl);
     font: 600 var(--fs-meta) var(--sans);
     text-anchor: middle;
     paint-order: stroke;
-    stroke: var(--ink);
-    stroke-width: 3px;
+    stroke: var(--night);
+    stroke-width: 4px;
     pointer-events: none;
   }
   .label {
-    fill: var(--haze);
+    fill: var(--dusk);
     font: 500 var(--fs-small) var(--sans);
     text-anchor: middle;
     paint-order: stroke;
-    stroke: var(--ink);
-    stroke-width: 3px;
+    stroke: var(--night);
+    stroke-width: 4px;
     pointer-events: none;
   }
   .tip {
     position: absolute;
     max-width: 280px;
-    padding: 7px 10px;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--ink-3) 88%, transparent);
-    backdrop-filter: blur(8px);
-    border: 1px solid var(--rim);
+    padding: 8px 11px;
+    border-radius: var(--r-md);
+    background: var(--night);
+    border: 1px solid var(--rim-2);
     color: var(--pearl);
     font-size: var(--fs-meta);
     line-height: 1.35;
     pointer-events: none;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--lift);
     animation: rise 0.18s ease-out;
   }
   @keyframes rise {
@@ -628,23 +630,28 @@
   }
   .legend {
     position: absolute;
-    left: 12px;
-    bottom: 10px;
+    left: 16px;
+    top: 14px;
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 12px;
-    font-size: var(--fs-small);
-    color: var(--haze);
+    gap: 6px;
+    max-width: calc(100% - 32px);
     pointer-events: none;
   }
   .legend span {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
+    padding: 3px 9px 3px 8px;
+    border: 1px solid var(--rim-2);
+    border-radius: 999px;
+    background: var(--night);
+    color: var(--haze);
+    font-size: var(--fs-small);
   }
   .legend i {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
   }
   .legend i.small {

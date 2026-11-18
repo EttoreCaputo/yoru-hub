@@ -82,6 +82,15 @@ const en = {
     listening: "Listening… click the microphone again when you're done",
   },
 
+  bubble: {
+    title: "Yoru",
+    hello: "Ask me something, or tell me what to fix in what I know.",
+    new: "New conversation",
+    grow: "Open in a tab",
+    close: "Close",
+    open: "Talk to Yoru",
+  },
+
   card: {
     yoruAsks: "Yoru asks first",
     allow: "Allow",
@@ -380,15 +389,11 @@ const en = {
 
   memory: {
     title: "Memory",
-    lede: "What Yoru knows about you and your world. Click a line to fix it.",
+    lede: "What Yoru knows about you and your world. Click a node to fix it, or tell him.",
     history: "History",
-    graph: "Graph",
-    list: "List",
     showFacts: "Facts",
     fit: "Fit",
-    people: "People and things",
     you: (name: string) => (name === "User" ? "You" : `${name} (you)`),
-    noName: "name not known yet",
     voiceKnown: "voice known",
     newName: "Someone or something new",
     add: "Add",
@@ -425,9 +430,22 @@ const en = {
     deleteConfirm: "Delete this line for good? (If it was true and no longer is, use No longer true: Yoru keeps it as history.)",
     deleteSure: "Delete",
     wasTrue: (from: string, to: string) => `true from ${from} to ${to}`,
-    none: "Nothing yet",
     noneHint: "Yoru adds what it learns as you talk; you can write something here too.",
     newFact: (name: string) => `Something true of ${name}`,
+    tell: "Tell Yoru",
+    tellAbout: (name: string) => `Tell Yoru about ${name}`,
+    me: "me",
+    draftAbout: (name: string) => `About ${name}: `,
+    newTitle: "Someone or something new",
+    close: "Close",
+    youTag: "You",
+    kind: "What it is",
+    gender: "Gender",
+    cancel: "Cancel",
+    links: "Links",
+    knows: "What he knows",
+    editHint: "Click to fix",
+    section: "Section",
   },
 
   meetings: {

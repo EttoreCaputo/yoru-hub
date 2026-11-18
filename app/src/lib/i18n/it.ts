@@ -80,6 +80,15 @@ const it: Messages = {
     listening: "Ti ascolto… clicca di nuovo il microfono quando hai finito",
   },
 
+  bubble: {
+    title: "Yoru",
+    hello: "Chiedimi qualcosa, o dimmi cosa correggere di quello che so.",
+    new: "Nuova conversazione",
+    grow: "Apri in una scheda",
+    close: "Chiudi",
+    open: "Parla con Yoru",
+  },
+
   card: {
     yoruAsks: "Yoru chiede prima",
     allow: "Consenti",
@@ -378,15 +387,11 @@ const it: Messages = {
 
   memory: {
     title: "Memoria",
-    lede: "Quello che Yoru sa di te e del tuo mondo. Clicca una riga per correggerla.",
+    lede: "Quello che Yoru sa di te e del tuo mondo. Clicca un nodo per correggerlo, o diglielo.",
     history: "Storico",
-    graph: "Grafo",
-    list: "Elenco",
     showFacts: "Fatti",
     fit: "Inquadra",
-    people: "Persone e cose",
     you: (name: string) => (name === "User" ? "Tu" : `${name} (tu)`),
-    noName: "nome non ancora noto",
     voiceKnown: "voce nota",
     newName: "Qualcuno o qualcosa di nuovo",
     add: "Aggiungi",
@@ -423,9 +428,22 @@ const it: Messages = {
     deleteConfirm: "Eliminare questa riga per sempre? (Se era vera e non lo è più, usa Non è più vero: Yoru la tiene nello storico.)",
     deleteSure: "Elimina",
     wasTrue: (from: string, to: string) => `vero dal ${from} al ${to}`,
-    none: "Ancora niente",
     noneHint: "Yoru aggiunge quello che impara mentre parlate; puoi anche scriverlo qui.",
     newFact: (name: string) => `Qualcosa di vero su ${name}`,
+    tell: "Dillo a Yoru",
+    tellAbout: (name: string) => `Racconta a Yoru di ${name}`,
+    me: "me",
+    draftAbout: (name: string) => `Su ${name}: `,
+    newTitle: "Qualcuno o qualcosa di nuovo",
+    close: "Chiudi",
+    youTag: "Tu",
+    kind: "Che cos'è",
+    gender: "Genere",
+    cancel: "Annulla",
+    links: "Legami",
+    knows: "Cosa sa",
+    editHint: "Clicca per correggere",
+    section: "Sezione",
   },
 
   meetings: {

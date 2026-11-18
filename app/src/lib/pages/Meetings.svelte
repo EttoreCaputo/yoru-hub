@@ -568,6 +568,7 @@
     gap: 8px;
   }
   .source {
+    position: relative;
     justify-items: center;
     gap: 6px;
     width: 88px;

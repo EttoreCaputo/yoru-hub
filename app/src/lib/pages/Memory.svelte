@@ -1,14 +1,19 @@
 <!--
   What Yoru knows, as a graph (docs/memory.md): the people and things in
   your life, what is true of each, and what used to be. Yoru writes it as you
-  talk and while it rests; here you correct it. Read again when you come
-  back, since Yoru may have learnt something meanwhile.
+  talk and while it rests; here you correct it, in the graph itself: a click
+  on a node (or one of its facts) opens its card over the graph, where its
+  name, links and facts are changed in place. Or you tell Yoru, from his
+  chat at the bottom right. Read again when you come back, since Yoru may
+  have learnt something meanwhile.
 -->
 <script lang="ts">
   import { call, why } from "../api";
+  import { bubble } from "../bubble.svelte";
   import { i18n } from "../i18n/index.svelte";
+  import { store } from "../store.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
-  import Toggle from "../ui/Toggle.svelte";
+  import Icon from "../ui/Icon.svelte";
   import MemoryGraph from "../ui/MemoryGraph.svelte";
 
   type Fact = { id: number; about: number | null; section: string; text: string; from: number; to: number | null; importance: number; private: boolean; episode: number | null };
@@ -23,19 +28,26 @@
   const t = $derived(i18n.t.memory);
   let graph = $state<Graph>({ entities: [], facts: [], relations: [], voices: [] });
   let error = $state("");
-  let history = $state(false);
   let selected = $state<number | null>(null);
+  /** The fact clicked in the graph, lit in the card. */
+  let lit = $state<number | null>(null);
 
   async function load() {
     try {
       graph = await call<Graph>("memory_graph");
-      if (selected === null || !graph.entities.some((e) => e.id === selected)) selected = user()?.id ?? null;
+      if (selected !== null && !graph.entities.some((e) => e.id === selected)) selected = null;
     } catch (e) {
       error = why(e);
     }
   }
   $effect(() => {
     void load();
+  });
+  // What's said to Yoru (from his chat here) may change what he knows.
+  $effect(() => {
+    void store.chat.length;
+    const again = setTimeout(load, 1500);
+    return () => clearTimeout(again);
   });
 
   /** Run `cmd`, then read the graph again. */
@@ -51,32 +63,42 @@
 
   const user = () => graph.entities.find((e) => e.is_user);
   const entity = $derived(graph.entities.find((e) => e.id === selected) ?? null);
-  const others = $derived(graph.entities.filter((e) => !e.is_user).sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "person" ? -1 : b.kind === "person" ? 1 : a.kind.localeCompare(b.kind))));
   const aboutOf = (f: Fact) => f.about ?? user()?.id ?? null;
   const factsOf = (id: number) => graph.facts.filter((f) => aboutOf(f) === id && (history || f.to === null));
-  const openCount = (id: number) => graph.facts.filter((f) => aboutOf(f) === id && f.to === null).length;
-  const nameOf = (id: number) => graph.entities.find((e) => e.id === id)?.name ?? `#${id}`;
-  const relationsOf = (id: number) => graph.relations.filter((r) => r.a === id || r.b === id);
+  const nameOf = (id: number) => {
+    const e = graph.entities.find((x) => x.id === id);
+    return e ? (e.is_user ? t.you(e.name) : e.name) : `#${id}`;
+  };
+  const relationsOf = (id: number) => graph.relations.filter((r) => r.to === null && (r.a === id || r.b === id));
   const day = (ms: number) => i18n.date(ms, { day: "numeric", month: "short", year: "numeric" });
 
-  // A new fact about the one selected.
-  let draft = $state({ text: "", section: "about" as string, important: false, private: false });
-  async function addFact() {
-    if (!draft.text.trim() || selected === null) return;
-    await act("memory_put_fact", { fact: { id: 0, about: selected, section: draft.section, text: draft.text.trim(), from: 0, to: null, importance: draft.important ? 0.9 : 0.5, private: draft.private, episode: null } });
-    draft = { ...draft, text: "", important: false, private: false };
+  // What the graph shows, remembered on this computer.
+  const read = (key: string, fallback: string) => {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  let showFacts = $state(read("memory.facts", "1") === "1");
+  let history = $state(false);
+  $effect(() => {
+    try {
+      localStorage.setItem("memory.facts", showFacts ? "1" : "0");
+    } catch {
+      // Not kept: fine.
+    }
+  });
+  let drawing = $state<MemoryGraph>();
+
+  function pick(id: number | null, fact?: number) {
+    selected = id;
+    lit = fact ?? null;
+    adding = false;
   }
 
-  // A fact being corrected.
-  let editing = $state<number | null>(null);
-  let editText = $state("");
-  async function saveFact(f: Fact) {
-    if (editText.trim() && editText.trim() !== f.text) await act("memory_put_fact", { fact: { ...f, text: editText.trim() } });
-    editing = null;
-  }
-  const flag = (f: Fact, change: Partial<Fact>) => act("memory_put_fact", { fact: { ...f, ...change } });
-
-  // Someone new.
+  // Someone or something new, from the head's Add.
+  let adding = $state(false);
   let newName = $state("");
   let newKind = $state("person");
   async function addEntity() {
@@ -85,105 +107,217 @@
     try {
       selected = await call<number>("memory_add_entity", { name: newName.trim(), kind: newKind });
       newName = "";
+      adding = false;
     } catch (e) {
       error = why(e);
     }
     await load();
   }
 
-  // The one selected, being edited.
+  // The card: the one selected, its fields as typed.
   let card = $state<Entity | null>(null);
-  $effect(() => {
-    card = entity ? { ...entity, aliases: [...entity.aliases] } : null;
-  });
-  const cardDirty = $derived(!!card && !!entity && (card.name !== entity.name || card.summary !== entity.summary || card.kind !== entity.kind || card.gender !== entity.gender || card.aliases.join(", ") !== entity.aliases.join(", ")));
   let aliases = $state("");
   $effect(() => {
+    card = entity ? { ...entity, aliases: [...entity.aliases] } : null;
     aliases = entity?.aliases.join(", ") ?? "";
   });
+  const dirty = $derived(
+    !!card && !!entity && (card.name !== entity.name || card.summary !== entity.summary || card.kind !== entity.kind || card.gender !== entity.gender || aliases !== entity.aliases.join(", ")),
+  );
   async function saveEntity() {
     if (!card) return;
     const list = aliases.split(",").map((a) => a.trim()).filter(Boolean);
     await act("memory_put_entity", { entity: { ...card, aliases: list, placeholder: card.placeholder && card.name === entity?.name } });
   }
+  function fieldKey(e: KeyboardEvent) {
+    if (e.key === "Enter") void saveEntity();
+  }
 
-  // List or graph, remembered on this computer.
-  const read = (key: string, fallback: string) => {
-    try {
-      return localStorage.getItem(key) ?? fallback;
-    } catch {
-      return fallback;
-    }
-  };
-  let mode = $state<"list" | "graph">(read("memory.view", "graph") === "list" ? "list" : "graph");
-  let showFacts = $state(read("memory.facts", "1") === "1");
-  $effect(() => {
-    try {
-      localStorage.setItem("memory.view", mode);
-      localStorage.setItem("memory.facts", showFacts ? "1" : "0");
-    } catch {
-      // Not kept: fine.
-    }
-  });
-  let drawing = $state<MemoryGraph>();
+  // A fact being corrected, and a new one.
+  let editing = $state<number | null>(null);
+  let editText = $state("");
+  async function saveFact(f: Fact) {
+    if (editText.trim() && editText.trim() !== f.text) await act("memory_put_fact", { fact: { ...f, text: editText.trim() } });
+    editing = null;
+  }
+  const flag = (f: Fact, change: Partial<Fact>) => act("memory_put_fact", { fact: { ...f, ...change } });
+  let draft = $state({ text: "", section: "about" as string });
+  async function addFact() {
+    if (!draft.text.trim() || selected === null) return;
+    await act("memory_put_fact", { fact: { id: 0, about: selected, section: draft.section, text: draft.text.trim(), from: 0, to: null, importance: 0.5, private: false, episode: null } });
+    draft = { ...draft, text: "" };
+  }
 
-  let mergeInto = $state<number | "">("");
   let relKind = $state("partner");
   let relTo = $state<number | "">("");
+  let mergeInto = $state<number | "">("");
+
+  /** Yoru's chat, opened on what's selected. */
+  const tellYoru = () => bubble.show(entity && !entity.is_user ? t.draftAbout(entity.name) : "");
 </script>
 
-<div class="page memory">
-  <div class="page-head">
-    <div>
+<section class="memory">
+  <header class="head">
+    <div class="what">
       <h1>{t.title}</h1>
       <p class="lede">{t.lede}</p>
     </div>
     <div class="actions">
-      <div class="seg" role="tablist">
-        <button role="tab" aria-selected={mode === "graph"} class:on={mode === "graph"} onclick={() => (mode = "graph")}>{t.graph}</button>
-        <button role="tab" aria-selected={mode === "list"} class:on={mode === "list"} onclick={() => (mode = "list")}>{t.list}</button>
-      </div>
-      <Toggle checked={history} label={t.history} onchange={(on) => (history = on)} />
-      <span class="dim small">{t.history}</span>
+      <button class="chip small" class:on={showFacts} aria-pressed={showFacts} onclick={() => (showFacts = !showFacts)}>{t.showFacts}</button>
+      <button class="chip small" class:on={history} aria-pressed={history} onclick={() => (history = !history)}>{t.history}</button>
+      <button class="icon-btn" title={t.fit} aria-label={t.fit} onclick={() => drawing?.fit()}><Icon name="scan" /></button>
+      <button class="btn" onclick={tellYoru}><Icon name="message-circle" size={15} />{t.tell}</button>
+      <button class="btn primary" onclick={() => ((adding = !adding), (selected = null))}><Icon name="plus" size={15} stroke={2.25} />{t.add}</button>
     </div>
-  </div>
+  </header>
 
-  {#if error}<p class="error-text">{error}</p>{/if}
+  {#if error}<p class="error-text err">{error}</p>{/if}
 
-  {#snippet addNew()}
-      <div class="add-entity">
-        <input type="text" placeholder={t.newName} bind:value={newName} onkeydown={(e) => e.key === "Enter" && addEntity()} />
-        <select bind:value={newKind}>
-          {#each KINDS as k}<option value={k}>{t.kinds[k] ?? k}</option>{/each}
-        </select>
-        <button class="btn small" disabled={!newName.trim()} onclick={addEntity}>{t.add}</button>
+  <div class="stage">
+    <MemoryGraph
+      bind:this={drawing}
+      {graph}
+      {selected}
+      {showFacts}
+      onselect={pick}
+      youName={t.you}
+      relationName={(k) => t.relations[k] ?? k}
+      kindName={(k) => t.kinds[k] ?? k}
+      sectionName={(k) => t.sections[k] ?? k}
+      inset={adding || entity ? 372 : 0}
+    />
+
+    {#if adding}
+      <div class="card add">
+        <div class="card-top">
+          <b>{t.newTitle}</b>
+          <button class="icon-btn small" aria-label={t.close} title={t.close} onclick={() => (adding = false)}><Icon name="x" size={15} /></button>
+        </div>
+        <input type="text" placeholder={t.newName} bind:value={newName} {@attach (el: HTMLInputElement) => el.focus()} onkeydown={(e) => e.key === "Enter" && addEntity()} />
+        <div class="row">
+          <select class="compact" bind:value={newKind}>
+            {#each KINDS as k}<option value={k}>{t.kinds[k] ?? k}</option>{/each}
+          </select>
+          <button class="btn small primary" disabled={!newName.trim()} onclick={addEntity}>{t.add}</button>
+        </div>
       </div>
-  {/snippet}
+    {:else if entity && card}
+      <aside class="card inspector">
+        <div class="card-top">
+          {#if entity.is_user}
+            <span class="tag">{t.youTag}</span>
+          {:else}
+            <select class="compact kind" bind:value={card.kind} aria-label={t.kind}>
+              {#each KINDS as k}<option value={k}>{t.kinds[k] ?? k}</option>{/each}
+            </select>
+          {/if}
+          {#if graph.voices.includes(entity.id)}<span class="tag done">{t.voiceKnown}</span>{/if}
+          <button class="icon-btn small close" aria-label={t.close} title={t.close} onclick={() => pick(null)}><Icon name="x" size={15} /></button>
+        </div>
 
-  {#snippet detail()}
-    {#if entity && card}
-      <section class="detail">
-        <div class="panel">
-          <div class="card-head">
-            <input type="text" class="name" bind:value={card.name} aria-label={t.name} />
-            {#if !entity.is_user}
-              <select bind:value={card.kind}>
-                {#each KINDS as k}<option value={k}>{t.kinds[k] ?? k}</option>{/each}
-              </select>
-            {/if}
-            {#if card.kind === "person"}
-              <select bind:value={card.gender}>
-                <option value={null}>{t.genderUnknown}</option>
-                <option value="f">{t.genderF}</option>
-                <option value="m">{t.genderM}</option>
-              </select>
-            {/if}
+        <input type="text" class="bare name" bind:value={card.name} aria-label={t.name} onkeydown={fieldKey} />
+        {#if entity.label}<p class="faint meta">{entity.label}</p>{/if}
+        <input type="text" class="bare" placeholder={t.summary} bind:value={card.summary} aria-label={t.summary} onkeydown={fieldKey} />
+        <input type="text" class="bare" placeholder={t.aliases} bind:value={aliases} aria-label={t.aliases} onkeydown={fieldKey} />
+        {#if card.kind === "person"}
+          <select class="compact gender" bind:value={card.gender} aria-label={t.gender}>
+            <option value={null}>{t.genderUnknown}</option>
+            <option value="f">{t.genderF}</option>
+            <option value="m">{t.genderM}</option>
+          </select>
+        {/if}
+        {#if dirty}
+          <div class="row">
+            <button class="btn small primary" onclick={saveEntity}>{t.save}</button>
+            <button class="btn small quiet" onclick={() => ((card = { ...entity, aliases: [...entity.aliases] }), (aliases = entity.aliases.join(", ")))}>{t.cancel}</button>
           </div>
-          {#if entity.label}<p class="dim small">{entity.label}</p>{/if}
-          <input type="text" class="summary" placeholder={t.summary} bind:value={card.summary} />
-          <input type="text" class="summary" placeholder={t.aliases} bind:value={aliases} />
-          <div class="row actions">
-            <button class="btn small primary" disabled={!cardDirty && aliases === entity.aliases.join(", ")} onclick={saveEntity}>{t.save}</button>
+        {/if}
+
+        <h3>{t.links}</h3>
+        <ul class="lines">
+          {#each relationsOf(entity.id) as r (r.id)}
+            <li>
+              <span class="text">{t.relation(nameOf(r.a), t.relations[r.kind] ?? r.kind, nameOf(r.b))}</span>
+              <span class="tools"><button class="icon-btn small" aria-label={t.unrelate} title={t.unrelate} onclick={() => act("memory_unrelate", { id: r.id })}><Icon name="x" size={14} /></button></span>
+            </li>
+          {/each}
+        </ul>
+        {#if entity.kind === "person"}
+          <div class="row relate">
+            <span class="faint">{t.isThe(entity.is_user ? t.you(entity.name) : entity.name)}</span>
+            <select class="compact" bind:value={relKind}>
+              {#each RELATIONS as k}<option value={k}>{t.relations[k] ?? k}</option>{/each}
+            </select>
+            <span class="faint">{t.of}</span>
+            <select class="compact" bind:value={relTo}>
+              <option value="">—</option>
+              {#each graph.entities.filter((e) => e.id !== entity.id && e.kind === "person") as e (e.id)}<option value={e.id}>{e.is_user ? t.you(e.name) : e.name}</option>{/each}
+            </select>
+            <button class="icon-btn small outline" disabled={relTo === ""} aria-label={t.add} title={t.add} onclick={() => { const b = relTo as number; relTo = ""; void act("memory_relate", { a: entity.id, kind: relKind, b }); }}><Icon name="plus" size={14} /></button>
+          </div>
+        {/if}
+
+        <h3>{t.knows}</h3>
+        {#each SECTIONS as s}
+          {@const facts = factsOf(entity.id).filter((f) => f.section === s)}
+          {#if facts.length}
+            <p class="section">{t.sections[s]}</p>
+            <ul class="lines">
+              {#each facts as f (f.id)}
+                <li class:closed={f.to !== null} class:lit={lit === f.id}>
+                  {#if editing === f.id}
+                    <input
+                      type="text"
+                      class="compact edit"
+                      bind:value={editText}
+                      {@attach (el: HTMLInputElement) => el.focus()}
+                      onblur={() => saveFact(f)}
+                      onkeydown={(e) => (e.key === "Enter" ? saveFact(f) : e.key === "Escape" ? (editing = null) : null)}
+                    />
+                  {:else}
+                    <button class="text" disabled={f.to !== null} title={f.to === null ? t.editHint : undefined} onclick={() => ((editing = f.id), (editText = f.text))}>
+                      {f.text}
+                      {#if f.to !== null}<span class="faint when">{t.wasTrue(day(f.from), day(f.to))}</span>{/if}
+                    </button>
+                    {#if f.importance >= 0.8}<span class="mark" title={t.important}><Icon name="star" size={13} /></span>{/if}
+                    {#if f.private}<span class="mark" title={t.private}><Icon name="lock" size={13} /></span>{/if}
+                    <span class="tools">
+                      {#if f.to === null}
+                        <button class="icon-btn small" class:on={f.importance >= 0.8} title={f.importance >= 0.8 ? t.notImportant : t.makeImportant} aria-label={f.importance >= 0.8 ? t.notImportant : t.makeImportant} onclick={() => flag(f, { importance: f.importance >= 0.8 ? 0.5 : 0.9 })}><Icon name="star" size={14} /></button>
+                        <button class="icon-btn small" class:on={f.private} title={f.private ? t.notPrivate : t.makePrivate} aria-label={f.private ? t.notPrivate : t.makePrivate} onclick={() => flag(f, { private: !f.private })}><Icon name="lock" size={14} /></button>
+                        <button class="icon-btn small" title={t.noLonger} aria-label={t.noLonger} onclick={() => act("memory_close_fact", { id: f.id })}><Icon name="history" size={14} /></button>
+                      {/if}
+                      <ConfirmButton icon="trash-2" small label={t.delete} question={t.deleteConfirm} sure={t.deleteSure} onconfirm={() => act("memory_forget_fact", { id: f.id })} />
+                    </span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/each}
+        {#if !factsOf(entity.id).length}<p class="faint meta">{t.noneHint}</p>{/if}
+
+        <div class="new-fact">
+          <input type="text" class="compact" placeholder={t.newFact(entity.is_user ? t.you(entity.name) : entity.name)} bind:value={draft.text} onkeydown={(e) => e.key === "Enter" && addFact()} />
+          <select class="compact" bind:value={draft.section} aria-label={t.section}>
+            {#each SECTIONS as s}<option value={s}>{t.sections[s]}</option>{/each}
+          </select>
+          <button class="icon-btn small outline" disabled={!draft.text.trim()} aria-label={t.add} title={t.add} onclick={addFact}><Icon name="plus" size={14} /></button>
+        </div>
+
+        <div class="foot">
+          <button class="btn link" onclick={tellYoru}><Icon name="message-circle" size={14} />{t.tellAbout(entity.is_user ? t.me : entity.name)}</button>
+          {#if !entity.is_user}
+            <div class="row">
+              <span class="faint">{t.sameAs}</span>
+              <select class="compact" bind:value={mergeInto}>
+                <option value="">—</option>
+                {#each graph.entities.filter((e) => e.id !== entity.id) as e (e.id)}<option value={e.id}>{e.is_user ? t.you(e.name) : e.name}</option>{/each}
+              </select>
+              <button class="btn small" disabled={mergeInto === ""} onclick={() => { const keep = mergeInto as number; mergeInto = ""; selected = keep; void act("memory_merge", { keep, drop: entity.id }); }}>{t.merge}</button>
+            </div>
+          {/if}
+          <div class="row">
             {#if graph.voices.includes(entity.id)}
               <ConfirmButton small label={t.forgetVoice} question={t.forgetVoiceConfirm(entity.name)} sure={t.forgetVoiceSure} onconfirm={() => act("memory_forget_voice", { id: entity.id })} />
             {/if}
@@ -191,265 +325,235 @@
               <ConfirmButton small label={t.remove} question={t.removeConfirm(entity.name)} sure={t.removeSure} onconfirm={() => act("memory_remove_entity", { id: entity.id })} />
             {/if}
           </div>
-
-          {#if !entity.is_user}
-            <div class="row merge">
-              <span class="dim small">{t.sameAs}</span>
-              <select bind:value={mergeInto}>
-                <option value="">—</option>
-                {#each graph.entities.filter((e) => e.id !== entity.id) as e (e.id)}<option value={e.id}>{e.is_user ? t.you(e.name) : e.name}</option>{/each}
-              </select>
-              <button class="btn small" disabled={mergeInto === ""} onclick={() => { const keep = mergeInto as number; mergeInto = ""; selected = keep; void act("memory_merge", { keep, drop: entity.id }); }}>{t.merge}</button>
-            </div>
-          {/if}
-
-          <div class="relations">
-            {#each relationsOf(entity.id) as r (r.id)}
-              <div class="rel small">
-                <span>{t.relation(nameOf(r.a), t.relations[r.kind] ?? r.kind, nameOf(r.b))}</span>
-                <button class="btn quiet small" onclick={() => act("memory_unrelate", { id: r.id })}>{t.unrelate}</button>
-              </div>
-            {/each}
-            <div class="row">
-              <span class="dim small">{t.isThe(entity.name)}</span>
-              <select bind:value={relKind}>
-                {#each RELATIONS as k}<option value={k}>{t.relations[k] ?? k}</option>{/each}
-              </select>
-              <span class="dim small">{t.of}</span>
-              <select bind:value={relTo}>
-                <option value="">—</option>
-                {#each graph.entities.filter((e) => e.id !== entity.id && e.kind === "person") as e (e.id)}<option value={e.id}>{e.is_user ? t.you(e.name) : e.name}</option>{/each}
-              </select>
-              <button class="btn small" disabled={relTo === ""} onclick={() => { const b = relTo as number; relTo = ""; void act("memory_relate", { a: entity.id, kind: relKind, b }); }}>{t.add}</button>
-            </div>
-          </div>
         </div>
-
-        {#each SECTIONS as s}
-          {@const facts = factsOf(entity.id).filter((f) => f.section === s)}
-          {#if facts.length}
-            <div class="panel">
-              <div class="section-title">{t.sections[s]}</div>
-              <ul class="facts">
-                {#each facts as f (f.id)}
-                  <li class:closed={f.to !== null}>
-                    {#if editing === f.id}
-                      <input type="text" class="edit" bind:value={editText} onkeydown={(e) => (e.key === "Enter" ? saveFact(f) : e.key === "Escape" ? (editing = null) : null)} />
-                      <button class="btn small primary" onclick={() => saveFact(f)}>{t.save}</button>
-                    {:else}
-                      <button class="text" disabled={f.to !== null} onclick={() => { editing = f.id; editText = f.text; }}>{f.text}</button>
-                      {#if f.private}<span class="tag">{t.private}</span>{/if}
-                      {#if f.importance >= 0.8}<span class="tag">{t.important}</span>{/if}
-                      {#if f.to !== null}
-                        <span class="faint small">{t.wasTrue(day(f.from), day(f.to))}</span>
-                      {:else}
-                        <span class="spacer"></span>
-                        <button class="btn quiet small" onclick={() => flag(f, { importance: f.importance >= 0.8 ? 0.5 : 0.9 })}>{f.importance >= 0.8 ? t.notImportant : t.makeImportant}</button>
-                        <button class="btn quiet small" onclick={() => flag(f, { private: !f.private })}>{f.private ? t.notPrivate : t.makePrivate}</button>
-                        <button class="btn quiet small" onclick={() => act("memory_close_fact", { id: f.id })}>{t.noLonger}</button>
-                      {/if}
-                      <ConfirmButton small label={t.delete} question={t.deleteConfirm} sure={t.deleteSure} onconfirm={() => act("memory_forget_fact", { id: f.id })} />
-                    {/if}
-                  </li>
-                {/each}
-              </ul>
-            </div>
-          {/if}
-        {/each}
-
-        {#if !factsOf(entity.id).length}
-          <div class="panel empty"><b>{t.none}</b><p>{t.noneHint}</p></div>
-        {/if}
-
-        <div class="panel add-fact">
-          <input type="text" placeholder={t.newFact(entity.is_user ? t.you(entity.name) : entity.name)} bind:value={draft.text} onkeydown={(e) => e.key === "Enter" && addFact()} />
-          <select bind:value={draft.section}>
-            {#each SECTIONS as s}<option value={s}>{t.sections[s]}</option>{/each}
-          </select>
-          <label class="small"><input type="checkbox" bind:checked={draft.important} /> {t.important}</label>
-          <label class="small"><input type="checkbox" bind:checked={draft.private} /> {t.private}</label>
-          <button class="btn small primary" disabled={!draft.text.trim()} onclick={addFact}>{t.add}</button>
-        </div>
-      </section>
+      </aside>
     {/if}
-  {/snippet}
-
-  {#if mode === "graph"}
-    <div class="graph-bar row">
-      <Toggle checked={showFacts} label={t.showFacts} onchange={(on) => (showFacts = on)} />
-      <span class="dim small">{t.showFacts}</span>
-      <span class="spacer-flex"></span>
-      <button class="btn quiet small" onclick={() => drawing?.fit()}>{t.fit}</button>
-    </div>
-    <MemoryGraph
-      bind:this={drawing}
-      {graph}
-      {selected}
-      {showFacts}
-      onselect={(id) => (selected = id)}
-      youName={t.you}
-      relationName={(k) => t.relations[k] ?? k}
-      kindName={(k) => t.kinds[k] ?? k}
-      sectionName={(k) => t.sections[k] ?? k}
-    />
-    <div class="panel add-under">{@render addNew()}</div>
-    <div class="under">{@render detail()}</div>
-  {:else}
-    <div class="split">
-    <aside class="panel people">
-      <div class="section-title">{t.people}</div>
-      <ul>
-        {#each [user(), ...others].filter((e) => !!e) as e (e!.id)}
-          {@const x = e!}
-          <li>
-            <button class="nav-row who" class:on={x.id === selected} onclick={() => (selected = x.id)}>
-              <b>{x.is_user ? t.you(x.name) : x.name}</b>
-              <span class="faint small">
-                {x.label ?? (x.kind === "person" ? "" : t.kinds[x.kind] ?? x.kind)}
-                {#if x.placeholder}· {t.noName}{/if}
-                {#if graph.voices.includes(x.id)}· {t.voiceKnown}{/if}
-              </span>
-              <span class="count faint">{openCount(x.id)}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
-      {@render addNew()}
-    </aside>
-      {@render detail()}
-    </div>
-  {/if}
-</div>
+  </div>
+</section>
 
 <style>
-  .small {
-    font-size: var(--fs-meta);
-  }
-  .split {
-    display: grid;
-    grid-template-columns: minmax(220px, 280px) 1fr;
-    gap: 16px;
-    align-items: start;
-  }
-  @media (max-width: 760px) {
-    .split {
-      grid-template-columns: 1fr;
-    }
-  }
-  .people ul,
-  .facts {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .who {
-    display: grid;
-    grid-template-columns: 1fr auto;
-  }
-  .who b {
-    font-weight: 600;
-  }
-  .who .small {
-    grid-column: 1;
-  }
-  .who .count {
-    grid-row: 1 / span 2;
-    grid-column: 2;
-    align-self: center;
-    font-size: var(--fs-meta);
-  }
-  .add-entity,
-  .add-fact,
-  .card-head {
+  .memory {
     display: flex;
-    gap: 6px;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+  /* The page's head, as on every page, but over a graph that fills the rest. */
+  .head {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    flex-wrap: wrap;
-    margin-top: 10px;
+    justify-content: space-between;
+    gap: 12px 16px;
+    padding: 26px 28px 18px;
+    border-bottom: 1px dashed var(--rim-2);
   }
-  .add-entity input,
-  .add-fact > input {
-    flex: 1;
-    min-width: 140px;
+  .what {
+    flex: 1 1 280px;
+    min-width: 0;
   }
-  .card-head {
-    margin-top: 0;
+  h1 {
+    font: 700 var(--fs-title)/1.1 var(--display);
+    letter-spacing: -0.015em;
   }
-  .card-head .name {
-    flex: 1;
-    font: 600 var(--fs-head)/1.3 var(--sans);
+  .lede {
+    margin-top: 6px;
+    color: var(--haze);
   }
-  .summary {
-    width: 100%;
-    margin-top: 8px;
-  }
-  .actions,
-  .merge {
-    margin-top: 10px;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .relations {
-    margin-top: 12px;
-    display: grid;
-    gap: 6px;
-  }
-  .relations .row {
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .rel {
+  .actions {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
   }
-  .facts li {
+  .err {
+    margin: 10px 28px 0;
+  }
+  .stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+  /* The card over the graph, on its right. */
+  .card {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 340px;
+    max-width: calc(100% - 32px);
+    /* Ends above Yoru, who waits at the bottom right. */
+    max-height: calc(100% - 136px);
+    overflow-y: auto;
+    padding: 14px 16px 16px;
+    border: 1px solid var(--rim-2);
+    border-radius: var(--r-lg);
+    background: var(--night);
+    box-shadow: var(--lift);
+    animation: in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes in {
+    from {
+      opacity: 0;
+      transform: translateX(8px);
+    }
+  }
+  .add {
+    display: grid;
+    gap: 10px;
+  }
+  .card-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .card-top .close,
+  .add .card-top button {
+    margin-left: auto;
+  }
+  .kind {
+    min-width: 0;
+  }
+  .row {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
-    padding: 6px 0;
   }
-  .facts li + li {
-    border-top: 1px solid var(--rim);
+  .inspector > .row {
+    margin-top: 8px;
   }
-  .facts .text {
+  .inspector input.bare {
+    display: block;
+    width: calc(100% + 6px);
+    color: var(--haze);
+  }
+  .inspector input.name {
+    color: var(--pearl);
+    font: 650 var(--fs-head)/1.3 var(--display);
+  }
+  .meta {
+    margin: 0 0 4px;
+    font-size: var(--fs-meta);
+  }
+  .gender {
+    margin-top: 6px;
+    min-width: 0;
+  }
+  h3 {
+    margin: 18px 0 6px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--rim-2);
+    font: 600 var(--fs-meta)/1.2 var(--sans);
+    color: var(--pearl);
+  }
+  .section {
+    margin: 10px 0 2px;
+    color: var(--dusk);
+    font-size: var(--fs-small);
+  }
+  .lines {
+    list-style: none;
+    margin: 0 -8px;
+    padding: 0;
+  }
+  .lines li {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 32px;
+    padding: 2px 4px 2px 8px;
+    border-radius: var(--r-sm);
+    transition: background 140ms;
+  }
+  .lines li:hover,
+  .lines li.lit {
+    background: var(--hover);
+  }
+  .lines .text {
     flex: 1;
-    min-width: 200px;
-    text-align: left;
+    min-width: 0;
+    padding: 4px 0;
     border: 0;
-    background: transparent;
+    background: none;
     color: var(--pearl);
     font: inherit;
-    font-size: var(--fs-body);
-    padding: 2px 0;
+    font-size: var(--fs-meta);
+    line-height: 1.4;
+    text-align: left;
     cursor: text;
   }
-  .facts li.closed .text {
-    color: var(--haze);
+  span.text {
+    cursor: default;
+  }
+  .lines li.closed .text {
+    color: var(--dusk);
     text-decoration: line-through;
     cursor: default;
   }
-  .facts .edit {
+  .when {
+    display: block;
+    text-decoration: none;
+    font-size: var(--fs-small);
+  }
+  .mark {
+    display: grid;
+    color: var(--dusk);
+  }
+  /* A line's tools show on the line pointed at. */
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    opacity: 0;
+    transition: opacity 120ms;
+  }
+  .lines li:hover .tools,
+  .tools:focus-within {
+    opacity: 1;
+  }
+  .lines li:hover .mark {
+    display: none;
+  }
+  .edit {
     flex: 1;
+    margin: 2px 0;
   }
-  .spacer {
-    flex: 0;
+  .relate {
+    margin-top: 6px;
+    font-size: var(--fs-meta);
   }
-  .graph-bar {
-    gap: 8px;
-    margin-bottom: 10px;
+  .relate select {
+    min-width: 0;
   }
-  .spacer-flex {
+  .new-fact {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 10px;
+  }
+  .new-fact input {
     flex: 1;
+    min-width: 0;
   }
-  .add-under {
-    margin-top: 12px;
+  .new-fact select {
+    min-width: 0;
+    max-width: 112px;
   }
-  .add-under .add-entity {
-    margin-top: 0;
+  .foot {
+    display: grid;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--rim-2);
+    font-size: var(--fs-meta);
   }
-  .under {
-    margin-top: 12px;
+  .foot .btn.link {
+    justify-self: start;
+    gap: 6px;
+  }
+  .foot select {
+    min-width: 0;
+    flex: 1;
   }
 </style>

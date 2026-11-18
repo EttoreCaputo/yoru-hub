@@ -18,10 +18,10 @@
     mic = false,
     conversation,
     placeholder,
-  }: { autofocus?: boolean; big?: boolean; mic?: boolean; conversation?: string; placeholder?: string } = $props();
+    text = $bindable(""),
+  }: { autofocus?: boolean; big?: boolean; mic?: boolean; conversation?: string; placeholder?: string; text?: string } = $props();
   const t = $derived(i18n.t.composer);
   const ready = $derived(store.info?.ready ?? false);
-  let text = $state("");
   let field: HTMLTextAreaElement | undefined = $state();
 
   $effect(() => {
