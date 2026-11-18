@@ -227,7 +227,7 @@ let meetings: Meeting[] = [
   },
 ];
 let recording: Meeting | null = null;
-let meetingSettings: MeetingSettings = { transcribe: "after", language: "", speakers: true, summary_by: "local", auto_summary: true };
+let meetingSettings: MeetingSettings = { transcribe: "after", language: "", speakers: true, summary_by: "local", auto_summary: true, detect: false };
 let meters: ReturnType<typeof setInterval> | undefined;
 
 function startMeeting(a: Record<string, any>): Meeting {

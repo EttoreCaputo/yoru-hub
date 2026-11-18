@@ -453,6 +453,8 @@ const en = {
     noBrain: "No brain is set up: Settings, Brain",
     llmHint: "The local language model that writes the summaries. About 2.7 GB.",
     fetching: "Downloading…",
+    detect: "Notice meetings",
+    detectHint: "From the calendar and from the apps that take the microphone. Yoru asks before recording and stops when the call ends.",
     autoSummary: "Summarize on its own",
     autoSummaryHint: "Once the transcript is made.",
     summarize: "Summarize",

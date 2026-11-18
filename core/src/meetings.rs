@@ -6,6 +6,7 @@
 //! What comes of a recording (its transcript, imported files, exports, the
 //! settings) is in [`transcript`].
 
+pub mod detect;
 mod summary;
 mod transcript;
 
@@ -124,6 +125,8 @@ pub struct Request {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Event {
+    /// A recording started (from the app, or the meeting detection).
+    Started { meeting: Meeting },
     /// Each track's loudest sample in the last quarter second, 0 to 1.
     Level { levels: BTreeMap<String, f32> },
     /// Something went wrong; the recording goes on if it can. `code` says

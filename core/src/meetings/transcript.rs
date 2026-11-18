@@ -43,6 +43,9 @@ pub struct Settings {
     pub summary_by: SummaryBy,
     /// Summarize a meeting once its transcript is made.
     pub auto_summary: bool,
+    /// Notice a meeting starting (the calendar, a call app taking the
+    /// microphone) and ask whether to record it (docs/meetings.md, Detection).
+    pub detect: bool,
 }
 
 /// The model that summarizes.
@@ -58,7 +61,7 @@ pub enum SummaryBy {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { transcribe: When::After, language: String::new(), speakers: true, summary_by: SummaryBy::Local, auto_summary: true }
+        Settings { transcribe: When::After, language: String::new(), speakers: true, summary_by: SummaryBy::Local, auto_summary: true, detect: false }
     }
 }
 

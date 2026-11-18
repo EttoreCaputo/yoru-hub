@@ -12,6 +12,9 @@
 //   yoru-audio model <folder> [--download]
 //       Whether the transcription model is in <folder>; fetches it first
 //       with --download, reporting `progress`.
+//   yoru-audio mic-users
+//       The apps using the microphone, now and at every change, until
+//       stdin closes (MicUsers.swift).
 //   yoru-audio talk
 //       The Mac as Yoru's microphone and speaker, for the Yoru in the
 //       notch: commands on stdin, audio on stdout (Talk.swift).
@@ -280,6 +283,8 @@ case "voiceprint":
     }
     guard let folder else { fail("voiceprint: no --model") }
     run { try await voiceprint(folder: URL(fileURLWithPath: folder, isDirectory: true)) }
+case "mic-users":
+    watchMicrophoneUsers()
 case "talk":
     talk()
 case "microphone":

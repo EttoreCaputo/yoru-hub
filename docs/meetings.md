@@ -75,6 +75,15 @@ Leftovers of the retired Yoru app are in `~/Library/Application Support/Yoru/mod
 - **Action items become work**: Yoru offers to create them as ClickUp tasks or calendar events through the connectors, on the Allow card like any acting tool.
 - A notification in the inbox and on the board when the summary is ready.
 
+## Detection
+
+Off by default (Meetings → Settings → "Notice meetings"). While on, Yoru Hub notices a meeting on its own and asks before recording it, on the Allow card: the notch opens for it, the board shows it. Nothing is recorded without a yes.
+
+- **The calendar.** Every 5 minutes it reads Google Calendar (the connector's `list_events`, from 10 minutes ago to 2 hours ahead), if connected. Two minutes before a meeting with a start time, the card asks whether to record it when the call starts (*«Standup» alle 10:30: la registro quando parte la chiamata?*). A yes arms it until 15 minutes after its start.
+- **The microphone.** `yoru-audio mic-users` reports, every 2 seconds and when it changes, the apps taking microphone input (Core Audio's `kAudioProcessPropertyIsRunningInput`, macOS 14+). A call app (Zoom, Teams, FaceTime, Slack, Discord, Webex, WhatsApp, Telegram, Skype…) taking it, or a browser while a calendar meeting is on, is a call. If its meeting was armed, the recording starts at once, of that app's sound and the default microphone, titled after the meeting; otherwise the card asks (*Chiamata su Zoom: la registro?*). Each call and each meeting is asked about once; a question waits 2 minutes.
+- **The end.** A recording the detection started stops once the app has left the microphone for 45 seconds; then it is transcribed and summarized as any other. A recording started by hand is never stopped by it.
+- **Where.** `core/src/meetings/detect.rs` decides (`Detector::step`, tested without a calendar or a microphone); `app/src-tauri/src/meeting_watch.rs` runs it every 5 seconds and does what it decides; each decision goes to `yoru.log` (`meetings`). Yoru Hub's own use of the microphone is ignored.
+
 ## The assistant
 
 - New tools: `list_meetings`, `search_meetings` (text and speakers), `get_meeting` (summary, or the transcript around a match), `start_recording`, `stop_recording`. "What did Marco say about the deadline?" is answered from the transcripts.
@@ -102,6 +111,8 @@ Status (2026-11-08): M1 is built and recorded a real call, except the menu bar; 
   - Built (2026-10-30): `core/src/meetings/summary.rs` asks a language model for a title, an overview, the points, the decisions, the things to do (who, by when) and the open questions, as JSON, in `summary.json`; a meeting without a title takes the summary's. The transcript goes with the speakers' names; one longer than the model reads at once (12,000 characters for the local model and for Groq and Ollama, 120,000 for Claude, OpenAI and Gemini) is summarized in parts, then the parts' notes together. The language is told to the model by name (`language_of`, from the transcript's common words): Qwen3.5 4B wrote in English otherwise. The model is a setting: this computer (default; Qwen3.5 4B on `llama-server`, the voice's own when it runs one locally, since two can't share the pid file; the page offers the 2.7 GB download) or the assistant's brain. On its own after the transcript (setting), or Summarize; Copy puts it on the clipboard as Markdown. The Boldrin video's 66 s took about 11 s on the M1 Pro.
   - Left: action items to ClickUp tasks and calendar events with Allow, the agent's tools (`search_meetings`…), the notification when it's ready.
 - **M5. Live and detection.** Streaming transcription and diarization, live text in the app, the full pass at the end, meeting detection with the question on the board.
+  - Built (2026-11-18): the detection (see Detection), from the calendar and the microphone, asking on the Allow card in the notch and on the board, stopping on its own. Not yet tried on a real call.
+  - Left: live transcription.
 
 ## Open questions
 

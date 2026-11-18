@@ -65,14 +65,16 @@
   const ear = $derived(geometry.height + 8);
   const closedWidth = $derived(geometry.width + 2 * ear);
   const busy = $derived(voice !== "idle" && voice !== "error");
-  const open = $derived(pointer || busy || held || typing || !!store.asking || store.now < lingerUntil);
+  const card = $derived(store.confirmations[0] ?? null);
+  /** Open while in use, and on its own for a question waiting for an answer
+   *  (a tool to allow, a meeting to record). */
+  const open = $derived(pointer || busy || held || typing || !!card || !!store.asking || store.now < lingerUntil);
   const last = $derived.by(() => {
     const lastOf = (from: "you" | "yoru") => store.chat.map((l) => l.from).lastIndexOf(from);
     const yoru = lastOf("yoru");
     const you = lastOf("you");
     return { you: you >= 0 ? store.chat[you] : null, yoru: yoru > you ? store.chat[yoru] : null };
   });
-  const card = $derived(store.confirmations[0] ?? null);
   /** What the left of the top row says while open. */
   const status = $derived(error ? t.states.error : fetching && busy ? fetching : t.states[voice] || "Yoru");
 

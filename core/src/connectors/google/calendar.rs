@@ -253,7 +253,11 @@ fn describe(e: &Value, full: bool) -> Value {
     if !attendees.is_empty() {
         out["attendees"] = json!(attendees);
     }
-    if let Some(link) = e["hangoutLink"].as_str() {
+    // Meet's own link, else a Zoom or Teams one added as a conference.
+    let video = e["hangoutLink"].as_str().or_else(|| {
+        e["conferenceData"]["entryPoints"].as_array()?.iter().find(|p| p["entryPointType"] == "video")?["uri"].as_str()
+    });
+    if let Some(link) = video {
         out["video_call"] = json!(link);
     }
     if let Some(d) = e["description"].as_str() {

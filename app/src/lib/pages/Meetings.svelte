@@ -364,6 +364,10 @@
   {#if showSettings && settings}
     <section class="panel settings">
       <div class="setting">
+        <div class="what"><b>{t.detect}</b><span>{t.detectHint}</span></div>
+        <div class="how"><Toggle checked={settings.detect} label={t.detect} onchange={(on) => saveSettings({ detect: on })} /></div>
+      </div>
+      <div class="setting">
         <div class="what"><b>{t.when}</b><span>{t.whenHint}</span></div>
         <div class="how choices" role="radiogroup" aria-label={t.when}>
           {#each [["after", t.whenAfter], ["live", t.whenLive], ["manual", t.whenManual]] as [id, label] (id)}

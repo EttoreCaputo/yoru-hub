@@ -91,32 +91,49 @@ pub fn meeting_active(state: State<'_, Meetings>) -> Option<Meeting> {
 /// for the microphone first).
 #[tauri::command]
 pub async fn meeting_start(app: AppHandle, request: Request) -> Result<Meeting, String> {
+    tauri::async_runtime::spawn_blocking(move || record(&app, request)).await.map_err(|e| e.to_string())?
+}
+
+/// Start recording what `request` asks for, waiting until every track runs:
+/// the Meetings page's Record, and the meeting detection's.
+pub fn record(app: &AppHandle, request: Request) -> Result<Meeting, String> {
     if app.state::<Meetings>().active.lock().unwrap().is_some() {
         return Err("a recording is already running".into());
     }
     let events = app.clone();
     let shown = request.clone();
-    let recording = blocking(move || {
-        Recording::start(&request, move |event| {
-            let done = match &event {
-                Event::Done { meeting } => Some(meeting.id.clone()),
-                _ => None,
-            };
-            if done.is_some() {
-                events.state::<Meetings>().active.lock().unwrap().take();
-                board(&events, "idle", None);
-            }
-            let _ = events.emit("meeting", &event);
-            if let Some(id) = done {
-                after_recording(&events, id);
-            }
-        })
+    let recording = Recording::start(&request, move |event| {
+        let done = match &event {
+            Event::Done { meeting } => Some(meeting.id.clone()),
+            _ => None,
+        };
+        if done.is_some() {
+            events.state::<Meetings>().active.lock().unwrap().take();
+            board(&events, "idle", None);
+        }
+        let _ = events.emit("meeting", &event);
+        if let Some(id) = done {
+            after_recording(&events, id);
+        }
     })
-    .await?;
+    .map_err(|e| e.to_string())?;
     let meeting = recording.meeting();
     *app.state::<Meetings>().active.lock().unwrap() = Some(recording);
-    board_recording(&app, &shown);
+    board_recording(app, &shown);
+    let _ = app.emit("meeting", &Event::Started { meeting: meeting.clone() });
     Ok(meeting)
+}
+
+/// Whether a recording runs.
+pub fn recording(app: &AppHandle) -> bool {
+    app.state::<Meetings>().active.lock().unwrap().is_some()
+}
+
+/// Stop the recording that runs, if one does.
+pub fn stop(app: &AppHandle) {
+    if let Some(recording) = app.state::<Meetings>().active.lock().unwrap().as_ref() {
+        recording.stop();
+    }
 }
 
 /// Stop the recording; a `meeting` event with `done` follows.

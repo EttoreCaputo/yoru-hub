@@ -30,6 +30,7 @@
 
 mod assistant;
 mod instances;
+mod meeting_watch;
 mod meetings;
 mod notch;
 
@@ -1937,6 +1938,7 @@ pub fn run() {
             *app.state::<AppState>().manager.lock().unwrap() = Some(manager);
             assistant::start(handle);
             meetings::start(handle);
+            meeting_watch::start(handle);
             build_tray(handle)?;
             Ok(())
         })

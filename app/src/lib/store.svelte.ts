@@ -188,7 +188,8 @@ class Store {
   }
 
   #onMeeting(e: MeetingEvent) {
-    if (e.kind === "level") this.levels = e.levels;
+    if (e.kind === "started") this.recording = e.meeting;
+    else if (e.kind === "level") this.levels = e.levels;
     else if (e.kind === "error") this.recordingError = { message: e.message, code: e.code };
     else if (e.kind === "progress") {
       // Loading the model counts as the start; the tracks share the bar.

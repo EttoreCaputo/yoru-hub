@@ -451,6 +451,8 @@ const it: Messages = {
     noBrain: "Nessun cervello configurato: Impostazioni, Cervello",
     llmHint: "Il modello di linguaggio locale che scrive i riassunti. Circa 2,7 GB.",
     fetching: "Scarico…",
+    detect: "Accorgiti delle riunioni",
+    detectHint: "Dal calendario e dalle app che usano il microfono. Yoru chiede prima di registrare e si ferma quando la chiamata finisce.",
     autoSummary: "Riassumi da solo",
     autoSummaryHint: "Appena la trascrizione è pronta.",
     summarize: "Riassumi",

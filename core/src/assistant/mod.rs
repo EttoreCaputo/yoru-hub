@@ -494,6 +494,11 @@ impl Assistant {
         self.audio_tags.load(Ordering::Relaxed)
     }
 
+    /// The language Yoru speaks when nothing was heard: the one set, else the system's.
+    pub fn language(&self) -> String {
+        self.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into())
+    }
+
     /// The language replies are in: the [one set](Self::set_language), else `heard`.
     fn reply_language(&self, heard: Option<&str>) -> Option<String> {
         self.language.lock().unwrap().clone().or(heard.map(str::to_string))
