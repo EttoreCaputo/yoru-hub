@@ -810,12 +810,36 @@ const en = {
     },
   },
 
+  permissions: {
+    required: "Required",
+    granted: "Allowed",
+    allow: "Allow",
+    asking: "Waiting for macOS…",
+    openSettings: "Open System Settings",
+    denied: "Turned off: switch Yoru on in System Settings, then come back here.",
+    microphone: { name: "Microphone", why: "To hear you when you talk to Yoru on the Mac, and to record meetings." },
+    calendar: { name: "Calendar", why: "To notice when a meeting is about to start and ask whether to record it." },
+    system_audio: { name: "System audio", why: "To record what calls and apps play, in a meeting." },
+    gateTitle: "Yoru needs the microphone",
+    gateText: "Without it he can't hear you. Allow it and Yoru picks up right where he was.",
+    later: "The calendar and the system audio can wait: they are for meetings only.",
+  },
+
   setup: {
     skip: "Skip setup",
     back: "Back",
     next: "Next",
     done: "Start",
-    steps: ["Yoru", "Setup", "A service", "You"],
+    steps: ["Welcome", "Permissions", "Yoru", "Setup", "A service", "You"],
+    welcome: {
+      title: "Hi, I'm Yoru",
+      text: "A few choices and I'm ready: the language, what I may use on this Mac, the board, how I think and talk, a first service. It takes a couple of minutes, and everything can be changed later in Settings.",
+    },
+    access: {
+      title: "What Yoru may use on this Mac",
+      text: "macOS asks you once for each. The microphone is needed to hear you: Yoru can't go on without it. The calendar and the system audio are for meetings only.",
+      waiting: "Allow the microphone to go on.",
+    },
     board: {
       title: "Put Yoru on your desk",
       text: "Plug the board in with a USB cable. You can also do this later: Yoru works from here too.",

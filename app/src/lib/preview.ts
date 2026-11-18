@@ -6,6 +6,8 @@
 //   ?boards=2   a second Yoru, on WiFi
 //   ?key=none   no brain's key yet (no Groq, no Anthropic)
 //   ?brain=groq Yoru thinks with Groq (its key only)
+//   ?mic=unknown the microphone never asked (or denied, restricted): the
+//               first run's permissions step, the gate, the notch's row
 
 import type {
   Action,
@@ -458,6 +460,7 @@ const boards: DeviceInfo[] = offline
     ];
 const shownBoard = () => boards.find((b) => b.current) ?? null;
 let onboardingDone = !params.has("setup");
+const permissions = { microphone: params.get("mic") ?? "granted", calendar: params.has("setup") ? "unknown" : "granted", system_audio: params.has("setup") ? "unknown" : "granted" };
 const handlers = new Map<string, Handler[]>();
 
 function emit(event: string, payload: unknown) {
@@ -592,9 +595,14 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   delete_spoken: (a) => (spoken = spoken.filter((c) => c.id !== a.id)),
   clear_spoken: (a) => void (spoken = spoken.filter((c) => c.voice.split(":")[0] !== a.source)),
   export_spoken: (a) => `/Users/you/Downloads/yoru-spoken-${a.source}-20261022-153012.zip`,
-  // ?mic=denied (or unknown, restricted) for the notch's permission row.
-  notch_microphone: (a) => (a.ask && params.get("mic") === "unknown" ? "granted" : (params.get("mic") ?? "granted")),
-  open_microphone_privacy: () => undefined,
+  permissions: () => ({ ...permissions }),
+  // Asking says yes, as a user would; a denied one waits for System Settings.
+  request_permission: (a) => {
+    const kind = a.kind as keyof typeof permissions;
+    if (permissions[kind] === "unknown") permissions[kind] = "granted";
+    return permissions[kind];
+  },
+  open_privacy: (a) => void (permissions[a.kind as keyof typeof permissions] = "granted"),
   meeting_sources: () => meetingSources,
   meetings_list: () => meetings,
   meeting_active: () => recording,

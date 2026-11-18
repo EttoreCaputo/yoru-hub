@@ -68,7 +68,7 @@ Plain `cargo` commands only touch `core` and `cli` (the workspace's default memb
 cd app
 npm install
 npm run dev                 # UI only, in a browser, with a mocked Yoru: no board or Rust needed
-                            # (?setup opens the first run, ?board=off, ?key=none and ?brain=groq other states)
+                            # (?setup opens the first run, ?mic=unknown or denied the permissions, ?board=off, ?key=none and ?brain=groq other states)
 npm run tauri dev           # the real app, hot reload on UI changes
 npm run tauri build         # release build + installers, in target/release/bundle/
 ```

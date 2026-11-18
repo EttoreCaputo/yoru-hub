@@ -28,6 +28,9 @@ import type {
   MeetingEvent,
   Notification,
   Onboarding,
+  PermissionKind,
+  PermissionState,
+  Permissions,
   Preset,
   ScheduleEvent,
   Status,
@@ -101,6 +104,10 @@ class Store {
   tasks = $state<TaskEntry[]>([]);
   schedule = $state<(ScheduleEvent & { at: number })[]>([]);
   onboarding = $state<Onboarding | null>(null);
+  /** The Mac's permissions; `null` until read. */
+  permissions = $state<Permissions | null>(null);
+  /** The microphone is required: the window waits for it (PermissionGate). */
+  micMissing = $derived(!!this.permissions && this.permissions.microphone !== "granted");
 
   // Meetings.
   /** The recording that runs. */
@@ -175,6 +182,7 @@ class Store {
     if (chat) this.chat = chat;
     if (confirmations) this.confirmations = confirmations;
     if (onboarding) this.onboarding = onboarding;
+    void this.refreshPermissions();
     void this.refreshConnectors();
     void this.refreshWatchers();
     void this.refreshTimers();
@@ -436,6 +444,20 @@ class Store {
       this.job = "idle";
       this.setup = null;
     }
+  }
+
+  async refreshPermissions() {
+    const p = await call<Permissions>("permissions").catch(() => null);
+    if (p) this.permissions = p;
+    return this.permissions;
+  }
+
+  /** macOS's prompt if never asked, System Settings if turned down. */
+  async requestPermission(kind: PermissionKind) {
+    const now = this.permissions?.[kind];
+    if (now === "denied" || now === "restricted") await call("open_privacy", { kind }).catch(() => {});
+    else await call<PermissionState>("request_permission", { kind }).catch(() => {});
+    await this.refreshPermissions();
   }
 
   async finishOnboarding() {

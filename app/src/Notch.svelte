@@ -78,24 +78,24 @@
   /** What the left of the top row says while open. */
   const status = $derived(error ? t.states.error : fetching && busy ? fetching : t.states[voice] || "Yoru");
 
-  /** Ask where it stands; macOS's own prompt comes up if it never did. */
-  async function checkMic(ask: boolean) {
+  /** Where it stands; the app asks for it in its window on the first run. */
+  async function checkMic() {
     try {
-      mic = await call<string>("notch_microphone", { ask });
+      mic = (await call<{ microphone: string }>("permissions")).microphone;
     } catch {
-      // No helper (the browser, a broken install): talking will say why.
+      // Outside the app: talking will say why.
     }
   }
+  /** macOS's own prompt if it never asked, System Settings once turned down. */
   async function allowMic() {
-    if (mic === "unknown") await checkMic(true);
-    else await call("open_microphone_privacy").catch(() => {});
+    if (mic === "unknown") await call("request_permission", { kind: "microphone" }).catch(() => {});
+    else await call("open_privacy", { kind: "microphone" }).catch(() => {});
+    await checkMic();
   }
-  void checkMic(false).then(() => {
-    if (mic === "unknown") return checkMic(true);
-  });
+  void checkMic();
   // Settings may have changed it meanwhile: look again on opening.
   $effect(() => {
-    if (pointer && mic !== "granted") void checkMic(false);
+    if (pointer && mic !== "granted") void checkMic();
   });
 
   $effect(() => {
@@ -124,7 +124,7 @@
     else if (e.event === "error") {
       error = e.message;
       voice = "error";
-      void checkMic(false);
+      void checkMic();
     }
   });
 

@@ -808,12 +808,36 @@ const it: Messages = {
     },
   },
 
+  permissions: {
+    required: "Obbligatorio",
+    granted: "Consentito",
+    allow: "Consenti",
+    asking: "Aspetto macOS…",
+    openSettings: "Apri Impostazioni di Sistema",
+    denied: "Disattivato: attiva Yoru in Impostazioni di Sistema, poi torna qui.",
+    microphone: { name: "Microfono", why: "Per sentirti quando parli con Yoru sul Mac, e per registrare le riunioni." },
+    calendar: { name: "Calendario", why: "Per accorgersi che una riunione sta per cominciare e chiederti se registrarla." },
+    system_audio: { name: "Audio di sistema", why: "Per registrare quello che suonano chiamate e app, in una riunione." },
+    gateTitle: "Yoru ha bisogno del microfono",
+    gateText: "Senza, non può sentirti. Consentilo e Yoru riparte da dove era.",
+    later: "Il calendario e l'audio di sistema possono aspettare: servono solo per le riunioni.",
+  },
+
   setup: {
     skip: "Salta",
     back: "Indietro",
     next: "Avanti",
     done: "Comincia",
-    steps: ["Yoru", "Profilo", "Un servizio", "Tu"],
+    steps: ["Benvenuto", "Permessi", "Yoru", "Profilo", "Un servizio", "Tu"],
+    welcome: {
+      title: "Ciao, sono Yoru",
+      text: "Poche scelte e sono pronto: la lingua, cosa posso usare su questo Mac, la scheda, come penso e parlo, un primo servizio. Ci vogliono un paio di minuti, e puoi cambiare tutto dopo nelle Impostazioni.",
+    },
+    access: {
+      title: "Cosa può usare Yoru su questo Mac",
+      text: "macOS te lo chiede una volta per ciascuno. Il microfono serve per sentirti: senza, Yoru non può andare avanti. Il calendario e l'audio di sistema servono solo per le riunioni.",
+      waiting: "Consenti il microfono per andare avanti.",
+    },
     board: {
       title: "Metti Yoru sulla scrivania",
       text: "Collega la scheda con un cavo USB. Puoi farlo anche dopo: Yoru funziona anche da qui.",

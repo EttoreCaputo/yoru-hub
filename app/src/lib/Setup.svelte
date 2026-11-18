@@ -1,12 +1,18 @@
 <!--
-  The first run, in four steps: Yoru on the desk, a setup (how he thinks,
-  hears and speaks, with the key it needs: ui/Profiles.svelte), a first
-  service, and a few lines about you (the first memory). Every step can be skipped; Settings can run it again.
+  The first run, in six steps: the language, the Mac's permissions (the
+  microphone is required: nothing goes on without it) with Yoru in the notch
+  and noticing meetings, Yoru on the desk, a setup (how he thinks, hears and
+  speaks, with the key it needs: ui/Profiles.svelte), a first service, and a
+  few lines about you (the first memory). Once the microphone is Yoru's,
+  every other step can be skipped; Settings can run it again.
 -->
 <script lang="ts">
   import { call, why } from "./api";
-  import { i18n } from "./i18n/index.svelte";
+  import { i18n, LANGUAGES, type Lang } from "./i18n/index.svelte";
   import { store } from "./store.svelte";
+  import type { MeetingSettings } from "./types";
+  import PermissionList from "./ui/PermissionList.svelte";
+  import Toggle from "./ui/Toggle.svelte";
   import Profiles from "./ui/Profiles.svelte";
   import ServiceIcon from "./ui/ServiceIcon.svelte";
   import YoruBoard from "./YoruBoard.svelte";
@@ -35,7 +41,26 @@
     }
   }
 
-  const next = () => step++;
+  const LAST = 5;
+  const LANG_CHOICES: (Lang | null)[] = [null, ...LANGUAGES.map((l) => l.id)];
+  const langName = (id: Lang) => LANGUAGES.find((l) => l.id === id)?.name ?? id;
+
+  // Yoru in the notch and noticing meetings start on: they are what makes
+  // him useful on the Mac, and the switches below say so before Next.
+  let notch = $state(true);
+  let meetings = $state<MeetingSettings | null>(null);
+  call<MeetingSettings>("meeting_settings").then((m) => (meetings = { ...m, detect: true }), () => {});
+
+  /** The choices on the Mac, kept when leaving the permissions step. */
+  async function saveMac() {
+    await call("set_notch", { on: notch }).catch(() => {});
+    if (meetings) await call("set_meeting_settings", { settings: meetings }).catch(() => {});
+  }
+
+  const next = async () => {
+    if (step === 1) await saveMac();
+    step++;
+  };
   const back = () => step--;
 
   /** The lines go under "About you" in memory.md: Yoru reads them every turn. */
@@ -51,6 +76,11 @@
     }
     await store.finishOnboarding();
   }
+
+  async function skip() {
+    if (step === 1) await saveMac();
+    await store.finishOnboarding();
+  }
 </script>
 
 <div class="veil" role="dialog" aria-modal="true" aria-labelledby="setup-title">
@@ -63,17 +93,46 @@
 
     <div class="body">
       {#if step === 0}
+        <h1 id="setup-title">{t.welcome.title}</h1>
+        <p class="dim">{t.welcome.text}</p>
+        <h2 class="section-title">{i18n.t.settings.appLanguage}</h2>
+        <section class="tiles" aria-label={i18n.t.settings.appLanguage}>
+          {#each LANG_CHOICES as l (l ?? "system")}
+            <button class="tile" class:on={(i18n.choice ?? null) === l} onclick={() => i18n.set(l)}>
+              <b>{l ? langName(l) : i18n.t.settings.system}</b>
+              <span>{langName(l ?? i18n.lang)}</span>
+            </button>
+          {/each}
+        </section>
+      {:else if step === 1}
+        <h1 id="setup-title">{t.access.title}</h1>
+        <p class="dim">{t.access.text}</p>
+        <PermissionList />
+        <div class="mac">
+          <div class="choice">
+            <div class="what"><b>{i18n.t.board.notch}</b><span>{i18n.t.board.notchHint}</span></div>
+            <Toggle checked={notch} label={i18n.t.board.notch} onchange={(on) => (notch = on)} />
+          </div>
+          {#if meetings}
+            <div class="choice">
+              <div class="what"><b>{i18n.t.meetings.detect}</b><span>{i18n.t.meetings.detectHint}</span></div>
+              <Toggle checked={meetings.detect} label={i18n.t.meetings.detect} onchange={(on) => (meetings = { ...meetings!, detect: on })} />
+            </div>
+          {/if}
+        </div>
+        {#if store.micMissing}<p class="status"><span class="dot wait"></span>{t.access.waiting}</p>{/if}
+      {:else if step === 2}
         <div class="mirror"><YoruBoard board={store.boardState === "off" ? "off" : "live"} size={130} /></div>
         <h1 id="setup-title">{t.board.title}</h1>
         <p class="dim">{t.board.text}</p>
         <p class="status"><span class="dot {store.boardState === 'live' ? 'done' : 'think'}"></span>{store.boardState === "live" ? t.board.found : t.board.waiting}</p>
         {#if store.update}<p class="faint">{t.board.update(store.update.to)}</p>{/if}
-      {:else if step === 1}
+      {:else if step === 3}
         <h1 id="setup-title">{t.brain.title}</h1>
         <p class="dim">{t.brain.text}</p>
         <Profiles compact />
         {#if store.info?.ready}<p class="status"><span class="dot done"></span>{t.brain.ok}</p>{/if}
-      {:else if step === 2}
+      {:else if step === 4}
         <h1 id="setup-title">{t.service.title}</h1>
         <p class="dim">{t.service.text}</p>
         <div class="services">
@@ -95,11 +154,11 @@
     </div>
 
     <footer>
-      <button class="btn quiet" onclick={() => store.finishOnboarding()}>{t.skip}</button>
+      {#if !store.micMissing}<button class="btn quiet" onclick={skip}>{t.skip}</button>{/if}
       <span class="spacer"></span>
       {#if step > 0}<button class="btn" onclick={back}>{t.back}</button>{/if}
-      {#if step < 3}
-        <button class="btn primary" onclick={next}>{step === 2 && !connected.size ? t.service.later : t.next}</button>
+      {#if step < LAST}
+        <button class="btn primary" disabled={step === 1 && store.micMissing} onclick={next}>{step === 4 && !connected.size ? t.service.later : t.next}</button>
       {:else}
         <button class="btn primary" onclick={finish}>{t.done}</button>
       {/if}
@@ -129,7 +188,8 @@
   }
   .steps {
     display: flex;
-    gap: 18px;
+    flex-wrap: wrap;
+    gap: 8px 16px;
     margin: 0;
     padding: 20px 28px;
     list-style: none;
@@ -223,6 +283,28 @@
   }
   .service.done {
     border-color: color-mix(in srgb, var(--done) 40%, transparent);
+  }
+  .mac {
+    display: grid;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .choice {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: var(--r);
+    border: 1px solid var(--rim);
+  }
+  .choice .what {
+    flex: 1;
+    display: grid;
+    gap: 2px;
+  }
+  .choice .what span {
+    color: var(--haze);
+    font-size: 12.5px;
   }
   footer {
     display: flex;

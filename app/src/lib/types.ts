@@ -364,6 +364,11 @@ export type MeetingEvent =
   | { kind: "summarized"; meeting: Meeting; summary: Summary }
   | { kind: "summary_failed"; id: string; message: string };
 export type Onboarding = { done: boolean; tour_version: number };
+/** Where a Mac permission stands (`unknown`: never asked). */
+export type PermissionState = "granted" | "denied" | "restricted" | "unknown" | "unsupported";
+export type PermissionKind = "microphone" | "calendar" | "system_audio";
+/** The microphone is required; the calendar and the system audio are for meetings. */
+export type Permissions = Record<PermissionKind, PermissionState>;
 
 /** A bridge event: `kind` and its fields, plus the board it comes from. */
 export type BridgeEvent = { kind: string; target?: string | null; board?: string | null; [field: string]: unknown };

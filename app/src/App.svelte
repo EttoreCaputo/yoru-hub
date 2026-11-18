@@ -11,6 +11,7 @@
   import Settings from "./lib/pages/Settings.svelte";
   import Spoken from "./lib/pages/Spoken.svelte";
   import Today from "./lib/pages/Today.svelte";
+  import PermissionGate from "./lib/PermissionGate.svelte";
   import Setup from "./lib/Setup.svelte";
   import Sidebar from "./lib/Sidebar.svelte";
   import { store } from "./lib/store.svelte";
@@ -35,7 +36,9 @@
     <Page />
   </main>
   <WindowBar />
-  {#if store.onboarding && !store.onboarding.done}<Setup />{/if}
+  <!-- The first run asks for the permissions itself; after it, the gate
+       waits for the microphone if it was taken away. -->
+  {#if store.onboarding && !store.onboarding.done}<Setup />{:else if store.micMissing}<PermissionGate />{/if}
 </div>
 
 <style>

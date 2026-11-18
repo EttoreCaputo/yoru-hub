@@ -145,23 +145,6 @@ pub fn hush() {
     }
 }
 
-/// Whether Yoru may use the Mac's microphone: `granted`, `denied`,
-/// `restricted`, or `unknown` while the user was never asked. With `ask`,
-/// macOS asks the user first if they never answered (it blocks until they
-/// do). The permission is the app's: `yoru-audio` runs as part of it.
-pub fn microphone(ask: bool) -> io::Result<String> {
-    let program = crate::sidecar::find_program("yoru-audio", "YORU_AUDIO")
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "yoru-audio isn't installed with the app"))?;
-    let mut command = Command::new(program);
-    command.arg("microphone");
-    if ask {
-        command.arg("--ask");
-    }
-    let out = command.stdin(Stdio::null()).stderr(Stdio::null()).output()?;
-    let event: Value = serde_json::from_slice(&out.stdout).map_err(|e| io::Error::other(format!("yoru-audio microphone: {e}")))?;
-    event["status"].as_str().map(str::to_string).ok_or_else(|| io::Error::other("yoru-audio microphone: no status"))
-}
-
 /// Start the board's thread; the host's end of the socket is returned.
 pub(crate) fn open() -> io::Result<UnixStream> {
     let (host, ours) = UnixStream::pair()?;

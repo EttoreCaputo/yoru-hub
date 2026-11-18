@@ -33,6 +33,7 @@ mod instances;
 mod meeting_watch;
 mod meetings;
 mod notch;
+mod permissions;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
@@ -1957,8 +1958,9 @@ pub fn run() {
             notch::notch_talk,
             notch::notch_hush,
             notch::notch_release,
-            notch::notch_microphone,
-            notch::open_microphone_privacy,
+            permissions::permissions,
+            permissions::request_permission,
+            permissions::open_privacy,
             set_notch,
             show_app,
             status, list_ports, set_port, set_transport, boards, show_board, set_primary, rename_board,

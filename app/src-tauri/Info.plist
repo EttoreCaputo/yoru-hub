@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Merged by Tauri into the app's Info.plist: why Yoru asks for what it
-     records in a meeting (docs/meetings.md). -->
+<!-- Merged by Tauri into the app's Info.plist: why Yoru asks for the
+     microphone, what it records in a meeting (docs/meetings.md), the
+     calendar, and the local network where the board is found over WiFi. -->
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
@@ -10,5 +11,11 @@
 	<string>Yoru records the sound of your calls and apps when you record a meeting.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Yoru reads your calendar to notice when a meeting is about to start and ask whether to record it.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Yoru finds his board on your WiFi and talks to it.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_yoru._tcp</string>
+	</array>
 </dict>
 </plist>
