@@ -809,6 +809,9 @@ const it: Messages = {
   },
 
   permissions: {
+    title: "Permessi",
+    change: "Cambia",
+    settingsHint: "Questi interruttori li tiene macOS: \"Consenti\" chiede la prima volta, poi si accendono e spengono in Impostazioni di Sistema. Yoru compare lì dopo averli chiesti.",
     required: "Obbligatorio",
     granted: "Consentito",
     allow: "Consenti",

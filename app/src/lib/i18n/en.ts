@@ -811,6 +811,9 @@ const en = {
   },
 
   permissions: {
+    title: "Permissions",
+    change: "Change",
+    settingsHint: "macOS keeps these switches: \"Allow\" asks the first time, then System Settings turns them on or off. Yoru shows up there once it has asked.",
     required: "Required",
     granted: "Allowed",
     allow: "Allow",

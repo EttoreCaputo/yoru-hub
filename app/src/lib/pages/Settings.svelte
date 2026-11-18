@@ -15,6 +15,7 @@
   import YoruBoard from "../YoruBoard.svelte";
   import Board from "../ui/Board.svelte";
   import KeyField from "../ui/KeyField.svelte";
+  import PermissionList from "../ui/PermissionList.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import Voice from "../ui/Voice.svelte";
   import Profiles from "../ui/Profiles.svelte";
@@ -394,6 +395,9 @@
 <!-- Yoru on this Mac: in the notch, and in Claude Code through his MCP server. -->
 {#snippet macPage()}
   {@const tb = i18n.t.board}
+  <h2 class="section-title">{i18n.t.permissions.title}</h2>
+  <PermissionList manage />
+  <p class="dim small perm-hint">{i18n.t.permissions.settingsHint}</p>
   <section class="panel">
     <div class="setting">
       <div class="what"><b>{tb.notch}</b><span>{tb.notchHint}</span></div>
@@ -674,6 +678,9 @@
     box-shadow: 0 0 36px -16px var(--c);
   }
 
+  .perm-hint {
+    margin: 10px 0 18px;
+  }
   .small {
     font-size: 12.5px;
     margin: -4px 0 10px;

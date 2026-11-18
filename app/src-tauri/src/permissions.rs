@@ -35,18 +35,23 @@ pub fn permissions() -> Permissions {
 #[tauri::command]
 pub async fn request_permission(kind: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        if status(&kind) != "unknown" {
-            return Ok(status(&kind));
+        let before = status(&kind);
+        if before != "unknown" {
+            log(&format!("{kind}: {before}, not asked again"));
+            return Ok(before);
         }
         ask(&kind)?;
         // No prompt and no answer: macOS can keep a record of an older
         // build that says neither yes nor no, and then it stays silent.
         // Forgetting this app's answer for that permission lets it ask.
         if status(&kind) == "unknown" {
+            log(&format!("{kind}: no answer, forgetting the old one and asking again"));
             reset(&kind);
             ask(&kind)?;
         }
-        Ok(status(&kind))
+        let after = status(&kind);
+        log(&format!("{kind}: asked, now {after}"));
+        Ok(after)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -66,6 +71,11 @@ pub fn open_privacy(kind: String) -> Result<(), String> {
         .status()
         .map_err(|e| e.to_string())
         .map(|_| ())
+}
+
+/// In `yoru.log`: when a prompt doesn't come up, what macOS said.
+fn log(line: &str) {
+    yoru_core::hostlog::line("permissions", line);
 }
 
 /// Forget this app's answer for one permission (only Yoru's, nobody else's).

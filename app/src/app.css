@@ -36,6 +36,18 @@
   box-sizing: border-box;
 }
 
+/* The main window's edge, a hairline as on a Mac window (the corners are
+   cut by the app: src-tauri/src/corners.rs). Not in the notch. */
+html:not(.notch) body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1px rgba(236, 233, 245, 0.12);
+  pointer-events: none;
+}
+
 html,
 body {
   margin: 0;

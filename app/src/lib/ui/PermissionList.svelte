@@ -6,9 +6,13 @@
   Settings shows here at once.
 -->
 <script lang="ts">
+  import { call } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
   import type { PermissionKind } from "../types";
+
+  /** In Settings, a granted one can be changed too (macOS turns it off, not the app). */
+  let { manage = false }: { manage?: boolean } = $props();
 
   const KINDS: PermissionKind[] = ["microphone", "calendar", "system_audio"];
   const t = $derived(i18n.t.permissions);
@@ -42,6 +46,7 @@
         </div>
         {#if state === "granted"}
           <span class="ok"><span class="dot done"></span>{t.granted}</span>
+          {#if manage}<button class="btn quiet small" onclick={() => call("open_privacy", { kind }).catch(() => {})}>{t.change}</button>{/if}
         {:else}
           <button class="btn small" class:primary={kind === "microphone"} disabled={!!asking} onclick={() => ask(kind)}>
             {asking === kind ? t.asking : state === "unknown" ? t.allow : t.openSettings}
