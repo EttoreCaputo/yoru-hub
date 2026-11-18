@@ -110,6 +110,8 @@
     background: none;
     resize: none;
     field-sizing: content;
+    /* It wraps: a horizontal scrollbar would only draw a bar under the text. */
+    overflow-x: hidden;
     font-size: 14px;
   }
   .big textarea {
