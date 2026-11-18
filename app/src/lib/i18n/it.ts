@@ -60,8 +60,6 @@ const it: Messages = {
   },
   confirm: { cancel: "Annulla" },
 
-  window: { minimize: "Riduci", maximize: "Ingrandisci", close: "Chiudi" },
-
   time: {
     now: "adesso",
     min: (n: number) => `${n} min fa`,

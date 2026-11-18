@@ -121,7 +121,8 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 22px 8px 22px;
+    /* Room above for macOS's own window buttons (tauri.conf.json's trafficLightPosition). */
+    padding: 52px 8px 22px;
   }
   .mini {
     width: 40px;

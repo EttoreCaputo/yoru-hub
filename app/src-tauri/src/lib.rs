@@ -29,7 +29,6 @@
 //! [`Hub`], which lives as long as the app, across bridge restarts.
 
 mod assistant;
-mod corners;
 mod instances;
 mod meeting_watch;
 mod meetings;
@@ -1934,9 +1933,6 @@ pub fn run() {
             // released and the whisper-server sidecar stopped.
             let quitter = handle.clone();
             let _ = ctrlc::set_handler(move || quitter.exit(0));
-            if let Some(main) = app.get_webview_window("main") {
-                corners::apply(&main);
-            }
             std::thread::spawn(permissions::log_state);
             let notch_on = app.state::<AppState>().settings.lock().unwrap().notch;
             notch::apply(handle, notch_on);
@@ -1949,12 +1945,6 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // In and out of full screen: square there, rounded elsewhere.
-            if let (WindowEvent::Resized(_), "main") = (event, window.label()) {
-                if let Some(main) = window.app_handle().get_webview_window("main") {
-                    corners::apply(&main);
-                }
-            }
             // Keep streaming to the board when the window is closed.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {

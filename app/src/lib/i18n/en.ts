@@ -60,8 +60,6 @@ const en = {
     quit: "Quit",
     unread: "{n} unread",
   },
-  window: { minimize: "Minimize", maximize: "Maximize", close: "Close" },
-
   confirm: { cancel: "Cancel" },
 
   time: {
