@@ -86,6 +86,11 @@ const CONVERSATION_MAX: usize = 120;
 const LOG_KEEP: usize = 300;
 /// The facts found for a request, in characters (a small local model gets half).
 const RECALL_CHARS: usize = 4000;
+/// Tries at reading an episode before the sleep gives it up.
+const SLEEP_TRIES: i64 = 6;
+/// The wait after the first failure, doubled after each next one
+/// (10, 20, 40, 80, 160 minutes).
+const SLEEP_RETRY_MS: i64 = 10 * 60 * 1000;
 /// The core of the memory, always in the prompt, in characters.
 const CORE_CHARS: usize = 12_000;
 /// How long a card waits for Allow or Deny.
@@ -633,18 +638,34 @@ impl Assistant {
         }
         let settings = self.settings();
         let ask = |prompt: &str, schema: &Value| self.complete_json(prompt, schema);
+        let now = memory::now_ms();
         for episode in self.memory.pending_episodes() {
+            // Failures so far, and when to try again: "2:1731900000000".
+            let key = format!("sleep_failed_{}", episode.id);
+            let state = self.memory.meta(&key).unwrap_or_default();
+            let mut state = state.split(':').map(|v| v.parse::<i64>().unwrap_or(0));
+            let (failed, retry_at) = (state.next().unwrap_or(0), state.next().unwrap_or(0));
+            if now < retry_at {
+                continue;
+            }
             match memory::sleep::consolidate(&self.memory, &episode, &settings.name, &ask) {
-                Ok(what) => done.push(format!("episode {} ({}): {what}", episode.id, episode.source)),
+                Ok(what) => {
+                    self.memory.drop_meta(&key);
+                    done.push(format!("episode {} ({}): {what}", episode.id, episode.source));
+                }
                 Err(e) => {
-                    // The brain may be away: try again later, but not forever.
-                    let key = format!("sleep_failed_{}", episode.id);
-                    let failed = self.memory.meta(&key).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) + 1;
-                    self.memory.set_meta(&key, &failed.to_string());
-                    if failed >= 3 {
+                    // The brain may be away: try again later, waiting longer
+                    // each time, for some hours, not forever.
+                    let failed = failed + 1;
+                    if failed >= SLEEP_TRIES {
                         self.memory.mark_consolidated(episode.id);
+                        self.memory.drop_meta(&key);
+                        done.push(format!("episode {}: {e}; given up after {failed} tries", episode.id));
+                    } else {
+                        let wait = SLEEP_RETRY_MS << (failed - 1);
+                        self.memory.set_meta(&key, &format!("{failed}:{}", now + wait));
+                        done.push(format!("episode {}: {e}; trying again in {} min", episode.id, wait / 60_000));
                     }
-                    done.push(format!("episode {}: {e}", episode.id));
                     break;
                 }
             }
@@ -670,8 +691,10 @@ impl Assistant {
                 loop {
                     std::thread::sleep(Duration::from_secs(120));
                     let Some(me) = me.upgrade() else { return };
+                    // In yoru.log: the app has no terminal, and a memory that
+                    // stops learning must say why.
                     for line in me.sleep_once() {
-                        eprintln!("memory sleep: {line}");
+                        crate::hostlog::line("memory", &line);
                     }
                 }
             })

@@ -65,7 +65,8 @@ pub trait Embedder: Send + Sync {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Fact {
     pub id: i64,
-    /// The entity it is about; `None`: the user, from before the graph.
+    /// The entity it is about. Always stored; `None` only in a new fact
+    /// from the Memory page, which is then the user's.
     pub about: Option<i64>,
     pub section: String,
     pub text: String,
@@ -566,7 +567,7 @@ impl Memory {
     // ---- facts ----
 
     /// Insert a fact as it is. Its id.
-    fn insert_fact(&self, about: Option<i64>, section: &str, text: &str, importance: f64, private: bool, episode: Option<i64>) -> Result<i64, String> {
+    pub(crate) fn insert_fact(&self, about: i64, section: &str, text: &str, importance: f64, private: bool, episode: Option<i64>) -> Result<i64, String> {
         let text = line(text);
         if text.is_empty() {
             return Err("nothing to remember".into());
@@ -585,7 +586,7 @@ impl Memory {
 
     /// The open fact that already says `text`: the same words, or the same
     /// meaning.
-    fn same_as(&self, text: &str) -> Option<i64> {
+    pub(crate) fn same_as(&self, text: &str) -> Option<i64> {
         let text = line(text);
         {
             let db = self.db.lock().unwrap();
@@ -618,10 +619,7 @@ impl Memory {
         if let Some(id) = self.same_as(text) {
             return Ok(format!("already known as [f{id}]"));
         }
-        let about = match about.map(str::trim).filter(|a| !a.is_empty()) {
-            Some(name) => self.resolve(name, None),
-            None => Some(self.user()),
-        };
+        let about = about.and_then(|name| self.resolve(name, None)).unwrap_or_else(|| self.user());
         // Its own episode is already in the graph: nothing for the sleep.
         let episode = episode.or_else(|| {
             let id = self.add_episode("remember", text);
@@ -671,7 +669,7 @@ impl Memory {
             return Err("nothing to write: use forget to remove the fact".into());
         }
         self.close(old.id);
-        let id = self.insert_fact(old.about, &old.section, text, old.importance, old.private, old.episode)?;
+        let id = self.insert_fact(old.about.unwrap_or_else(|| self.user()), &old.section, text, old.importance, old.private, old.episode)?;
         Ok(format!("[f{}] closed, now [f{id}]", old.id))
     }
 
@@ -717,14 +715,15 @@ impl Memory {
         if f.id == 0 {
             let episode = self.add_episode("page", &f.text);
             self.mark_consolidated(episode);
-            return self.insert_fact(f.about.or_else(|| Some(self.user())), &f.section, &f.text, f.importance, f.private, Some(episode));
+            return self.insert_fact(f.about.unwrap_or_else(|| self.user()), &f.section, &f.text, f.importance, f.private, Some(episode));
         }
         let text = line(&f.text);
+        let about = f.about.unwrap_or_else(|| self.user());
         let vector = self.embed(std::slice::from_ref(&text), false).and_then(|mut v| v.pop());
         let db = self.db.lock().unwrap();
         db.execute(
             "UPDATE facts SET about = ?1, section = ?2, text = ?3, importance = ?4, private = ?5, embedding = ?6 WHERE id = ?7",
-            params![f.about, f.section, text, f.importance.clamp(0.0, 1.0), f.private, vector.as_deref().map(to_blob), f.id],
+            params![about, f.section, text, f.importance.clamp(0.0, 1.0), f.private, vector.as_deref().map(to_blob), f.id],
         )
         .map_err(|e| e.to_string())?;
         Ok(f.id)
@@ -871,7 +870,7 @@ impl Memory {
             out.push_str(&line(format!("The user is {}{summary}.", u.name)));
             out.push('\n');
         }
-        let mine = |f: &&&Fact| f.about.is_none() || f.about == uid;
+        let mine = |f: &&&Fact| f.about == uid;
         let core = |f: &&&Fact| matches!(f.section.as_str(), "about" | "tell" | "quiet") || f.importance >= 0.8;
         for (key, title) in SECTIONS {
             let lines: Vec<String> = open.iter().filter(mine).filter(core).filter(|f| f.section == *key).map(|f| line(format!("- {}", f.text))).collect();
@@ -1099,6 +1098,11 @@ impl Memory {
     pub(crate) fn meta(&self, key: &str) -> Option<String> {
         let db = self.db.lock().unwrap();
         db.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).ok()
+    }
+
+    pub(crate) fn drop_meta(&self, key: &str) {
+        let db = self.db.lock().unwrap();
+        let _ = db.execute("DELETE FROM meta WHERE key = ?1", [key]);
     }
 
     pub(crate) fn set_meta(&self, key: &str, value: &str) {
