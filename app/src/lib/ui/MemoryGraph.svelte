@@ -63,7 +63,6 @@
     s: number;
     sv: number;
     born: number;
-    phase: number;
     held: boolean;
     entity?: Entity;
     fact?: Fact;
@@ -104,7 +103,6 @@
         s: calm ? 1 : 0,
         sv: 0,
         born: now + order++ * (old.size ? 0 : 35),
-        phase: Math.random() * Math.PI * 2,
         held: false,
       };
     };
@@ -373,13 +371,8 @@
     return hover ? byKey.get(hover) : undefined;
   });
 
-  /** Where a node is drawn: where it is, floating a little. */
-  const at = (n: Node) => {
-    if (calm || n.held) return { x: n.x, y: n.y };
-    const t = now / 1000;
-    const amp = n.fact ? 1.5 : 3;
-    return { x: n.x + Math.sin(t * 0.7 + n.phase) * amp, y: n.y + Math.cos(t * 0.9 + n.phase * 1.3) * amp };
-  };
+  /** Where a node is drawn: where the physics put it, no motion of its own. */
+  const at = (n: Node) => ({ x: n.x, y: n.y });
   /** The link's curve: its ends, and a control point bowed by its bend. */
   const curve = (l: Link) => {
     const a = at(l.a);
@@ -398,18 +391,7 @@
   const drawn = $derived.by(() => {
     void frame;
     const ls = links.map((l) => ({ l, q: curve(l) }));
-    // Light running along each relation, both ways, at its own pace.
-    const sparks = calm
-      ? []
-      : ls
-          .filter(({ l }) => l.label)
-          .flatMap(({ l, q }, i) =>
-            [0, 0.5].map((off) => {
-              const t = (now / (2200 + q.d * 6) + off + i * 0.13) % 1;
-              return { ...bezier(q, off ? 1 - t : t), o: Math.sin(t * Math.PI), colour: colourOf(off ? l.a : l.b) };
-            }),
-          );
-    return { links: ls, sparks, nodes: [...nodes].sort((a, b) => (a.fact ? 0 : 1) - (b.fact ? 0 : 1)).map((n) => ({ n, p: at(n) })) };
+    return { links: ls, nodes: [...nodes].sort((a, b) => (a.fact ? 0 : 1) - (b.fact ? 0 : 1)).map((n) => ({ n, p: at(n) })) };
   });
 
   const colourOf = (n: Node) => (n.entity ? (n.entity.is_user ? "#ece9f5" : KIND_COLOURS[n.entity.kind] ?? KIND_COLOURS.thing) : SECTION_COLOURS[n.fact!.section] ?? "#a19cba");
@@ -437,10 +419,6 @@
         <feGaussianBlur stdDeviation="7" result="blur" />
         <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
       </filter>
-      <filter id="mg-spark" x="-200%" y="-200%" width="500%" height="500%">
-        <feGaussianBlur stdDeviation="2.2" result="blur" />
-        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-      </filter>
       <radialGradient id="mg-shine" cx="35%" cy="30%" r="70%">
         <stop offset="0%" stop-color="#fff" stop-opacity="0.55" />
         <stop offset="45%" stop-color="#fff" stop-opacity="0.08" />
@@ -451,9 +429,6 @@
       {#each drawn.links as { l, q }, i (i)}
         {@const lit = !near || (near.has(l.a.key) && near.has(l.b.key))}
         <path d="M{q.a.x} {q.a.y} Q{q.c.x} {q.c.y} {q.b.x} {q.b.y}" class="link" class:loose={l.loose} class:fact={!!l.b.fact} class:dim={!lit} class:hot={!!near && lit && !!l.label} />
-      {/each}
-      {#each drawn.sparks as s, i (i)}
-        <circle cx={s.x} cy={s.y} r="2.4" fill={s.colour} opacity={s.o * 0.9} filter="url(#mg-spark)" class="spark" />
       {/each}
       {#each drawn.links.filter(({ l }) => l.label) as { l, q }, i (i)}
         {@const lit = !near || (near.has(l.a.key) && near.has(l.b.key))}
@@ -475,7 +450,6 @@
           {#if n.entity}
             {#if n.entity.id === selected}
               <circle r={n.r + 7} class="halo" style:stroke={colourOf(n)} />
-              <circle r={n.r + 7} class="halo pulse" style:stroke={colourOf(n)} />
             {/if}
             <circle r={n.r} fill={colourOf(n)} class="body" class:placeholder={n.entity.placeholder} class:user={n.entity.is_user} filter={n.entity.placeholder ? undefined : "url(#mg-glow)"} />
             {#if !n.entity.placeholder}<circle r={n.r} fill="url(#mg-shine)" class="shine" />{/if}
@@ -554,9 +528,6 @@
     stroke: color-mix(in srgb, var(--pearl-mid) 18%, transparent);
     stroke-width: 1;
   }
-  .spark {
-    pointer-events: none;
-  }
   .rel {
     fill: var(--haze);
     font: 500 10.5px var(--sans);
@@ -589,7 +560,6 @@
     stroke-dasharray: 3 3;
     color: var(--haze);
     stroke-width: 1.5;
-    animation: turn 12s linear infinite;
   }
   .shine {
     pointer-events: none;
@@ -598,26 +568,6 @@
     fill: none;
     stroke-width: 2;
     opacity: 0.8;
-  }
-  .halo.pulse {
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: pulse 1.8s ease-out infinite;
-  }
-  @keyframes pulse {
-    from {
-      transform: scale(1);
-      opacity: 0.7;
-    }
-    to {
-      transform: scale(1.9);
-      opacity: 0;
-    }
-  }
-  @keyframes turn {
-    to {
-      stroke-dashoffset: -60;
-    }
   }
   .voice {
     fill: var(--done);
@@ -700,11 +650,5 @@
   .legend i.small {
     width: 6px;
     height: 6px;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .halo.pulse,
-    .body.placeholder {
-      animation: none;
-    }
   }
 </style>
