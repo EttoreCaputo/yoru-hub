@@ -1,8 +1,8 @@
 <!--
   The top of the window, over everything: the macOS title bar is hidden
   behind the page (its own buttons sit at the top left), so this strip is
-  where the window is dragged from. Next to the Mac's buttons, the one that
-  folds the sidebar away, then the tabs, as in Pocket: the page's (Home,
+  where the window is dragged from. Over the sidebar, at its right edge, the
+  one that folds it away; then, from where the page's card starts, the tabs, as in Pocket: the page's (Home,
   Memory…), each conversation or meeting opened, and + for a new
   conversation. On the right, Notifications and Settings, a click
   away from every page, and the one that folds the activity panel.
@@ -46,9 +46,11 @@
 </script>
 
 <div class="bar chrome" data-tauri-drag-region>
-  <button class="icon-btn side" class:on={!look.sidebar} aria-label={sideLabel} title={sideLabel} onclick={() => look.toggleSidebar()}>
-    <Icon name="panel-left" />
-  </button>
+  <div class="lead" class:folded={!look.sidebar} data-tauri-drag-region>
+    <button class="icon-btn side" class:on={!look.sidebar} aria-label={sideLabel} title={sideLabel} onclick={() => look.toggleSidebar()}>
+      <Icon name="panel-left" />
+    </button>
+  </div>
 
   <div class="tabs" role="tablist" data-tauri-drag-region>
     <button class="tab pagetab" role="tab" class:on={tabs.active < 0} aria-selected={tabs.active < 0} onclick={() => tabs.page()}>
@@ -89,9 +91,23 @@
     grid-row: 1;
     display: flex;
     align-items: center;
-    /* Past macOS's own buttons (tauri.conf.json's trafficLightPosition). */
-    padding: 2px 14px 0 82px;
+    padding: 2px 14px 0 0;
     z-index: 5;
+  }
+  /* As wide as the sidebar (App.svelte's first column), its button at the
+     sidebar's right edge, so the tabs start where the page's card does.
+     Folded, just past macOS's own buttons (tauri.conf.json's trafficLightPosition). */
+  .lead {
+    display: flex;
+    justify-content: flex-end;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: var(--sidebar-w);
+    padding-right: 10px;
+    transition: width 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .lead.folded {
+    width: 128px;
   }
   .tabs {
     display: flex;
@@ -99,7 +115,6 @@
     gap: 6px;
     flex: 1;
     min-width: 0;
-    margin-left: 10px;
     overflow: hidden;
   }
   /* A tab is a pill on the frame; the one shown is solid, like the page under it. */
