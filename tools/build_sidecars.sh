@@ -77,7 +77,10 @@ mkdir -p "$work" "$out/licenses"
 fetch llama.cpp "$LLAMA_CPP"
 fetch whisper.cpp "$WHISPER_CPP"
 
-llama="$(build llama.cpp llama-server -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF)"
+# Without the web UI: Yoru only calls the API, and the prebuilt UI llama.cpp
+# fetches from Hugging Face at build time no longer matches b11146 (the
+# release build of 2026-11-18 failed on it).
+llama="$(build llama.cpp llama-server -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_USE_PREBUILT_UI=OFF)"
 whisper="$(build whisper.cpp whisper-server -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_SERVER=ON -DWHISPER_SDL2=OFF -DWHISPER_CURL=OFF)"
 
 cp "$llama" "$out/llama-server-$target$exe"
