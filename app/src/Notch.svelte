@@ -58,6 +58,9 @@
   /** The microphone's permission: granted, denied, restricted, unknown. */
   let mic = $state("granted");
   let shape: HTMLElement | undefined = $state();
+  /** The coding sessions at work are shown only once asked for, with the
+   *  pointer on their count, and until the pointer leaves the notch. */
+  let sessions = $state(false);
 
   const ear = $derived(geometry.height + 8);
   const closedWidth = $derived(geometry.width + 2 * ear);
@@ -91,6 +94,10 @@
   // Settings may have changed it meanwhile: look again on opening.
   $effect(() => {
     if (pointer && mic !== "granted") void checkMic(false);
+  });
+
+  $effect(() => {
+    if (!pointer) sessions = false;
   });
 
   call<Geometry | null>("notch_geometry").then((g) => g && (geometry = g), () => {});
@@ -242,7 +249,7 @@
       {:else if store.unread}
         <span class="count">{store.unread}</span>
       {:else if store.working}
-        <span class="count agents" title={i18n.t.agents.title}>{store.working}</span>
+        <span class="count agents" role="presentation" title={i18n.t.agents.title} onpointerenter={() => (sessions = true)}>{store.working}</span>
       {/if}
     </div>
   </div>
@@ -293,7 +300,7 @@
         <p class="hint">{t.empty}</p>
       {/if}
       {#if error || store.askError}<p class="error">{error || store.askError}</p>{/if}
-      {#if store.agents.length}
+      {#if sessions && store.agents.length}
         <section class="at-work">
           <p class="label">{i18n.t.agents.title}</p>
           <AgentList limit={3} dark />
