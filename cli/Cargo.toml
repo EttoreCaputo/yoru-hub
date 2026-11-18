@@ -1,6 +1,6 @@
 [package]
 name = "yoru-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Command line for Yoru, the personal assistant with a body on the desk"
 authors = ["Ettore Caputo <ettore.caputo27@gmail.com>"]
