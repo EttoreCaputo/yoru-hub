@@ -1,30 +1,19 @@
 <!--
   The sidebar: Yoru's own small presence at the top (lit by what it's doing),
-  with two boards or more the list of them to pick the one shown, the pages,
+  with two boards or more the list of them to pick the one shown, the pages
+  (Notifications and Settings are icons in the window bar),
   and "do not disturb" at the bottom.
 -->
 <script lang="ts">
   import { i18n } from "./i18n/index.svelte";
+  import { PAGE_ICONS } from "./icons/pages";
   import { store, type Page } from "./store.svelte";
 
   const t = $derived(i18n.t);
 
-  const ICONS: Record<Page, string> = {
-    today: "M3 18h18M7 18a5 5 0 0 1 10 0M12 6v2.5M5.6 10.6l1.6 1.6M18.4 10.6l-1.6 1.6",
-    conversation: "M5 6h14v9H10l-4 3v-3H5z",
-    inbox: "M4 13h4l1.5 2.5h5L16 13h4M5.5 6h13L20 13v5H4v-5z",
-    connectors: "M9 7V4M15 7V4M7 7h10v4a5 5 0 0 1-10 0zM12 16v4",
-    tasks: "M9 6h10M9 12h10M9 18h10M4.5 5.5l1 1 2-2M4.5 11.5l1 1 2-2M4.5 17.5l1 1 2-2",
-    routines: "M12 7v5l3 2M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z",
-    memory: "M6 4h9l3 3v13H6zM9 10h6M9 14h6",
-    meetings: "M12 4a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3ZM6 11a6 6 0 0 0 12 0M12 17v3",
-    spoken: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2",
-    animations: "M4 6h16v12H4zM10 9.5v5l4-2.5z",
-    settings: "M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4",
-  };
   const MOON = "M4 13a8 8 0 0 0 15 3.5A8 8 0 0 1 9 5a8 8 0 0 0-5 8Z";
-  const MAIN: Page[] = ["today", "conversation", "inbox", "connectors", "tasks", "routines", "memory", "meetings", "spoken", "animations"];
-  const BODY: Page[] = ["settings"];
+  // Notifications and Settings are icons in the window bar; Settings opens Services, Spoken and Animations.
+  const MAIN: Page[] = ["today", "conversation", "tasks", "routines", "memory", "meetings"];
 
   const tint = $derived(
     store.asking || store.voice === "thinking" ? "think" : store.voice === "speaking" ? "done" : store.confirmations.length ? "wait" : null,
@@ -41,12 +30,8 @@
   const boardDot = (link: string) => (link === "connected" ? "done" : link === "searching" ? "think" : "wrong");
 
   const badge = (p: Page): { n?: number; dot?: string } | null => {
-    if (p === "inbox" && store.unread) return { n: store.unread };
     if (p === "conversation" && store.confirmations.length) return { dot: "wait" };
     if (p === "meetings" && store.recording) return { dot: "wrong" };
-    if (p === "settings" && store.info && !store.info.ready) return { dot: "wrong" };
-    if (p === "settings" && store.update) return { dot: "wait" };
-    if (p === "connectors" && store.connectors.some((c) => c.enabled && (c.state === "needs_login" || c.state === "error"))) return { dot: "wait" };
     return null;
   };
 </script>
@@ -94,9 +79,6 @@
   <ul>
     {#each MAIN as p (p)}{@render item(p)}{/each}
   </ul>
-  <ul class="body">
-    {#each BODY as p (p)}{@render item(p)}{/each}
-  </ul>
 
   <footer>
     {#if quietUntil}
@@ -119,7 +101,7 @@
   {@const b = badge(p)}
   <li>
     <button class:on={store.page === p} aria-current={store.page === p ? "page" : undefined} onclick={() => store.go(p)}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={ICONS[p]} /></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={PAGE_ICONS[p]} /></svg>
       <span>{t.nav[p]}</span>
       {#if b?.n}<span class="count">{b.n}</span>{:else if b?.dot}<span class="dot {b.dot}"></span>{/if}
     </button>
@@ -250,11 +232,6 @@
     padding: 0;
     display: grid;
     gap: 2px;
-  }
-  ul.body {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid var(--rim);
   }
   li button {
     display: flex;

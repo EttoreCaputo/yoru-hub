@@ -697,6 +697,12 @@ const en = {
     boardOff: "Not connected",
     aboutSummary: "Data and first setup",
     back: "Settings",
+    more: "Also here",
+    moreNotes: {
+      connectors: "The services Yoru reads and acts on for you.",
+      spoken: "What Yoru said with a cloud voice, to hear again or export.",
+      animations: "Every animation of Yoru's eyes, to try on the board.",
+    },
     provider: "Thinks with",
     model: "Model",
     keyOf: (name: string) => `${name} key`,

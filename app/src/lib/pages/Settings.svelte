@@ -20,6 +20,7 @@
   import Voice from "../ui/Voice.svelte";
   import Profiles from "../ui/Profiles.svelte";
   import { currentProfile } from "../profiles";
+  import { PAGE_ICONS, SETTINGS_PAGES } from "../icons/pages";
 
   const t = $derived(i18n.t.settings);
   const s = $derived(store.info?.settings);
@@ -183,6 +184,11 @@
     const bx = w.side < 0 ? Math.max(ax, ex - Math.abs(ey - ay)) : Math.min(ax, ex + Math.abs(ey - ay));
     return { d: `M ${ax} ${ay} H ${bx} L ${ex} ${ey}`, ax, ay, ex, ey };
   }
+  // The pages that aren't part of Yoru's wiring, opened from the menu under it.
+  const MORE_COLORS: Record<(typeof SETTINGS_PAGES)[number], string> = { connectors: "var(--think)", spoken: "#c58cff", animations: "var(--done)" };
+  const moreDot = (p: (typeof SETTINGS_PAGES)[number]) =>
+    p === "connectors" && store.connectors.some((c) => c.enabled && (c.state === "needs_login" || c.state === "error")) ? "wait" : "";
+
   // Yoru looks at the card under the pointer.
   const gaze = $derived<Gaze | null>(hover ? { x: wire(hover).side * 0.9, y: offset(wire(hover)) * 0.5, movedAt: store.now } : store.gaze);
 </script>
@@ -264,6 +270,21 @@
         </button>
       {/each}
     </div>
+
+    <h2 class="section-title more-title">{t.more}</h2>
+    <nav class="menu panel" aria-label={t.more}>
+      {#each SETTINGS_PAGES as p (p)}
+        {@const dot = moreDot(p)}
+        <button style:--c={MORE_COLORS[p]} onclick={() => store.go(p)}>
+          <span class="glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={PAGE_ICONS[p]} /></svg></span>
+          <span class="words">
+            <b>{i18n.t.nav[p]}{#if dot}<span class="dot {dot}"></span>{/if}</b>
+            <span class="says">{t.moreNotes[p]}</span>
+          </span>
+          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6" /></svg>
+        </button>
+      {/each}
+    </nav>
   {/if}
 </div>
 
@@ -510,6 +531,35 @@
   }
 
   /* A part: a card wired to Yoru. */
+  .more-title {
+    margin-top: 28px;
+  }
+  .menu {
+    display: grid;
+    padding: 4px;
+  }
+  .menu button {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: calc(var(--r-lg) - 4px);
+    background: none;
+    color: var(--pearl);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 160ms;
+  }
+  .menu button + button {
+    box-shadow: 0 -1px 0 var(--rim);
+  }
+  .menu button:hover,
+  .menu button:focus-visible {
+    background: color-mix(in srgb, var(--c) 7%, var(--ink-2));
+    outline: none;
+  }
   .part {
     position: absolute;
     right: 0;
@@ -611,6 +661,7 @@
       stroke 200ms,
       transform 200ms;
   }
+  .menu button:hover .chev,
   .part:hover .chev {
     stroke: var(--c);
     transform: translateX(2px);

@@ -695,6 +695,12 @@ const it: Messages = {
     boardOff: "Non collegata",
     aboutSummary: "Dati e prima configurazione",
     back: "Impostazioni",
+    more: "Anche qui",
+    moreNotes: {
+      connectors: "I servizi che Yoru legge e su cui agisce per te.",
+      spoken: "Quello che Yoru ha detto con una voce cloud, da riascoltare o esportare.",
+      animations: "Tutte le animazioni degli occhi di Yoru, da provare sulla scheda.",
+    },
     provider: "Pensa con",
     model: "Modello",
     keyOf: (name: string) => `Chiave di ${name}`,

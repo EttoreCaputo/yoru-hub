@@ -16,12 +16,15 @@
   import Sidebar from "./lib/Sidebar.svelte";
   import { store } from "./lib/store.svelte";
   import WindowBar from "./lib/WindowBar.svelte";
+  import { SETTINGS_PAGES } from "./lib/icons/pages";
 
   store.start();
   i18n.start();
 
   const PAGES = { today: Today, conversation: Conversation, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
+  // Services, Spoken and Animations are opened from Settings, and lead back to it.
+  const fromSettings = $derived((SETTINGS_PAGES as readonly string[]).includes(store.page));
   let main: HTMLElement | undefined = $state();
   // Each page starts at its top.
   $effect(() => {
@@ -33,6 +36,13 @@
 <div class="app">
   <Sidebar />
   <main bind:this={main}>
+    {#if fromSettings}
+      <div class="back">
+        <button class="btn quiet small" onclick={() => store.go("settings")}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6l-6 6 6 6" /></svg>{i18n.t.settings.back}
+        </button>
+      </div>
+    {/if}
     <Page />
   </main>
   <WindowBar />
@@ -52,5 +62,24 @@
     position: relative;
     overflow-y: auto;
     padding-top: 18px;
+  }
+  /* Lined up with the page under it, which then starts a little higher. */
+  .back {
+    max-width: 920px;
+    margin: 16px auto -26px;
+    padding: 0 40px;
+  }
+  .back button {
+    margin-left: -10px;
+    gap: 4px;
+  }
+  .back svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 </style>

@@ -156,6 +156,8 @@ Until 2026-10-19 the window was DualEye's: a home with the board's mirror and pi
 | Spoken | What ElevenLabs said, to play again, delete or export (added 2026-10-22) |
 | Settings | A list of parts: how Yoru thinks and talks (a setup: Free, The best, Live, Private, or Custom with the brain, its model and key), the MCP server, voice (listening, speaking, keep listening, a goodbye, the end of a sentence), language, the board (connection, WiFi, firmware, its settings, wake word, volume; it was the Yoru page until 2026-10-21) and about |
 
+Since 2026-11-18 Inbox and Settings are icons at the top right of the window, not sidebar items, and Connectors, Spoken and Animations open from a menu in Settings.
+
 The tray icon shows the last notification, a "talk" button and do-not-disturb. The first run has four steps: connect Yoru, pick the brain (with Yoru's voice as an optional part), connect a first service, say what matters to you (the first memory).
 
 ## What leaves this repository
