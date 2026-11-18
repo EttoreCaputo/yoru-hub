@@ -12,6 +12,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager, State};
+use yoru_core::assistant::{self, Brain};
 use yoru_core::llm::{self, Llm, LlmConfig};
 use yoru_core::meetings::{self, Event, Format, Meeting, Recording, Request, Settings, Sources, Summary, SummaryBy, Transcript, When};
 
@@ -262,13 +263,19 @@ struct Summarizer {
     /// The voice's local model, when it runs one: only one llama-server
     /// at a time (they share a pid file).
     shared: Option<Arc<yoru_core::Agent>>,
-    brain: bool,
+    /// A cloud (or Ollama) model, instead of the local one: `None` for the
+    /// brain's own, or a model picked for the summaries.
+    remote: Option<Option<(Brain, String)>>,
 }
 
 impl Summarizer {
     fn complete(&self, app: &AppHandle, prompt: &str, schema: &Value) -> Result<String, String> {
-        if self.brain {
-            return app.state::<AppState>().assistant.complete_json(prompt, schema);
+        if let Some(remote) = &self.remote {
+            let assistant = &app.state::<AppState>().assistant;
+            return match remote {
+                Some((brain, model)) => assistant.complete_json_by(*brain, model, prompt, schema),
+                None => assistant.complete_json(prompt, schema),
+            };
         }
         let llm = self.own.as_deref().or(self.shared.as_ref().map(|a| a.llm())).ok_or("no local model")?;
         let request = json!({
@@ -291,12 +298,20 @@ impl Summarizer {
 /// The summarizer the settings ask for, or why there is none.
 fn summarizer(app: &AppHandle) -> Result<Summarizer, String> {
     let state = app.state::<AppState>();
+    // Groq's free tier and Ollama read little at once; the others a lot.
+    let chunk = |brain: Brain| if matches!(brain, Brain::Groq | Brain::Ollama) { 12_000 } else { 120_000 };
     match meetings::settings().summary_by {
         SummaryBy::Brain => {
             let settings = state.assistant.settings();
             let brain = settings.brain().filter(|b| b.has_key()).ok_or("no brain is set up (Settings, Brain)")?;
-            let chunk = if matches!(brain, yoru_core::assistant::Brain::Groq | yoru_core::assistant::Brain::Ollama) { 12_000 } else { 120_000 };
-            Ok(Summarizer { label: format!("{} {}", brain.name(), settings.model_of(brain)), chunk, own: None, shared: None, brain: true })
+            Ok(Summarizer { label: format!("{} {}", brain.name(), settings.model_of(brain)), chunk: chunk(brain), own: None, shared: None, remote: Some(None) })
+        }
+        SummaryBy::Model { provider, model } => {
+            let brain = Brain::by_id(&provider).ok_or_else(|| format!("no provider {provider}"))?;
+            if !brain.has_key() {
+                return Err(format!("no {} key: add it in Settings, or pick another model for the summaries", brain.name()));
+            }
+            Ok(Summarizer { label: format!("{} {model}", brain.name()), chunk: chunk(brain), own: None, shared: None, remote: Some(Some((brain, model))) })
         }
         SummaryBy::Local => {
             let shared = state.voice.lock().unwrap().agent.clone().filter(|a| a.llm().config().is_local());
@@ -309,7 +324,7 @@ fn summarizer(app: &AppHandle) -> Result<Summarizer, String> {
                 }
             };
             let name = model.and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_default();
-            Ok(Summarizer { label: name, chunk: 12_000, own, shared, brain: false })
+            Ok(Summarizer { label: name, chunk: 12_000, own, shared, remote: None })
         }
     }
 }
@@ -324,20 +339,42 @@ pub fn meeting_summary(id: String) -> Result<Option<Summary>, String> {
     meetings::summary(&id).map_err(|e| e.to_string())
 }
 
-/// What can summarize: whether the local model is there, and the brain's name.
+/// What can summarize: whether the local model is there, the brain's name,
+/// and every model of the providers with a key (and Ollama's, if running).
 #[derive(Serialize)]
 pub struct Summarizers {
     local: bool,
     brain: Option<String>,
+    models: Vec<SummaryModel>,
+}
+
+/// A model that can summarize: `id` is the setting's value (`groq:qwen/…`).
+#[derive(Serialize)]
+pub struct SummaryModel {
+    id: String,
+    provider: &'static str,
+    model: String,
+    note: String,
 }
 
 #[tauri::command]
-pub fn meeting_summarizers(state: State<'_, AppState>) -> Summarizers {
-    let settings = state.assistant.settings();
-    Summarizers {
-        local: llm::local_fallback().is_some() || state.voice.lock().unwrap().agent.as_ref().is_some_and(|a| a.llm().config().is_local()),
-        brain: settings.brain().filter(|b| b.has_key()).map(|b| format!("{} · {}", b.name(), settings.model_of(b))),
-    }
+pub async fn meeting_summarizers(app: AppHandle) -> Result<Summarizers, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let settings = state.assistant.settings();
+        let models = Brain::ALL
+            .into_iter()
+            .filter(|b| b.has_key())
+            .flat_map(|b| assistant::chat_models(b).into_iter().map(move |(model, note)| SummaryModel { id: format!("{}:{model}", b.id()), provider: b.name(), model, note }))
+            .collect();
+        Summarizers {
+            local: llm::local_fallback().is_some() || state.voice.lock().unwrap().agent.as_ref().is_some_and(|a| a.llm().config().is_local()),
+            brain: settings.brain().filter(|b| b.has_key()).map(|b| format!("{} · {}", b.name(), settings.model_of(b))),
+            models,
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

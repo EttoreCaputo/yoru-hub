@@ -635,7 +635,15 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   }),
   meeting_export: () => "/Users/you/Downloads/Weekly with Marco.md",
   meeting_import: () => null,
-  meeting_summarizers: () => ({ local: true, brain: "OpenAI · gpt-6-luna" }),
+  meeting_summarizers: () => ({
+    local: true,
+    brain: "OpenAI · gpt-6-luna",
+    models: [
+      { id: "anthropic:claude-sonnet-5-5", provider: "Claude", model: "claude-sonnet-5-5", note: "Claude Sonnet 5.5: nearly as good, cheaper" },
+      { id: "openai:gpt-6-luna", provider: "OpenAI", model: "gpt-6-luna", note: "GPT-6 Luna: fast and cheap" },
+      { id: "groq:openai/gpt-oss-120b", provider: "Groq", model: "openai/gpt-oss-120b", note: "" },
+    ],
+  }),
   meeting_summary: (a) =>
     a.id === "20261029-143000"
       ? {

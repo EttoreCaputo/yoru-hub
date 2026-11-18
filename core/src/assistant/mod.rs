@@ -182,6 +182,18 @@ impl Settings {
         self.provider.or_else(Brain::auto)
     }
 
+    /// Use `model` for `brain`.
+    pub fn set_model_of(&mut self, brain: Brain, model: &str) {
+        let field = match brain {
+            Brain::Anthropic => &mut self.model,
+            Brain::OpenAi => &mut self.openai_model,
+            Brain::Google => &mut self.google_model,
+            Brain::Groq => &mut self.groq_model,
+            Brain::Ollama => &mut self.ollama_model,
+        };
+        *field = model.to_string();
+    }
+
     /// The model of `brain`.
     pub fn model_of(&self, brain: Brain) -> &str {
         match brain {
@@ -892,26 +904,16 @@ impl Assistant {
     /// One answer in JSON matching `schema`, with no tools: the watchers'
     /// triage, a meeting's summary. Its text, to be parsed by the caller.
     pub fn complete_json(&self, prompt: &str, schema: &Value) -> Result<String, String> {
-        let settings = self.settings();
-        match settings.brain() {
-            Some(Brain::Anthropic) => {
-                let key = anthropic::api_key().ok_or("no Anthropic API key")?;
-                let body = json!({
-                    "model": settings.model,
-                    "max_tokens": 16000,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "thinking": {"type": "adaptive"},
-                    "output_config": {"effort": settings.task_effort, "format": {"type": "json_schema", "schema": schema}},
-                });
-                let response = anthropic::messages(&key, &body).map_err(|e| e.to_string())?;
-                if response["stop_reason"] == "refusal" {
-                    return Err("the model declined to read this output".into());
-                }
-                Ok(text_of(&response["content"]))
-            }
-            Some(brain) => compat::complete_json(&settings, brain, prompt, schema),
-            None => Err(NO_BRAIN.into()),
-        }
+        complete_json_with(&self.settings(), prompt, schema)
+    }
+
+    /// [`Self::complete_json`] with `model` of `brain`, whatever the brain
+    /// in Settings is: a meeting's summary by a model of its own.
+    pub fn complete_json_by(&self, brain: Brain, model: &str, prompt: &str, schema: &Value) -> Result<String, String> {
+        let mut settings = self.settings();
+        settings.provider = Some(brain);
+        settings.set_model_of(brain, model);
+        complete_json_with(&settings, prompt, schema)
     }
 
     fn call_tool(&self, name: &str, input: &Value, board: &[Tool], external: &[ExternalTool], host: &dyn Host) -> Result<String, String> {
@@ -1394,6 +1396,61 @@ fn text_of(content: &Value) -> String {
 }
 
 /// A tool's arguments in one line for the board's card: its strings, by name.
+/// One answer in JSON matching `schema`, by `settings`' brain and model.
+fn complete_json_with(settings: &Settings, prompt: &str, schema: &Value) -> Result<String, String> {
+    match settings.brain() {
+        Some(Brain::Anthropic) => {
+            let key = anthropic::api_key().ok_or("no Anthropic API key")?;
+            let body = json!({
+                "model": settings.model,
+                "max_tokens": 16000,
+                "messages": [{"role": "user", "content": prompt}],
+                "thinking": {"type": "adaptive"},
+                "output_config": {"effort": settings.task_effort, "format": {"type": "json_schema", "schema": schema}},
+            });
+            let response = anthropic::messages(&key, &body).map_err(|e| e.to_string())?;
+            if response["stop_reason"] == "refusal" {
+                return Err("the model declined to read this output".into());
+            }
+            Ok(text_of(&response["content"]))
+        }
+        Some(brain) => compat::complete_json(settings, brain, prompt, schema),
+        None => Err(NO_BRAIN.into()),
+    }
+}
+
+/// Claude's models, as Settings offers them.
+pub const CLAUDE_MODELS: &[(&str, &str)] = &[
+    ("claude-opus-5-5", "Claude Opus 5.5: the best"),
+    ("claude-sonnet-5-5", "Claude Sonnet 5.5: nearly as good, cheaper"),
+    ("claude-haiku-5-5", "Claude Haiku 5.5: quick and cheap"),
+];
+
+/// The chat models `brain` offers, as ids and notes: Claude's, the
+/// catalog's, or those Ollama has on this computer (none if it isn't
+/// running). Whether there is a key is the caller's concern.
+pub fn chat_models(brain: Brain) -> Vec<(String, String)> {
+    match brain {
+        Brain::Anthropic => CLAUDE_MODELS.iter().map(|(id, note)| (id.to_string(), note.to_string())).collect(),
+        Brain::Ollama => cloud::list_models(&cloud::OLLAMA).unwrap_or_default().into_iter().map(|id| (id, String::new())).collect(),
+        brain => compat::models(brain).into_iter().map(|(id, note)| (id.to_string(), note.to_string())).collect(),
+    }
+}
+
+impl Brain {
+    pub const ALL: [Brain; 5] = [Brain::Anthropic, Brain::OpenAi, Brain::Google, Brain::Groq, Brain::Ollama];
+
+    /// Its id in settings (`openai`).
+    pub fn id(self) -> &'static str {
+        self.provider().id
+    }
+
+    /// The brain whose id is `id`.
+    pub fn by_id(id: &str) -> Option<Brain> {
+        Brain::ALL.into_iter().find(|b| b.id() == id)
+    }
+}
+
 fn summarize(input: &Value) -> String {
     let Some(map) = input.as_object() else { return input.to_string() };
     let parts: Vec<String> = map

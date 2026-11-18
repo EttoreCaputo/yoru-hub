@@ -163,7 +163,19 @@
   }
 
   /** Whether the settings' summarizer is there. */
-  const canSummarize = $derived(!!settings && !!summarizers && (settings.summary_by === "local" ? summarizers.local : !!summarizers.brain));
+  const canSummarize = $derived(
+    !!settings &&
+      !!summarizers &&
+      (settings.summary_by === "local" ? summarizers.local : settings.summary_by === "brain" ? !!summarizers.brain : summarizers.models.some((m) => m.id === settings!.summary_by)),
+  );
+  /** The models to summarize with, by provider. */
+  const providers = $derived.by(() => {
+    const by = new Map<string, Summarizers["models"]>();
+    for (const m of summarizers?.models ?? []) by.set(m.provider, [...(by.get(m.provider) ?? []), m]);
+    return [...by];
+  });
+  /** The chosen model when its provider's key is gone: still shown, as missing. */
+  const lost = $derived(!!settings && !!summarizers && !["local", "brain"].includes(settings.summary_by) && !summarizers.models.some((m) => m.id === settings!.summary_by));
 
   async function summarize(m: Meeting) {
     error = "";
@@ -397,9 +409,17 @@
       </div>
       <div class="setting">
         <div class="what"><b>{t.summaryBy}</b><span>{t.summaryByHint}</span></div>
-        <div class="how choices" role="radiogroup" aria-label={t.summaryBy}>
-          <button class="choice" class:on={settings.summary_by === "local"} role="radio" aria-checked={settings.summary_by === "local"} onclick={() => saveSettings({ summary_by: "local" })}>{t.thisComputer}</button>
-          <button class="choice" class:on={settings.summary_by === "brain"} role="radio" aria-checked={settings.summary_by === "brain"} disabled={!summarizers?.brain} title={summarizers?.brain ?? t.noBrain} onclick={() => saveSettings({ summary_by: "brain" })}>{summarizers?.brain ?? t.brain}</button>
+        <div class="how">
+          <select value={settings.summary_by} onchange={(e) => saveSettings({ summary_by: e.currentTarget.value })} aria-label={t.summaryBy}>
+            <option value="local">{t.thisComputer}</option>
+            <option value="brain" disabled={!summarizers?.brain}>{summarizers?.brain ? `${t.brain} (${summarizers.brain})` : t.noBrain}</option>
+            {#each providers as [provider, models] (provider)}
+              <optgroup label={provider}>
+                {#each models as m (m.id)}<option value={m.id} title={m.note || m.model}>{m.note.split(":")[0] || m.model}</option>{/each}
+              </optgroup>
+            {/each}
+            {#if lost}<option value={settings.summary_by}>{settings.summary_by} ({t.noKey})</option>{/if}
+          </select>
         </div>
       </div>
       {#if settings.summary_by === "local" && summarizers && !summarizers.local}

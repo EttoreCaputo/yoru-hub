@@ -337,15 +337,15 @@ export type Summary = {
   by: string;
   made_at: number;
 };
-/** What can summarize (`meeting_summarizers`): the local model, and the brain's name. */
-export type Summarizers = { local: boolean; brain: string | null };
+/** What can summarize (`meeting_summarizers`): the local model, the brain's name, and every model of a provider with a key. */
+export type Summarizers = { local: boolean; brain: string | null; models: { id: string; provider: string; model: string; note: string }[] };
 /** A stretch of speech: `kind` `mic` is the user's track; `speaker` who, within the track (0: first heard). */
 export type TranscriptLine = { track: string; kind: "mic" | "others"; start_ms: number; end_ms: number; text: string; speaker: number | null };
 /** Someone heard: `key` is `<track>/<speaker or ->`; `number` 0 is the user, then 1, 2… as they first speak. */
 export type Speaker = { key: string; number: number; name: string | null };
 export type Transcript = { engine: string; language: string | null; lines: TranscriptLine[]; speakers: Speaker[] };
 /** `meeting_settings`: when to transcribe, the language (empty: Parakeet finds it), whether to tell the speakers apart, and whether to notice meetings on their own (`detect`). */
-export type MeetingSettings = { transcribe: "after" | "live" | "manual"; language: string; speakers: boolean; summary_by: "local" | "brain"; auto_summary: boolean; detect: boolean };
+export type MeetingSettings = { transcribe: "after" | "live" | "manual"; language: string; speakers: boolean; /** `local`, `brain`, or a provider's model (`groq:openai/gpt-oss-120b`). */ summary_by: string; auto_summary: boolean; detect: boolean };
 /** What can be recorded right now (`meeting_sources`). */
 export type MeetingSources = { apps: { id: string; name: string; playing: boolean; icon?: string }[]; microphones: { id: string; name: string; default: boolean }[] };
 /** What to record (`meeting_start`): everything played, or one app's sound, and microphones. */
