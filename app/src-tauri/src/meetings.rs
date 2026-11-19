@@ -215,15 +215,16 @@ fn queue(app: &AppHandle, id: String) {
         let _ = app.emit("meeting", &event);
         drop(_turn);
         if transcribed && meetings::settings().auto_summary && summarizer(&app).is_ok() {
-            queue_summary(&app, id);
+            queue_summary(&app, id, None);
         } else {
             board(&app, if transcribed { "done" } else { "failed" }, None);
         }
     });
 }
 
-/// Put meeting `id` in line for a summary, after any transcript being made.
-fn queue_summary(app: &AppHandle, id: String) {
+/// Put meeting `id` in line for a summary, after any transcript being made,
+/// in `style` (`meetings::STYLES`), else the settings' style.
+fn queue_summary(app: &AppHandle, id: String, style: Option<String>) {
     let key = format!("summary:{id}");
     if !app.state::<Meetings>().queued.lock().unwrap().insert(key.clone()) {
         return;
@@ -239,7 +240,8 @@ fn queue_summary(app: &AppHandle, id: String) {
                 let _ = app.emit("meeting", &Event::Summarizing { id: id.clone(), fraction });
             };
             let complete = |prompt: &str, schema: &Value| model.complete(&app, prompt, schema);
-            let summary = meetings::summarize(&id, you, person, &model.label, model.chunk, &complete, progress);
+            let style = style.unwrap_or_else(|| meetings::settings().summary_style);
+            let summary = meetings::summarize(&id, &style, you, person, &model.label, model.chunk, &complete, progress);
             model.done();
             summary.map_err(|e| e.to_string())
         });
@@ -336,8 +338,8 @@ fn summarizer(app: &AppHandle) -> Result<Summarizer, String> {
 }
 
 #[tauri::command]
-pub fn meeting_summarize(app: AppHandle, id: String) {
-    queue_summary(&app, id);
+pub fn meeting_summarize(app: AppHandle, id: String, style: Option<String>) {
+    queue_summary(&app, id, style);
 }
 
 #[tauri::command]

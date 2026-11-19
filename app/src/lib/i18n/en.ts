@@ -527,6 +527,12 @@ const en = {
     decisions: "Decisions",
     actions: "To do",
     questions: "Open questions",
+    style: "Kind of summary",
+    styleHint: "How the summary is laid out. Automatic picks the sections that fit what was recorded.",
+    styles: { auto: "Automatic", meeting: "Meeting", call: "Call", interview: "Interview", lecture: "Lesson", note: "Voice note" },
+    kinds: { task: "Task", reminder: "Reminder", message: "Message", email: "Email" },
+    copyDraft: "Copy the draft",
+    showDraft: "Draft",
     copy: "Copy",
     copied: "Copied",
     noSystemAudio:
@@ -541,7 +547,7 @@ const en = {
     stepTranscript: "Transcript",
     stepTranscriptNote: "Made on this Mac: the audio doesn't leave it.",
     stepSummary: "Summary",
-    stepSummaryNote: "Points, decisions, things to do and open questions, written from the transcript.",
+    stepSummaryNote: "Written from the transcript: the gist, sections that fit what was said, decisions, things to do (with a date, and a draft for a message or an email) and open questions.",
     llm: "Local model for summaries",
   },
   pocket: {

@@ -114,3 +114,15 @@ of the reset and the Pair button.
 The app needs `NSBluetoothAlwaysUsageDescription` in `Info.plist`; a binary
 run outside the bundle (`cargo run`) doesn't start the Pocket's thread, since
 macOS would end it.
+
+## What Pocket's own app makes of a recording
+
+Studied on 2026-11-20 from the web app (app.heypocket.com, which the Mac app loads) and its public configuration (`GET https://production.heypocketai.com/api/v1/configs`). It is the model for Yoru's summaries ([meetings.md](meetings.md), Summary); the prompts themselves are on Pocket's server and can't be read from the app, which only sends a template id, a model id and a language.
+
+- **Summary**: one Markdown document written by the chosen model (Gemini 3 Flash by default; GPT-6, Claude Sonnet 5 and, with Pro, larger ones). It opens with a paragraph, then sections named for the content ("Key decisions", "Next steps", "Technical notes"), items with a bold subject. The model can put cards in it, `<pocket:chart type="bar" title="…">Label | value</pocket:chart>` and `<pocket:timeline title="…">date | title | description</pocket:timeline>` (also flowchart, decision tree, email and message), and LaTeX formulas.
+- **Templates** ("themes"): 89, 8 of them free (Auto Detect, Meeting Notes, Call Notes, Interview Notes, Dictation Notes, Key Points, Lecture Notes, Dictation Format), the others by trade (medical SOAP, sales BANT, legal, education, minutes…). Each is an id, a title and a line ("Topic · Agreement · Conclusion"). Custom templates are sections with a title and instructions, plus whether to make to-dos and a mind map.
+- **To-dos**: from the same pass, `{label, assignee, dueDate, status, type}` with `type` `create_reminder`, `send_message` or `draft_email` (the last two with the text to send); the due date is worked out from what was said. The To-dos page filters them by kind; each opens with its date, who, its source recording, Copy, Share and Mark as done.
+- **Mind maps**: made on request, four kinds (overview, drivers, topics, people), as lists of nodes pointing to their parent.
+- **The recording's page**: Notes (the summary, with More detail, Shorter and Rewrite, the only prompts in the client) and Source (the transcript, speakers to map, merge or bulk assign, markers); its menu has the transcript, history, regenerate (template, model, language), export, audio and feedback.
+- **Ask Pocket**: a chat over the recordings with two tools, `pocket_memory` (search of recordings and transcripts, on Turbopuffer) and `web_search` (Exa); Thinking or Pro mode, files, deep research.
+- **Developers**: API keys, webhooks and an MCP connector, a possible way for Yoru Hub to read what Pocket's cloud made, if the user ever uses it.

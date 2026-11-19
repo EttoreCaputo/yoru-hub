@@ -158,6 +158,14 @@
       </div>
     {/if}
     <div class="setting">
+      <div class="what"><b>{t.style}</b><span>{t.styleHint}</span></div>
+      <div class="how">
+        <select value={settings.summary_style || "auto"} onchange={(e) => save({ summary_style: e.currentTarget.value })} aria-label={t.style}>
+          {#each Object.entries(t.styles) as [id, label] (id)}<option value={id}>{label}</option>{/each}
+        </select>
+      </div>
+    </div>
+    <div class="setting">
       <div class="what"><b>{t.autoSummary}</b><span>{t.autoSummaryHint}</span></div>
       <div class="how"><Toggle checked={settings.auto_summary} label={t.autoSummary} onchange={(on) => save({ auto_summary: on })} /></div>
     </div>

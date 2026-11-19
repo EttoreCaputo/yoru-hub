@@ -21,6 +21,28 @@ pub struct ActionItem {
     /// When, as said ("Friday"); empty when no date was said.
     #[serde(default)]
     pub due: String,
+    /// The day it is due, `YYYY-MM-DD`, worked out from `due` and the
+    /// meeting's day; empty when no day can be told.
+    #[serde(default)]
+    pub date: String,
+    /// What kind of doing: `task`, `reminder` (at a time), `message` or `email`.
+    #[serde(default = "task")]
+    pub kind: String,
+    /// For a message or an email, the text ready to send; empty otherwise.
+    #[serde(default)]
+    pub draft: String,
+}
+
+fn task() -> String {
+    "task".into()
+}
+
+/// A part of the summary, named for what is in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Section {
+    pub title: String,
+    #[serde(default)]
+    pub items: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -28,7 +50,11 @@ pub struct Summary {
     pub title: String,
     /// A few sentences on what the meeting was about and how it went.
     pub overview: String,
+    /// The body, laid out by the style: sections the model names.
     #[serde(default)]
+    pub sections: Vec<Section>,
+    /// The main things said, in summaries made before the sections.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<String>,
     #[serde(default)]
     pub decisions: Vec<String>,
@@ -36,6 +62,9 @@ pub struct Summary {
     pub actions: Vec<ActionItem>,
     #[serde(default)]
     pub questions: Vec<String>,
+    /// The style it was written in (`STYLES`); empty in older summaries.
+    #[serde(default)]
+    pub style: String,
     /// The model that wrote it, for people.
     #[serde(default)]
     pub by: String,
@@ -51,7 +80,8 @@ impl Summary {
         out.extend(self.decisions.iter().map(|d| format!("Decided: {d}")));
         out.extend(self.actions.iter().map(|a| {
             let who = if a.owner.is_empty() { String::new() } else { format!(" ({})", a.owner) };
-            let due = if a.due.is_empty() { String::new() } else { format!(", by {}", a.due) };
+            let when = if !a.date.is_empty() { &a.date } else { &a.due };
+            let due = if when.is_empty() { String::new() } else { format!(", by {when}") };
             format!("To do{who}: {}{due}", a.text)
         }));
         out.join("\n")
@@ -61,22 +91,55 @@ impl Summary {
 /// A JSON answer to a prompt, matching a schema: the model's text.
 pub type Complete<'a> = dyn Fn(&str, &Value) -> Result<String, String> + 'a;
 
+/// The ways a summary can be laid out, like the note templates of meeting
+/// recorders (Pocket's free ones): an id and how the sections go. The rest
+/// of the summary (decisions, things to do, open questions) is the same in each.
+pub const STYLES: [(&str, &str); 6] = [
+    (
+        "auto",
+        "First tell what this is (a meeting, a call, an interview, a lesson, a talk, a voice note, a chat), then lay out the sections that fit it: two to five, each named for what is in it (never \"Points\" or \"Summary\"), in the order that reads best.",
+    ),
+    ("meeting", "One section per topic discussed, named for the topic, with what was said on it and by whom."),
+    ("call", "A short call note: a section \"Background\" (why the call, who was on it), then one section with what was discussed. Keep each item short."),
+    ("interview", "One section per question asked, titled with the question, its items the key points of the answer; then a section \"Impressions\" if any were said."),
+    ("lecture", "Study notes: one section per topic of the lesson, in order, with its key ideas, definitions and examples; then a section \"To review\"."),
+    ("note", "One person speaking to themselves (a voice note, a dictation): one section per idea, in their words, without the fillers and repeats."),
+];
+
+/// How style `id` lays out the sections; an unknown one is `auto`.
+fn layout(style: &str) -> (&'static str, &'static str) {
+    STYLES.iter().copied().find(|(id, _)| *id == style).unwrap_or(STYLES[0])
+}
+
 fn schema() -> Value {
     let list = json!({"type": "array", "items": {"type": "string"}});
+    let text = json!({"type": "string"});
     json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["title", "overview", "points", "decisions", "actions", "questions"],
+        "required": ["title", "overview", "sections", "decisions", "actions", "questions"],
         "properties": {
-            "title": {"type": "string"},
-            "overview": {"type": "string"},
-            "points": list,
+            "title": text,
+            "overview": text,
+            "sections": {"type": "array", "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["title", "items"],
+                "properties": {"title": text, "items": list},
+            }},
             "decisions": list,
             "actions": {"type": "array", "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["text", "owner", "due"],
-                "properties": {"text": {"type": "string"}, "owner": {"type": "string"}, "due": {"type": "string"}},
+                "required": ["text", "owner", "due", "date", "kind", "draft"],
+                "properties": {
+                    "text": text,
+                    "owner": text,
+                    "due": text,
+                    "date": text,
+                    "kind": {"type": "string", "enum": ["task", "reminder", "message", "email"]},
+                    "draft": text,
+                },
             }},
             "questions": list,
         },
@@ -84,19 +147,20 @@ fn schema() -> Value {
 }
 
 const RULES: &str = "Be faithful: only what was said, no advice and nothing made up; a transcript made by speech recognition has mistakes, so read past them. \
-`title`: what the meeting was about, at most eight words (never just \"meeting\" or \"summary\"). \
-`overview`: three to five sentences on what it was about and how it went. \
-`points`: the main things said, one line each, with who said them when it matters. \
+`title`: what it was about, at most eight words (never just \"meeting\" or \"summary\"). \
+`overview`: two to four sentences, the gist a reader needs if they read nothing else. \
+`sections`: the body, as the layout below says; each item one line, starting with its subject in **bold** when that helps (\"**Pricing:** 39 euro a month\"), with who said it when it matters. \
 `decisions`: what was agreed. \
-`actions`: what someone has to do, with `owner` (as the transcript names them, or empty) and `due` (as said, or empty). \
+`actions`: what someone has to do, a short imperative each: `owner` as the transcript names them (or empty), `due` as said (or empty), `date` the day it is due as YYYY-MM-DD worked out from `due` and the day it was recorded (or empty), `kind` \"email\" for writing an email, \"message\" for sending a message (chat, WhatsApp, Slack), \"reminder\" for something at a time (a call, an appointment), else \"task\"; `draft`, for an email or a message only, the text ready to send, short, in the speakers' language (else empty). \
 `questions`: what was left open. \
 Leave a list empty rather than pad it.";
 
-/// Summarize meeting `id` with `complete`, reading at most `chunk` characters
-/// of transcript at once. The speakers are called by their names, else `you`
-/// or `person` and their number. `by` names the model in the summary.
-/// `on_progress` hears how far it got, 0 to 1.
-pub fn summarize(id: &str, you: &str, person: &str, by: &str, chunk: usize, complete: &Complete, mut on_progress: impl FnMut(f64)) -> io::Result<Summary> {
+/// Summarize meeting `id` with `complete`, in `style` (`STYLES`), reading at
+/// most `chunk` characters of transcript at once. The speakers are called by
+/// their names, else `you` or `person` and their number. `by` names the
+/// model in the summary. `on_progress` hears how far it got, 0 to 1.
+#[allow(clippy::too_many_arguments)]
+pub fn summarize(id: &str, style: &str, you: &str, person: &str, by: &str, chunk: usize, complete: &Complete, mut on_progress: impl FnMut(f64)) -> io::Result<Summary> {
     let transcript = transcript(id)?.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no transcript yet"))?;
     let labels = super::transcript::labels(&transcript.speakers, you, person);
     let lines: Vec<String> = transcript
@@ -107,9 +171,12 @@ pub fn summarize(id: &str, you: &str, person: &str, by: &str, chunk: usize, comp
     if lines.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "the transcript is empty"));
     }
+    let (style, sections) = layout(style);
+    // The day it was recorded turns "Friday" into a date.
+    let day = chrono::DateTime::from_timestamp_millis(get(id)?.started_at).map(|t| t.with_timezone(&chrono::Local).format("%A %-d %B %Y").to_string()).unwrap_or_default();
     // Small models answer in English unless told the language by name.
     let you_are = format!(
-        "The person who recorded it is called \"{you}\" in it. Write every field in {}.",
+        "It was recorded on {day}. The person who recorded it is called \"{you}\" in it. Write every field in {}. Layout of `sections`: {sections}",
         language_of(&transcript.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join(" "))
     );
     let parts = split(&lines, chunk);
@@ -131,12 +198,13 @@ pub fn summarize(id: &str, you: &str, person: &str, by: &str, chunk: usize, comp
         }
         on_progress(parts.len() as f64 / (parts.len() + 1) as f64);
         let prompt = format!(
-            "These are notes on the {} parts of one meeting, in order. Merge them into the summary of the whole meeting: one title, one overview, and each list without repeats. {you_are} {RULES}\n\nNotes:\n{}",
+            "These are notes on the {} parts of one meeting, in order. Merge them into the summary of the whole meeting: one title, one overview, the sections laid out again for the whole, and each list without repeats. {you_are} {RULES}\n\nNotes:\n{}",
             parts.len(),
             notes.join("\n")
         );
         ask(complete, &prompt)?
     };
+    summary.style = style.to_string();
     summary.by = by.to_string();
     summary.made_at = chrono::Local::now().timestamp_millis();
     let folder = folder(id)?;
@@ -229,8 +297,24 @@ mod tests {
 
     #[test]
     fn reads_a_fenced_answer() {
-        let text = "```json\n{\"title\": \"Weekly\", \"overview\": \"o\", \"points\": [], \"decisions\": [\"ship\"], \"actions\": [{\"text\": \"t\", \"owner\": \"Marco\", \"due\": \"\"}], \"questions\": []}\n```";
+        let text = "```json\n{\"title\": \"Weekly\", \"overview\": \"o\", \"sections\": [{\"title\": \"Pricing\", \"items\": [\"**Monthly:** 39\"]}], \"decisions\": [\"ship\"], \"actions\": [{\"text\": \"t\", \"owner\": \"Marco\", \"due\": \"Friday\", \"date\": \"2026-11-20\", \"kind\": \"email\", \"draft\": \"Ciao\"}], \"questions\": []}\n```";
         let s = parse(text).unwrap();
-        assert_eq!((s.title.as_str(), s.decisions.len(), s.actions[0].owner.as_str()), ("Weekly", 1, "Marco"));
+        assert_eq!((s.title.as_str(), s.sections[0].title.as_str(), s.decisions.len()), ("Weekly", "Pricing", 1));
+        assert_eq!((s.actions[0].owner.as_str(), s.actions[0].date.as_str(), s.actions[0].kind.as_str()), ("Marco", "2026-11-20", "email"));
+    }
+
+    #[test]
+    fn reads_an_older_summary() {
+        // Before the sections: points, and to-dos without a date or a kind.
+        let text = "{\"title\": \"Weekly\", \"overview\": \"o\", \"points\": [\"p\"], \"decisions\": [], \"actions\": [{\"text\": \"t\", \"owner\": \"\", \"due\": \"\"}], \"questions\": []}";
+        let s = parse(text).unwrap();
+        assert_eq!((s.points.len(), s.sections.len(), s.actions[0].kind.as_str(), s.style.as_str()), (1, 0, "task", ""));
+    }
+
+    #[test]
+    fn falls_back_to_auto() {
+        assert_eq!(layout("interview").0, "interview");
+        assert_eq!(layout("nonsense").0, "auto");
+        assert_eq!(layout("").0, "auto");
     }
 }

@@ -1,8 +1,9 @@
 <!--
   A meeting, in a tab of its own (docs/meetings.md): its tracks to listen
-  to, and its summary or its transcript, one at a time. The summary (what
-  was said, decided, left to do and left open) can be copied as Markdown or
-  written again; the transcript names who speaks (each nameable, a colour
+  to, and its summary or its transcript, one at a time. The summary (the
+  gist, sections laid out by its style, what was decided, left to do and
+  left open) can be copied as Markdown or written again in another style;
+  a to-do shows its day and, for a message or an email, a draft to copy; the transcript names who speaks (each nameable, a colour
   each), jumps to a line's moment in its track, and exports as Markdown,
   SRT or plain text. Recording and the list are on the Meetings page.
 -->
@@ -11,7 +12,7 @@
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { Meeting, MeetingSettings, MeetingTrack, Speaker, Summarizers, Summary, Transcript, TranscriptLine } from "../types";
+  import type { ActionItem, Meeting, MeetingSettings, MeetingTrack, Speaker, Summarizers, Summary, Transcript, TranscriptLine } from "../types";
   import { clock } from "../ui/when";
 
   let { id }: { id: string } = $props();
@@ -28,6 +29,11 @@
   let error = $state("");
   let exported = $state("");
   let copied = $state(false);
+  /** The style to summarize again in; the summary's own until changed. */
+  let style = $state("");
+  /** The to-do whose draft is open, and the one whose draft was just copied. */
+  let drafting = $state<number | null>(null);
+  let draftCopied = $state<number | null>(null);
   /** Blob URLs of the tracks loaded for listening, by name. */
   let audio = $state<Record<string, string>>({});
   const players: Record<string, HTMLAudioElement> = {};
@@ -38,6 +44,8 @@
       transcript = undefined;
       summary = undefined;
       exported = "";
+      style = "";
+      drafting = null;
     });
     call<Transcript | null>("meeting_transcript", { id: want }).then((x) => want === id && (transcript = x), () => (transcript = null));
     call<Summary | null>("meeting_summary", { id: want }).then(
@@ -74,11 +82,15 @@
       (settings.summary_by === "local" ? summarizers.local : settings.summary_by === "brain" ? !!summarizers.brain : summarizers.models.some((x) => x.id === settings!.summary_by)),
   );
 
+  const STYLES = ["auto", "meeting", "call", "interview", "lecture", "note"] as const;
+  /** The style shown in the picker: chosen here, else the summary's, else the settings'. */
+  const picked = $derived(style || summary?.style || settings?.summary_style || "auto");
+
   async function summarize() {
     error = "";
     store.summarizing = { ...store.summarizing, [id]: 0 };
     try {
-      await call("meeting_summarize", { id });
+      await call("meeting_summarize", { id, style: picked });
     } catch (e) {
       error = why(e);
     }
@@ -94,18 +106,40 @@
     }
   }
 
+  /** When a to-do is due: its day, else what was said. */
+  const dueOf = (a: ActionItem) => {
+    const [y, mo, d] = (a.date ?? "").split("-").map(Number);
+    return y && mo && d ? i18n.date(new Date(y, mo - 1, d).getTime(), { weekday: "short", day: "numeric", month: "short" }) : a.due;
+  };
+  const metaOf = (a: ActionItem) => [a.owner, dueOf(a)].map((x) => x?.trim()).filter(Boolean).join(" · ");
+  const kindOf = (a: ActionItem) => (a.kind in t.kinds ? a.kind : "task") as keyof typeof t.kinds;
+
+  /** A line's **bold** stretches apart from the rest, to show without HTML. */
+  const bolds = (text: string) => text.split("**").map((part, i) => ({ part, bold: i % 2 === 1 }));
+
   /** The summary as Markdown, on the clipboard. */
   async function copySummary(s: Summary) {
     const list = (title: string, items: string[]) => (items.length ? `\n## ${title}\n\n${items.map((x) => `- ${x}`).join("\n")}\n` : "");
     const actions = s.actions.map((a) => {
-      const who = [a.owner, a.due].map((x) => x.trim()).filter(Boolean).join(", ");
-      return who ? `${a.text} (${who})` : a.text;
+      const meta = metaOf(a);
+      return `[ ] ${a.text}${meta ? ` (${meta})` : ""}${a.draft ? `\n  > ${a.draft.replaceAll("\n", "\n  > ")}` : ""}`;
     });
-    const text = `# ${s.title}\n\n${s.overview}\n${list(t.points, s.points)}${list(t.decisions, s.decisions)}${list(t.actions, actions)}${list(t.questions, s.questions)}`;
+    const body = (s.sections ?? []).map((x) => list(x.title, x.items)).join("") + list(t.points, s.points ?? []);
+    const text = `# ${s.title}\n\n${s.overview}\n${body}${list(t.decisions, s.decisions)}${list(t.actions, actions)}${list(t.questions, s.questions)}`;
     try {
       await navigator.clipboard.writeText(text);
       copied = true;
       setTimeout(() => (copied = false), 1600);
+    } catch (e) {
+      error = why(e);
+    }
+  }
+
+  async function copyDraft(i: number, draft: string) {
+    try {
+      await navigator.clipboard.writeText(draft);
+      draftCopied = i;
+      setTimeout(() => draftCopied === i && (draftCopied = null), 1600);
     } catch (e) {
       error = why(e);
     }
@@ -216,17 +250,35 @@
         {:else if summary}
           <h2>{summary.title}</h2>
           <p class="overview">{summary.overview}</p>
-          {#each [{ title: t.points, items: summary.points }, { title: t.decisions, items: summary.decisions }] as part (part.title)}
+          {#each [...(summary.sections ?? []), { title: t.points, items: summary.points ?? [] }, { title: t.decisions, items: summary.decisions }] as part, n (n)}
             {#if part.items.length}
               <h3>{part.title}</h3>
-              <ul>{#each part.items as item, i (i)}<li>{item}</li>{/each}</ul>
+              <ul>
+                {#each part.items as item, i (i)}
+                  <li>{#each bolds(item) as x, k (k)}{#if x.bold}<b>{x.part}</b>{:else}{x.part}{/if}{/each}</li>
+                {/each}
+              </ul>
             {/if}
           {/each}
           {#if summary.actions.length}
             <h3>{t.actions}</h3>
             <ul class="todo">
               {#each summary.actions as a, i (i)}
-                <li>{a.text}{#if a.owner || a.due}<span class="faint"> · {[a.owner, a.due].filter(Boolean).join(", ")}</span>{/if}</li>
+                <li>
+                  <div class="do">
+                    <span class="kind {kindOf(a)}">{t.kinds[kindOf(a)]}</span>
+                    <span class="what">{a.text}{#if metaOf(a)}<span class="faint meta">· {metaOf(a)}</span>{/if}</span>
+                    {#if a.draft}
+                      <button class="btn link small" aria-expanded={drafting === i} onclick={() => (drafting = drafting === i ? null : i)}>{t.showDraft}</button>
+                    {/if}
+                  </div>
+                  {#if a.draft && drafting === i}
+                    <div class="draft well">
+                      <p>{a.draft}</p>
+                      <button class="btn small" onclick={() => copyDraft(i, a.draft)}>{draftCopied === i ? t.copied : t.copyDraft}</button>
+                    </div>
+                  {/if}
+                </li>
               {/each}
             </ul>
           {/if}
@@ -234,10 +286,15 @@
             <h3>{t.questions}</h3>
             <ul>{#each summary.questions as item, i (i)}<li>{item}</li>{/each}</ul>
           {/if}
-          <p class="faint small by">
-            {t.summaryBy}: {summary.by}
-            <button class="btn link small" disabled={!canSummarize} onclick={summarize}>{t.summarizeAgain}</button>
-          </p>
+          <div class="faint small by">
+            <span>{t.summaryBy}: {summary.by}{#if summary.style in t.styles} · {t.styles[summary.style as keyof typeof t.styles]}{/if}</span>
+            <span class="again-with">
+              <select class="compact" value={picked} onchange={(e) => (style = e.currentTarget.value)} aria-label={t.style}>
+                {#each STYLES as s (s)}<option value={s}>{t.styles[s]}</option>{/each}
+              </select>
+              <button class="btn small" disabled={!canSummarize} onclick={summarize}>{t.summarizeAgain}</button>
+            </span>
+          </div>
         {:else if summary === null}
           <div class="empty">
             <p>{m.transcribed_at ? t.summarize : t.needModel}</p>
@@ -350,14 +407,73 @@
     line-height: 1.55;
     user-select: text;
   }
-  .todo li::marker {
-    content: "☐  ";
+  .summary b {
+    font-weight: 600;
+  }
+  .todo {
+    list-style: none;
+    padding-left: 0;
+    display: grid;
+    gap: 8px;
+  }
+  .do {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .do .what {
+    flex: 1;
+    min-width: 0;
+  }
+  .meta {
+    margin-left: 6px;
+  }
+  .kind {
+    flex-shrink: 0;
+    min-width: 76px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--rim);
+    color: var(--haze);
+    font-size: var(--fs-small);
+    text-align: center;
+  }
+  .kind.reminder {
+    color: var(--wait);
+    border-color: color-mix(in srgb, var(--wait) 40%, transparent);
+  }
+  .kind.message {
+    color: var(--done);
+    border-color: color-mix(in srgb, var(--done) 40%, transparent);
+  }
+  .kind.email {
+    color: var(--think);
+    border-color: color-mix(in srgb, var(--think) 40%, transparent);
+  }
+  .draft {
+    display: grid;
+    justify-items: start;
+    gap: 8px;
+    margin: 8px 0 4px 86px;
+    padding: 10px 12px;
+  }
+  .draft p {
+    white-space: pre-wrap;
+    user-select: text;
+    color: var(--pearl);
   }
   .by {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 10px;
-    margin-top: 18px;
+    margin-top: 22px;
+  }
+  .again-with {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
   }
   .empty {
     display: grid;

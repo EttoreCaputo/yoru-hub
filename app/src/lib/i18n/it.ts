@@ -525,6 +525,12 @@ const it: Messages = {
     decisions: "Decisioni",
     actions: "Da fare",
     questions: "Domande aperte",
+    style: "Tipo di riassunto",
+    styleHint: "Come è organizzato il riassunto. Automatico sceglie le sezioni adatte a ciò che è stato registrato.",
+    styles: { auto: "Automatico", meeting: "Riunione", call: "Chiamata", interview: "Intervista", lecture: "Lezione", note: "Nota vocale" },
+    kinds: { task: "Attività", reminder: "Promemoria", message: "Messaggio", email: "Email" },
+    copyDraft: "Copia la bozza",
+    showDraft: "Bozza",
     copy: "Copia",
     copied: "Copiato",
     noSystemAudio:
@@ -539,7 +545,7 @@ const it: Messages = {
     stepTranscript: "Trascrizione",
     stepTranscriptNote: "Fatta su questo Mac: l'audio non esce da qui.",
     stepSummary: "Riassunto",
-    stepSummaryNote: "Punti, decisioni, cose da fare e domande aperte, scritti a partire dalla trascrizione.",
+    stepSummaryNote: "Scritto dalla trascrizione: il succo, sezioni adatte a ciò che è stato detto, decisioni, cose da fare (con una data, e una bozza per un messaggio o un'email) e domande aperte.",
     llm: "Modello locale per i riassunti",
   },
   pocket: {

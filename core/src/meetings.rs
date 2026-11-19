@@ -10,7 +10,7 @@ pub mod detect;
 mod summary;
 mod transcript;
 
-pub use summary::{ActionItem, Complete, Summary, summarize, summary};
+pub use summary::{ActionItem, Complete, STYLES, Section, Summary, summarize, summary};
 
 pub use transcript::{Format, Line, Settings, Speaker, SummaryBy, Transcript, When, download_model, export, import, import_recording, model_present, rename_speaker, set_settings, settings, transcribe, transcript, voices};
 

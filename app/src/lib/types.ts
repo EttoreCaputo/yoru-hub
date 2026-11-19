@@ -340,13 +340,19 @@ export type Meeting = {
 export type Summary = {
   title: string;
   overview: string;
-  points: string[];
+  /** The body, as the style lays it out; `points` only in older summaries. */
+  sections: { title: string; items: string[] }[];
+  points?: string[];
   decisions: string[];
-  actions: { text: string; owner: string; due: string }[];
+  actions: ActionItem[];
   questions: string[];
+  /** `auto`, `meeting`, `call`, `interview`, `lecture`, `note`; empty in older summaries. */
+  style: string;
   by: string;
   made_at: number;
 };
+/** A to-do from a meeting: `due` as said, `date` as `YYYY-MM-DD` when it can be told; `draft` the text of a message or an email. */
+export type ActionItem = { text: string; owner: string; due: string; date: string; kind: "task" | "reminder" | "message" | "email"; draft: string };
 /** What can summarize (`meeting_summarizers`): the local model, the brain's name, and every model of a provider with a key. */
 export type Summarizers = { local: boolean; brain: string | null; models: { id: string; provider: string; model: string; note: string }[] };
 /** A stretch of speech: `kind` `mic` is the user's track; `speaker` who, within the track (0: first heard). */
@@ -355,7 +361,7 @@ export type TranscriptLine = { track: string; kind: "mic" | "others"; start_ms: 
 export type Speaker = { key: string; number: number; name: string | null };
 export type Transcript = { engine: string; language: string | null; lines: TranscriptLine[]; speakers: Speaker[] };
 /** `meeting_settings`: when to transcribe, the language (empty: Parakeet finds it), whether to tell the speakers apart, and whether to notice meetings on their own (`detect`). */
-export type MeetingSettings = { transcribe: "after" | "live" | "manual"; language: string; speakers: boolean; /** `local`, `brain`, or a provider's model (`groq:openai/gpt-oss-120b`). */ summary_by: string; auto_summary: boolean; detect: boolean };
+export type MeetingSettings = { transcribe: "after" | "live" | "manual"; language: string; speakers: boolean; /** `local`, `brain`, or a provider's model (`groq:openai/gpt-oss-120b`). */ summary_by: string; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; detect: boolean };
 /** What can be recorded right now (`meeting_sources`). */
 export type MeetingSources = { apps: { id: string; name: string; playing: boolean; icon?: string }[]; microphones: { id: string; name: string; default: boolean }[] };
 /** What to record (`meeting_start`): everything played, or one app's sound, and microphones. */

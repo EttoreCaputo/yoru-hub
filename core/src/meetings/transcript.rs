@@ -41,6 +41,8 @@ pub struct Settings {
     pub speakers: bool,
     /// What writes the summaries.
     pub summary_by: SummaryBy,
+    /// How summaries are laid out unless one is asked for (`summary::STYLES`).
+    pub summary_style: String,
     /// Summarize a meeting once its transcript is made.
     pub auto_summary: bool,
     /// Notice a meeting starting (the calendar, a call app taking the
@@ -88,7 +90,7 @@ impl From<SummaryBy> for String {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { transcribe: When::After, language: String::new(), speakers: true, summary_by: SummaryBy::Local, auto_summary: true, detect: false }
+        Settings { transcribe: When::After, language: String::new(), speakers: true, summary_by: SummaryBy::Local, summary_style: "auto".into(), auto_summary: true, detect: false }
     }
 }
 

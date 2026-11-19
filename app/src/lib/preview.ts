@@ -330,7 +330,7 @@ function pocketDownload(names: string[]) {
   next();
 }
 
-let meetingSettings: MeetingSettings = { transcribe: "after", language: "", speakers: true, summary_by: "local", auto_summary: true, detect: false };
+let meetingSettings: MeetingSettings = { transcribe: "after", language: "", speakers: true, summary_by: "local", summary_style: "auto", auto_summary: true, detect: false };
 let meters: ReturnType<typeof setInterval> | undefined;
 
 function startMeeting(a: Record<string, any>): Meeting {
@@ -802,10 +802,18 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
       ? {
           title: "Firmware review before Friday",
           overview: "Marco and you went over Friday's deadline. Only the firmware review is left; Marco updates the document meanwhile.",
-          points: ["The firmware review is the last open item", "The test boards are being prepared"],
+          sections: [
+            { title: "Firmware", items: ["**Review:** the last open item before shipping", "**Boards:** the test boards are being prepared"] },
+            { title: "Documentation", items: ["Marco keeps the release notes up to date meanwhile"] },
+          ],
           decisions: ["Ship on Friday"],
-          actions: [{ text: "Review the firmware", owner: "Tu", due: "venerdì" }, { text: "Update the document", owner: "Marco", due: "" }],
-          questions: [],
+          actions: [
+            { text: "Review the firmware", owner: "Tu", due: "venerdì", date: "2026-10-30", kind: "task", draft: "" },
+            { text: "Send Marco the test results", owner: "Tu", due: "", date: "", kind: "email", draft: "Ciao Marco, ti mando i risultati dei test sulle schede. Fammi sapere se manca qualcosa." },
+            { text: "Call the board supplier", owner: "Marco", due: "giovedì alle 10", date: "2026-10-29", kind: "reminder", draft: "" },
+          ],
+          questions: ["Whether the documentation ships with the firmware"],
+          style: "meeting",
           by: "Qwen3.5-4B-Q4_K_M",
           made_at: now(),
         }
