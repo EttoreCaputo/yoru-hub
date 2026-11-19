@@ -15,7 +15,7 @@
 mod link;
 pub mod protocol;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -36,10 +36,17 @@ pub const KEY_ACCOUNT: &str = "pocket.session-key";
 /// Where a pairing made before Yoru's (by hand, with `security`) left its key.
 const LEGACY_SERVICE: &str = "pocket-ble-session-key";
 
-/// How long a scan looks before resting.
-const SCAN_FOR: Duration = Duration::from_secs(20);
+/// How long a scan looks before starting again. Scanning for one service
+/// costs CoreBluetooth little, so it hardly rests: the Pocket is found as
+/// soon as it advertises.
+const SCAN_FOR: Duration = Duration::from_secs(30);
 /// The rest between scans while nothing is found.
-const SCAN_REST: Duration = Duration::from_secs(20);
+const SCAN_REST: Duration = Duration::from_secs(1);
+/// The Pocket drops a link that's quiet for 30 s: asked its state this
+/// often, it stays, so a recording that stops is copied at once.
+const KEEP_ALIVE: Duration = Duration::from_secs(15);
+/// Downloads tried on their own before waiting for the user's Sync.
+const TRIES: u32 = 3;
 /// Battery and storage are read again this often while connected.
 const REFRESH_EVERY: Duration = Duration::from_secs(5 * 60);
 /// Long enough to mean "until something happens".
@@ -196,7 +203,7 @@ impl Pocket {
             keychain: Keychain::default(),
             bluetooth: None,
             pairing: false,
-            failed: BTreeSet::new(),
+            failed: BTreeMap::new(),
         };
         std::thread::Builder::new().name("pocket".into()).spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a tokio runtime");
@@ -288,9 +295,10 @@ struct Worker {
     bluetooth: Option<Bluetooth>,
     /// The user asked to pair: the next Pocket found gets a new key.
     pairing: bool,
-    /// Recordings that failed to download in this run: not tried again on
-    /// their own until the user asks.
-    failed: BTreeSet<String>,
+    /// Recordings that failed to download in this run, and how many times:
+    /// tried again on their own at the next connection (a link that broke
+    /// halfway), up to `TRIES`; after that only when the user asks.
+    failed: BTreeMap<String, u32>,
 }
 
 impl Worker {
@@ -407,7 +415,7 @@ impl Worker {
                 End::Restart => {}
                 End::Lost(why) => {
                     crate::hostlog::line("pocket", &format!("link ended: {why}"));
-                    self.wait(Duration::from_secs(5)).await;
+                    self.wait(Duration::from_secs(1)).await;
                 }
             }
         }
@@ -563,7 +571,7 @@ impl Worker {
             .filter(|r| !done.contains_key(&r.name))
             .filter(|r| match &pick {
                 Pick::None => false,
-                Pick::New => !self.failed.contains(&r.name),
+                Pick::New => self.failed.get(&r.name).is_none_or(|n| *n < TRIES),
                 Pick::These(names) => names.contains(&r.name),
             })
             .collect();
@@ -624,7 +632,7 @@ impl Worker {
         let bytes = match bytes {
             Ok(bytes) => bytes,
             Err(e @ (LinkError::Incomplete(..) | LinkError::Timeout)) => {
-                self.failed.insert(name.clone());
+                *self.failed.entry(name.clone()).or_default() += 1;
                 self.update(|s| s.error = Some(format!("{name}: {e}")));
                 return if link.is_connected().await { Ok(()) } else { Err(LinkError::Closed) };
             }
@@ -643,7 +651,7 @@ impl Worker {
                 }
             }
             Err(e) => {
-                self.failed.insert(name.clone());
+                *self.failed.entry(name.clone()).or_default() += 1;
                 self.update(|s| s.error = Some(format!("{name}: {e}")));
             }
         }
@@ -670,6 +678,8 @@ impl Worker {
     async fn stay(&mut self, link: &mut Link) -> End {
         let mut refresh = tokio::time::interval(REFRESH_EVERY);
         refresh.tick().await;
+        let mut alive = tokio::time::interval(KEEP_ALIVE);
+        alive.tick().await;
         loop {
             let result = tokio::select! {
                 message = link.next() => match message {
@@ -719,6 +729,14 @@ impl Worker {
                     }
                 },
                 _ = refresh.tick() => self.read_status(link).await,
+                _ = alive.tick() => match link.request(command::STATE, |m| matches!(m, Message::State(_)), Duration::from_secs(3)).await {
+                    Ok(message) => {
+                        self.note(&message);
+                        Ok(())
+                    }
+                    Err(LinkError::Timeout) => Ok(()),
+                    Err(e) => Err(e),
+                },
             };
             if let Err(e) = result {
                 return End::Lost(e.to_string());

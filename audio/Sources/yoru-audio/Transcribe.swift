@@ -44,7 +44,9 @@ func transcribe(file: URL, folder: URL, language: String?, speakers: URL?) async
     defer { reporter.cancel() }
     // The hint only keeps the decoder in the language's script; Parakeet
     // finds the language on its own.
-    let result = try await manager.transcribe(file, decoderState: &state, language: language.flatMap(Language.init(rawValue:)))
+    var audio = try AudioConverter().resampleAudioFile(file)
+    clean(&audio)
+    let result = try await manager.transcribe(audio, decoderState: &state, language: language.flatMap(Language.init(rawValue:)))
     var heard = words(result.tokenTimings ?? [])
     if let speakers, !heard.isEmpty {
         emit(["event": "progress", "phase": "speakers", "fraction": 0])
@@ -52,12 +54,57 @@ func transcribe(file: URL, folder: URL, language: String?, speakers: URL?) async
             emit(["event": "progress", "phase": "download", "fraction": progress.fractionCompleted])
         }
         let diarizer = Nemotron3Diarizer(config: speakersPreset, models: models)
-        let audio = try AudioConverter().resampleAudioFile(file)
         let (probabilities, frames) = try diarizer.processComplete(audio)
         attribute(&heard, probabilities: probabilities, frames: frames, slots: speakersPreset.numSpeakers)
         emit(["event": "progress", "phase": "speakers", "fraction": 1])
     }
     emit(["event": "done", "segments": segments(heard).map(\.json)])
+}
+
+/// The 16 kHz sound made easier to hear, gently: no noise removal, whose
+/// artefacts cost a model trained on noisy speech more words than the
+/// noise does. What's below 80 Hz (a table's thumps, a pocket's rubbing,
+/// hum) goes, and the voices are brought to one level: a recorder far from
+/// the speakers, or a quiet call, is lifted up to 24 dB, never clipped.
+func clean(_ samples: inout [Float], rate: Float = 16000) {
+    guard samples.count > 1 else { return }
+    // A second-order Butterworth high-pass at 80 Hz (RBJ's cookbook).
+    let w = 2 * Float.pi * 80 / rate
+    let q = 1 / Float(2).squareRoot()
+    let alpha = sin(w) / (2 * q)
+    let cw = cos(w)
+    let a0 = 1 + alpha
+    let b0 = (1 + cw) / 2 / a0, b1 = -(1 + cw) / a0, b2 = b0
+    let a1 = -2 * cw / a0, a2 = (1 - alpha) / a0
+    var x1: Float = 0, x2: Float = 0, y1: Float = 0, y2: Float = 0
+    for i in samples.indices {
+        let x = samples[i]
+        let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        x2 = x1; x1 = x; y2 = y1; y1 = y
+        samples[i] = y
+    }
+    // The voices' level: the loud end (95th percentile) of 50 ms frames, so
+    // silences don't count, brought to -20 dBFS.
+    let frame = Int(rate / 20)
+    var levels: [Float] = []
+    levels.reserveCapacity(samples.count / frame + 1)
+    var at = 0
+    while at + frame <= samples.count {
+        var sum: Float = 0
+        for v in samples[at..<at + frame] { sum += v * v }
+        levels.append((sum / Float(frame)).squareRoot())
+        at += frame
+    }
+    guard !levels.isEmpty else { return }
+    levels.sort()
+    let voice = levels[levels.count * 95 / 100]
+    guard voice > 1e-5 else { return }
+    let gain = min(0.1 / voice, 16)
+    // Peaks the gain would push past full scale are rounded off, not cut.
+    for i in samples.indices {
+        let v = samples[i] * gain
+        samples[i] = abs(v) <= 0.9 ? v : (v < 0 ? -1 : 1) * (0.9 + 0.1 * tanh((abs(v) - 0.9) / 0.1))
+    }
 }
 
 /// Give each word the speaker most active over it (10 ms frames, `slots`

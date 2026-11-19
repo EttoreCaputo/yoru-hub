@@ -160,7 +160,8 @@
     try {
       const raw = await call<ArrayBuffer | Uint8Array | number[]>("meeting_audio", { id, track: track.name });
       const bytes = raw instanceof ArrayBuffer ? raw : ArrayBuffer.isView(raw) ? raw : Uint8Array.from(raw);
-      const type = track.file?.endsWith(".caf") ? "audio/x-caf" : "audio/mp4";
+      const ext = track.file?.split(".").pop() ?? "";
+      const type = { caf: "audio/x-caf", mp3: "audio/mpeg", wav: "audio/wav", aif: "audio/aiff", aiff: "audio/aiff", flac: "audio/flac" }[ext] ?? "audio/mp4";
       audio = { ...audio, [track.name]: URL.createObjectURL(new Blob([bytes as BlobPart], { type })) };
     } catch (e) {
       error = why(e);

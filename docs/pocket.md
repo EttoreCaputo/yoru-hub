@@ -44,6 +44,9 @@ seen on firmware 1.8.9:
   stopped. Yoru then lists and copies it.
 - Recordings are MP3, 16 kHz mono, 32 kbps (4000 bytes a second), named after
   the UTC time they started (`20261119143012`; some `PH` and a shorter time).
+  At that rate the encoder keeps nothing above about 4.5 kHz, which costs the
+  transcription its consonants (measured on 2026-11-20); Yoru keeps the MP3
+  as it is, without re-encoding it (until 2026-11-20 it became a 24 kbps AAC).
   Over Bluetooth to a Mac about 55 KB/s: an hour in about four and a half
   minutes.
 
@@ -60,15 +63,19 @@ A thread of its own (`Pocket::start`), with a tokio runtime:
    macOS asks for the Bluetooth permission only when the user pairs.
 2. Pairing (`pocket_pair`): a new random key, sent to the first Pocket found;
    on `SK&OK` it goes to the keychain and Yoru reconnects.
-3. Otherwise it scans for 20 s, rests 20 s, and again. Found, it connects,
+3. Otherwise it scans almost without a break (30 s, a second's rest, again;
+   until 2026-11-20 it rested 20 s, so finding it took up to 40 s). Found, it connects,
    sends the key, reads battery, firmware, storage and state, sets the clock
    (a setting), lists the recordings and copies the new ones, oldest first.
-4. It stays connected: a recording that stops is copied at once; battery and
-   storage are read again every five minutes; the app's commands (sync now,
+4. It stays connected: the Pocket drops a link that's quiet for 30 s, so
+   its state is asked every 15 s (since 2026-11-20; before, the link broke
+   every half minute and a recording waited for the next connection); a
+   recording that stops is copied at once; battery and storage are read
+   again every five minutes; the app's commands (sync now,
    copy these, delete one, settings, forget) are handled in between.
-5. A link that breaks is looked for again five seconds later. A download that
-   ends short or stalls 15 s is skipped and not tried again on its own until
-   the user syncs.
+5. A link that breaks is looked for again a second later. A download that
+   ends short or stalls 15 s is skipped and tried again at the next
+   connection, three times in all; after that, only when the user syncs.
 
 A copied recording is checked against the size the device announced, written
 to `pocket/recordings/<name>.mp3`, imported with `meetings::import_recording`

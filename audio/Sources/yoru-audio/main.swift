@@ -206,8 +206,27 @@ func finalize(_ caf: URL) -> String? {
     return m4a.lastPathComponent
 }
 
-/// `import`: the sound of `source`, re-encoded as AAC, in `folder`.
+/// Audio kept as it comes: re-encoding a file already compressed (the
+/// Pocket's 32 kbps MP3) only loses more of what the transcription needs.
+private let keptAsIs: Set<String> = ["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac"]
+
+/// `import`: the sound of `source` in `folder`: an audio file copied as it
+/// is, the sound of anything else (a video) re-encoded as AAC.
 func importFile(_ source: URL, into folder: URL) throws {
+    let ext = source.pathExtension.lowercased()
+    if keptAsIs.contains(ext), let file = try? AVAudioFile(forReading: source), file.length > 0 {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = "others.\(ext)"
+        let out = folder.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: out)
+        try FileManager.default.copyItem(at: source, to: out)
+        let format = file.fileFormat
+        emit(["event": "done", "tracks": [[
+            "name": "others", "source": source.lastPathComponent, "kind": "others", "file": name,
+            "duration_ms": Int64(Double(file.length) * 1000 / format.sampleRate), "rate": Int(format.sampleRate), "channels": Int(format.channelCount),
+        ]]])
+        return
+    }
     let asset = AVURLAsset(url: source)
     let done = DispatchSemaphore(value: 0)
     var tracks: [AVAssetTrack] = []

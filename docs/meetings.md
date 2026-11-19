@@ -32,6 +32,8 @@ Nemotron 3 Diarization says who speaks when, but gives no voice print to keep: t
 
 The speed figures on the model cards are from an M5 Pro; the first test is on the user's M1 Pro, where MacWhisper itself warns that some Neural Engine models stop on long files.
 
+Before Parakeet hears it (since 2026-11-20, `clean` in `audio/Sources/yoru-audio/Transcribe.swift`), the sound loses what's under 80 Hz (thumps, rubbing, hum) and the voices are brought to one level (the loud end of 50 ms frames to -20 dBFS, at most +24 dB, peaks rounded off). No noise removal: its artefacts cost a model trained on noisy speech more words than the noise does. An imported audio file (the Pocket's MP3 too) is kept as it is; only a video's sound is re-encoded.
+
 Leftovers of the retired Yoru app are in `~/Library/Application Support/Yoru/models/` (FluidAudio's pyannote diarization and Parakeet v3). Yoru Hub downloads its own, pinned like the other models, into its data folder.
 
 ## How it fits Yoru Hub
