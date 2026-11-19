@@ -1,5 +1,5 @@
 //! The Pocket voice recorder (docs/pocket.md): its thread, and the commands
-//! of the Meetings page's Pocket panel. Each recording it brings becomes a
+//! of its dialog and its Settings page. Each recording it brings becomes a
 //! meeting, transcribed like an imported file.
 
 use serde::Serialize;

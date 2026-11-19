@@ -138,6 +138,8 @@ class Store {
   recorded = $state<Meeting | null>(null);
   /** The Pocket recorder, or null where it can't run. */
   pocket = $state<PocketStatus | null>(null);
+  /** The Pocket's dialog is open (from the sidebar, or its Settings page). */
+  pocketShown = $state(false);
   /** Every meeting, newest first, for the Home's list and the tabs. */
   meetings = $state<Meeting[]>([]);
   /** How far each meeting's transcript is, 0 to 1, while it is made. */

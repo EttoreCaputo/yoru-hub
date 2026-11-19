@@ -1,7 +1,8 @@
 <!--
   The sidebar: with two boards or more the list of them to pick the one
   shown, the pages (Notifications and Settings are icons in the window bar),
-  and at the bottom where the board is and "do not disturb". Yoru himself
+  and at the bottom the Pocket recorder (a click opens its dialog), where the
+  board is, and "do not disturb". Yoru himself
   isn't here: he sits at the bottom right of the pages (YoruBubble.svelte).
 -->
 <script lang="ts">
@@ -28,6 +29,17 @@
   const quietUntil = $derived(store.info?.quiet_until ?? null);
   const several = $derived(store.boards.length > 1);
   const boardDot = (link: string) => (link === "connected" ? "done" : link === "searching" ? "think" : "wrong");
+
+  // The Pocket recorder, while it is on: connected or not, and its battery.
+  const pocket = $derived.by(() => {
+    const p = store.pocket;
+    if (!p || p.phase === "off") return null;
+    const dot = p.phase === "connected" ? "done" : p.phase === "refused" || p.phase === "no_bluetooth" ? "wrong" : p.phase === "unpaired" ? "" : "think";
+    const tp = t.pocket;
+    const text =
+      p.transfer ? tp.syncing : p.recording ? tp.recordingNow : p.phase === "connected" ? tp.connectedShort : p.phase === "unpaired" ? tp.phases.unpaired : p.phase === "searching" || p.phase === "connecting" ? tp.away : tp.phases[p.phase];
+    return { dot, text, battery: p.phase === "connected" ? p.battery : null };
+  });
 
   const badge = (p: Page): { n?: number; dot?: string } | null => {
     if (p === "home" && store.confirmations.length) return { dot: "wait" };
@@ -58,6 +70,13 @@
   </ul>
 
   <footer>
+    {#if pocket}
+      <button class="nav-row pocket" title={t.pocket.openTitle} onclick={() => (store.pocketShown = true)}>
+        <Icon name="mic" size={16} />
+        <span class="pname">Pocket</span>
+        <span class="pstate"><span class="dot {pocket.dot}"></span>{pocket.text}{#if pocket.battery !== null}<span class="faint"> · {pocket.battery}%</span>{/if}</span>
+      </button>
+    {/if}
     <div class="status">
       <span class="dot {status.dot}"></span>{status.text}{#if via && store.boardState === "live"}<span class="faint"> · {via}</span>{/if}
       {#if store.preview}<span class="preview" title={t.nav.previewTitle}>{t.nav.preview}</span>{/if}
@@ -187,6 +206,25 @@
   }
   footer {
     margin-top: auto;
+  }
+  .pocket {
+    gap: 9px;
+    min-height: 34px;
+    margin-bottom: 8px;
+    font-size: var(--fs-meta);
+  }
+  .pname {
+    font-weight: 550;
+  }
+  .pstate {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .dnd {
     display: flex;

@@ -64,7 +64,7 @@
   const user = () => graph.entities.find((e) => e.is_user);
   const entity = $derived(graph.entities.find((e) => e.id === selected) ?? null);
   const aboutOf = (f: Fact) => f.about ?? user()?.id ?? null;
-  const factsOf = (id: number) => graph.facts.filter((f) => aboutOf(f) === id && (history || f.to === null));
+  const factsOf = (id: number) => graph.facts.filter((f) => aboutOf(f) === id && f.to === null);
   const nameOf = (id: number) => {
     const e = graph.entities.find((x) => x.id === id);
     return e ? (e.is_user ? t.you(e.name) : e.name) : `#${id}`;
@@ -72,23 +72,6 @@
   const relationsOf = (id: number) => graph.relations.filter((r) => r.to === null && (r.a === id || r.b === id));
   const day = (ms: number) => i18n.date(ms, { day: "numeric", month: "short", year: "numeric" });
 
-  // What the graph shows, remembered on this computer.
-  const read = (key: string, fallback: string) => {
-    try {
-      return localStorage.getItem(key) ?? fallback;
-    } catch {
-      return fallback;
-    }
-  };
-  let showFacts = $state(read("memory.facts", "1") === "1");
-  let history = $state(false);
-  $effect(() => {
-    try {
-      localStorage.setItem("memory.facts", showFacts ? "1" : "0");
-    } catch {
-      // Not kept: fine.
-    }
-  });
   let drawing = $state<MemoryGraph>();
 
   function pick(id: number | null, fact?: number) {
@@ -163,10 +146,7 @@
       <p class="lede">{t.lede}</p>
     </div>
     <div class="actions">
-      <button class="chip small" class:on={showFacts} aria-pressed={showFacts} onclick={() => (showFacts = !showFacts)}>{t.showFacts}</button>
-      <button class="chip small" class:on={history} aria-pressed={history} onclick={() => (history = !history)}>{t.history}</button>
       <button class="icon-btn" title={t.fit} aria-label={t.fit} onclick={() => drawing?.fit()}><Icon name="scan" /></button>
-      <button class="btn" onclick={tellYoru}><Icon name="message-circle" size={15} />{t.tell}</button>
       <button class="btn primary" onclick={() => ((adding = !adding), (selected = null))}><Icon name="plus" size={15} stroke={2.25} />{t.add}</button>
     </div>
   </header>
@@ -178,7 +158,6 @@
       bind:this={drawing}
       {graph}
       {selected}
-      {showFacts}
       onselect={pick}
       youName={t.you}
       relationName={(k) => t.relations[k] ?? k}

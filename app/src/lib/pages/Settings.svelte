@@ -2,8 +2,8 @@
   Settings as Yoru's wiring: the mirror in the middle, and each part of the
   settings a card wired to him by a trace, with what it says right now. On
   the left what Yoru is (his brain, his voice, the language he answers
-  in); on the right what he's connected to (the services' keys,
-  the Mac, the board, the data folder). A card opens its own page, with the
+  in, what he does with a meeting); on the right what he's connected to
+  (the services' keys, the Mac, the board, the Pocket, the data folder). A card opens its own page, with the
   everyday choices first and the technical ones under "Advanced".
 -->
 <script lang="ts">
@@ -12,13 +12,15 @@
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { AssistantInfo, AssistantSettings, Brain, Effort, Gaze, KeySource, McpInfo, VoiceInfo, VoiceSettings } from "../types";
+  import type { AssistantInfo, AssistantSettings, Brain, Effort, Gaze, KeySource, McpInfo, MeetingSettings, VoiceInfo, VoiceSettings } from "../types";
   import YoruBoard from "../YoruBoard.svelte";
   import Board from "../ui/Board.svelte";
   import KeyField from "../ui/KeyField.svelte";
   import PermissionList from "../ui/PermissionList.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import Voice from "../ui/Voice.svelte";
+  import MeetingSettingsPage from "../ui/MeetingSettings.svelte";
+  import PocketSettingsPage from "../ui/PocketSettings.svelte";
   import Profiles from "../ui/Profiles.svelte";
   import { currentProfile } from "../profiles";
   import { PAGE_ICONS, SETTINGS_PAGES } from "../icons/pages";
@@ -49,10 +51,13 @@
   let voice = $state<VoiceInfo | null>(null);
   let mcp = $state<McpInfo | null>(null);
   let notch = $state(false);
+  let meetings = $state<{ settings: MeetingSettings; model: boolean } | null>(null);
   let error = $state("");
 
   async function readAll() {
     [voice, mcp] = await Promise.all([call<VoiceInfo>("voice_info").catch(() => null), call<McpInfo>("mcp_info").catch(() => null)]);
+    const [ms, model] = await Promise.all([call<MeetingSettings>("meeting_settings").catch(() => null), call<boolean>("meeting_model").catch(() => true)]);
+    meetings = ms ? { settings: ms, model } : null;
     notch = (await call<{ notch?: boolean }>("status").catch(() => null))?.notch ?? false;
   }
   $effect(() => {
@@ -110,16 +115,18 @@
     store.onboarding = { done: false, tour_version: store.onboarding?.tour_version ?? 0 };
   }
 
-  // The parts, wired to Yoru: three on the left, four on the right, top to bottom.
-  type Part = "brain" | "voice" | "language" | "keys" | "mac" | "board" | "about";
+  // The parts, wired to Yoru: four on the left, five on the right, top to bottom.
+  type Part = "brain" | "voice" | "language" | "meetings" | "keys" | "mac" | "board" | "pocket" | "about";
   type Wire = { id: Part; side: -1 | 1; color: string; icon: IconName };
   const WIRES: Wire[] = [
     { id: "brain", side: -1, color: "var(--think)", icon: "sparkles" },
     { id: "voice", side: -1, color: "#c58cff", icon: "audio-waveform" },
     { id: "language", side: -1, color: "#5fd4c8", icon: "languages" },
+    { id: "meetings", side: -1, color: "#ff9f6b", icon: "users" },
     { id: "keys", side: 1, color: "var(--wait)", icon: "key-round" },
     { id: "mac", side: 1, color: "#7fb2ff", icon: "laptop" },
     { id: "board", side: 1, color: "var(--done)", icon: "cpu" },
+    { id: "pocket", side: 1, color: "#e0559a", icon: "mic" },
     { id: "about", side: 1, color: "var(--pearl-mid)", icon: "info" },
   ];
   const PAGES: Part[] = WIRES.map((w) => w.id);
@@ -141,6 +148,14 @@
   const firmware = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   const via = $derived(store.port?.startsWith("wifi:") ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
   const vs = $derived(voice?.settings);
+  const pocketSummary = $derived.by(() => {
+    const p = store.pocket;
+    const tp = i18n.t.pocket;
+    if (!p) return { text: tp.unavailable, dot: "" };
+    if (p.phase === "off") return { text: tp.phases.off, dot: "" };
+    const dot = p.phase === "connected" ? "done" : p.phase === "refused" || p.phase === "no_bluetooth" ? "wrong" : p.phase === "unpaired" ? "" : "think";
+    return { text: [tp.phases[p.phase], p.phase === "connected" && p.battery !== null ? `${p.battery}%` : ""].filter(Boolean).join(" · "), dot };
+  });
   const summary = $derived<Record<Part, { text: string; dot: string; warn?: boolean }>>({
     brain: !store.info?.ready
       ? { text: brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain, dot: "wrong", warn: true }
@@ -156,6 +171,12 @@
       store.boardState === "off"
         ? { text: t.boardOff, dot: "" }
         : { text: [store.boardState === "boot" ? i18n.t.link.boot : i18n.t.link.live, via, firmware].filter(Boolean).join(" · "), dot: store.update ? "wait" : store.boardState === "boot" ? "think" : "done" },
+    meetings: !meetings
+      ? { text: "—", dot: "" }
+      : !meetings.model
+        ? { text: t.meetingsNoModel, dot: "wait" }
+        : { text: `${t.meetingsWhen[meetings.settings.transcribe]} · ${t.meetingsBy(meetings.settings.summary_by.split(":").pop() ?? "")}`, dot: meetings.settings.detect ? "done" : "" },
+    pocket: pocketSummary,
     about: { text: t.aboutSummary, dot: "" },
   });
 
@@ -246,6 +267,8 @@
       {:else if open === "keys"}{@render keysPage()}
       {:else if open === "mac"}{@render macPage()}
       {:else if open === "board"}<Board />
+      {:else if open === "meetings"}<MeetingSettingsPage />
+      {:else if open === "pocket"}<PocketSettingsPage />
       {:else}{@render aboutPage()}{/if}
       {#if error}<p class="error-text note">{error}</p>{/if}
     </div>

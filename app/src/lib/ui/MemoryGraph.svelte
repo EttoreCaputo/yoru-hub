@@ -6,9 +6,11 @@
   alive: nodes float, bounce and spring back. Drag a node to stretch it (fling
   it and it flies back), drag the background to pan, scroll to zoom, click a
   node (or one of its facts) to open its card, click the background to close it.
+  The first layout is worked out before it is drawn and framed once: the
+  camera moves again only when the window changes size or the user asks.
 -->
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
 
   type Fact = { id: number; about: number | null; section: string; text: string; to: number | null; importance: number; private: boolean };
   type Entity = { id: number; name: string; kind: string; placeholder: boolean; is_user: boolean; label: string | null };
@@ -18,7 +20,6 @@
   let {
     graph,
     selected,
-    showFacts,
     onselect,
     youName,
     relationName,
@@ -28,7 +29,6 @@
   }: {
     graph: Graph;
     selected: number | null;
-    showFacts: boolean;
     onselect: (id: number | null, fact?: number) => void;
     youName: (name: string) => string;
     relationName: (kind: string) => string;
@@ -131,29 +131,36 @@
     for (const e of graph.entities) {
       if (u && !e.is_user && !linked.has(e.id)) out.push({ a: u, b: next.get(`e${e.id}`)!, length: 240, stiffness: 0.008, loose: true, bend: 0, bendV: 0 });
     }
-    if (showFacts) {
-      for (const f of graph.facts.filter((f) => f.to === null)) {
-        const owner = next.get(`e${f.about ?? user}`);
-        if (!owner) continue;
-        const key = `f${f.id}`;
-        const n = { ...make(key, owner, owner.r + 18, f.importance >= 0.8 ? 5.5 : 4), fact: f, owner: owner.key };
-        next.set(key, n);
-        out.push({ a: owner, b: n, length: owner.r + 34, stiffness: 0.09, bend: 0, bendV: 0 });
-      }
+    for (const f of graph.facts.filter((f) => f.to === null)) {
+      const owner = next.get(`e${f.about ?? user}`);
+      if (!owner) continue;
+      const key = `f${f.id}`;
+      const n = { ...make(key, owner, owner.r + 18, f.importance >= 0.8 ? 5.5 : 4), fact: f, owner: owner.key };
+      next.set(key, n);
+      out.push({ a: owner, b: n, length: owner.r + 34, stiffness: 0.09, bend: 0, bendV: 0 });
     }
     byKey = next;
     nodes = [...next.values()];
     links = out;
-    if (!old.size) {
+    if (!old.size && nodes.length) {
       age = 0;
       touched = false;
+      settle();
     }
   }
 
+  /** The first layout, worked out before it is shown: the camera frames
+      where the nodes end up once, instead of chasing them as they spread. */
+  function settle() {
+    for (let i = 0; i < SETTLE_STEPS; i++) step();
+    fit(true);
+  }
+  const SETTLE_STEPS = 120;
+
   $effect(() => {
     void graph;
-    void showFacts;
-    rebuild();
+    void relationName;
+    untrack(rebuild);
   });
 
   onMount(() => {
@@ -274,16 +281,15 @@
   let dragging: { node?: Node; startX: number; startY: number; viewX: number; viewY: number; moved: boolean; lastX: number; lastY: number } | null = null;
   let touched = false;
   let legendHeight = $state(0);
-  // A new size (the window, the card opened beside it): frame it again, unless the user took the camera.
+  // A new size (the window): frame it again, unless the user took the camera.
   $effect(() => {
     void width;
     void height;
-    if (!touched && age > 60) fit();
+    void legendHeight;
+    untrack(() => !touched && nodes.length && fit(true));
   });
 
   function glide() {
-    // Frame it as it unfolds, unless the user took the camera.
-    if (!touched && age >= 60 && age <= 480 && age % 60 === 0) fit();
     if (!goal) return;
     const e = 0.1;
     view = { x: view.x + (goal.x - view.x) * e, y: view.y + (goal.y - view.y) * e, k: view.k + (goal.k - view.k) * e };
@@ -351,8 +357,8 @@
     if (n) goal = { x: -n.x * view.k - inset / 2, y: -n.y * view.k, k: view.k };
   }
 
-  /** Glide to fit everything in view. */
-  export function fit() {
+  /** Glide to fit everything in view; `now`, jump there. */
+  export function fit(now = false) {
     if (!nodes.length) return;
     const xs = nodes.map((n) => n.x);
     const ys = nodes.map((n) => n.y);
@@ -361,6 +367,10 @@
     const top = legendHeight + 20;
     const k = Math.min(1.15, width / (x1 - x0), (height - top) / (y1 - y0));
     goal = { k, x: (-(x0 + x1) / 2) * k, y: (-(y0 + y1) / 2) * k + top / 2 };
+    if (now) {
+      view = goal;
+      goal = null;
+    }
   }
 
   // ---- what to draw ----
@@ -411,7 +421,7 @@
   const initial = (e: Entity) => (e.placeholder ? "?" : ([...e.name.trim()][0] ?? "?").toUpperCase());
   const nameOf = (e: Entity) => (e.is_user ? youName(e.name) : e.name);
   const kindsShown = $derived([...new Set(graph.entities.filter((e) => !e.is_user).map((e) => e.kind))]);
-  const sectionsShown = $derived(showFacts ? [...new Set(graph.facts.filter((f) => f.to === null).map((f) => f.section))] : []);
+  const sectionsShown = $derived([...new Set(graph.facts.filter((f) => f.to === null).map((f) => f.section))]);
   const tipAt = (n: Node) => ({ x: width / 2 + view.x + at(n).x * view.k, y: height / 2 + view.y + at(n).y * view.k });
 </script>
 

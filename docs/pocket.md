@@ -11,8 +11,9 @@ firmware stays as it is; nothing goes to the vendor.
 The code: `core/src/pocket.rs` (the thread, settings, sync), `core/src/pocket/link.rs`
 (Bluetooth, through btleplug), `core/src/pocket/protocol.rs` (the commands and
 answers, tested without a device), `app/src-tauri/src/pocket.rs` (the app's
-commands and the `pocket` event), `app/src/lib/ui/PocketPanel.svelte` (the
-panel on the Meetings page).
+commands and the `pocket` event), `app/src/lib/ui/PocketDialog.svelte` (the
+dialog the sidebar's Pocket row opens), `app/src/lib/ui/PocketSettings.svelte`
+(its page in Settings).
 
 ## The device and its protocol
 
@@ -86,9 +87,10 @@ a pairing made before Yoru's, kept by `security` under the service
 
 ## Settings
 
-On the Meetings page's settings, under Pocket:
+In Settings, under Pocket: the Pocket's name and state, with a button to its
+dialog (Pair when it isn't paired), then:
 
-- **Pocket recorder** (on): look for it and stay connected.
+- **Use the Pocket** (on): look for it and stay connected.
 - **Sync on its own** (on): copy new recordings when the Pocket is near and
   when one ends; off, only on Sync.
 - **Free the Pocket after copying** (off): delete a recording from the Pocket
@@ -96,9 +98,13 @@ On the Meetings page's settings, under Pocket:
 - **Set the Pocket's clock** (on): at each connection, in UTC.
 - **Forget this Pocket**: drop the key; pairing again needs a reset.
 
-## The panel
+## The sidebar and the dialog
 
-After the vendor app's "device sync": the Pocket's name and connection,
+While the Pocket is on, the sidebar shows it above the board's state: a dot
+(green connected, grey not paired, blinking while it's looked for, red when
+refused or without Bluetooth), connected or not nearby (or syncing,
+recording), and its battery. A click opens its dialog, after the vendor app's
+"device sync": the Pocket's name and connection,
 battery, free storage and firmware; the new recordings, with select all and
 "Sync N recordings"; the copy under way with its progress and how many wait;
 "Everything is synced" when nothing is new; the recordings already in

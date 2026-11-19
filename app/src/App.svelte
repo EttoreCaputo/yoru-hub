@@ -22,6 +22,7 @@
   import { SETTINGS_PAGES } from "./lib/icons/pages";
   import { look } from "./lib/look.svelte";
   import ActivityPanel from "./lib/ui/ActivityPanel.svelte";
+  import PocketDialog from "./lib/ui/PocketDialog.svelte";
   import Icon from "./lib/ui/Icon.svelte";
 
   store.start();
@@ -68,6 +69,7 @@
   </main>
   {#if bubbled && !(store.onboarding && !store.onboarding.done)}<YoruBubble />{/if}
   {#if look.activity}<ActivityPanel />{/if}
+  {#if store.pocketShown && store.pocket}<PocketDialog pocket={store.pocket} onclose={() => (store.pocketShown = false)} />{/if}
   <!-- The first run asks for the permissions itself; after it, the gate
        waits for the microphone if it was taken away. -->
   {#if store.onboarding && !store.onboarding.done}<Setup />{:else if store.micMissing}<PermissionGate />{/if}

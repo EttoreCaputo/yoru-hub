@@ -1,9 +1,10 @@
 <!--
-  The Pocket recorder on the Meetings page (docs/pocket.md), after the
-  vendor's "device sync" panel: the device (connection, battery, storage),
-  the recordings on it and which are already meetings, the new ones to
-  bring in (all, or those picked), and the download under way. Unpaired,
-  it walks the user through the reset that lets Yoru pair it.
+  The Pocket recorder (docs/pocket.md), opened from its row in the sidebar,
+  after the vendor's "device sync" panel: the device (connection, battery,
+  storage), the recordings on it and which are already meetings, the new
+  ones to bring in (all, or those picked), and the download under way.
+  Unpaired, it walks the user through the reset that lets Yoru pair it.
+  Its settings are in Settings, under Pocket.
 -->
 <script lang="ts">
   import { call, why } from "../api";
@@ -13,9 +14,10 @@
   import type { PocketRecording, PocketStatus } from "../types";
   import { clock } from "./when";
   import ConfirmButton from "./ConfirmButton.svelte";
+  import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
 
-  let { pocket }: { pocket: PocketStatus } = $props();
+  let { pocket, onclose }: { pocket: PocketStatus; onclose: () => void } = $props();
 
   const t = $derived(i18n.t.pocket);
   let error = $state("");
@@ -50,16 +52,21 @@
   const bring = () => act("pocket_download", { names: picked.length ? picked : fresh.map((r) => r.name) }).then(() => (picked = []));
   const toggle = (name: string, on: boolean) => (picked = on ? [...picked, name] : picked.filter((n) => n !== name));
 
+  function openMeeting(id: string) {
+    onclose();
+    tabs.open({ kind: "meeting", id });
+  }
+
   const dot = $derived(
     connected ? "done" : pocket.phase === "refused" || pocket.phase === "no_bluetooth" ? "wrong" : pocket.phase === "unpaired" ? "" : "wait",
   );
 </script>
 
-<section class="panel pocket">
+<Dialog title={pocket.name ?? "Pocket"} {onclose}>
+<div class="pocket">
   <div class="head">
     <span class="glyph"><Icon name="mic" size={20} stroke={1.6} /></span>
     <div class="who">
-      <b>{pocket.name ?? "Pocket"}</b>
       <span class="dim small"><span class="dot {dot}"></span> {t.phases[pocket.phase]}{#if pocket.recording} · <span class="rec-now">{t.recordingNow}</span>{/if}</span>
     </div>
     {#if connected}
@@ -141,7 +148,7 @@
               <span class="faint small mono">{clock(r.seconds)}</span>
               <span class="end">
                 {#if store.meetings.some((m) => m.id === r.meeting)}
-                  <button class="btn small" onclick={() => tabs.open({ kind: "meeting", id: r.meeting! })}>{t.open}</button>
+                  <button class="btn small" onclick={() => openMeeting(r.meeting!)}>{t.open}</button>
                 {/if}
                 {#if connected}
                   <ConfirmButton small icon="trash-2" label={t.deleteFromPocket} question={t.deleteConfirm} sure={t.delete} disabled={busy} onconfirm={() => act("pocket_delete", { name: r.name })} />
@@ -158,11 +165,12 @@
 
   {#if pocket.error && pocket.phase !== "no_bluetooth" && pocket.phase !== "refused"}<p class="error-text small">{pocket.error}</p>{/if}
   {#if error}<p class="error-text small">{error}</p>{/if}
-</section>
+</div>
+</Dialog>
 
 <style>
   .pocket {
-    margin-top: 14px;
+    width: min(480px, 80vw);
   }
   .small {
     font-size: var(--fs-meta);

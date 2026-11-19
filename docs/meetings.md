@@ -57,6 +57,8 @@ Leftovers of the retired Yoru app are in `~/Library/Application Support/Yoru/mod
 - **Imported files**: audio or video dropped on the Meetings page or opened with the app, and an optional watched folder.
 - **The Pocket recorder**: its recordings, copied over Bluetooth and imported as meetings with origin `pocket` ([pocket.md](pocket.md)).
 
+In the app (since 2026-11-19) the Meetings page only records and imports; the meetings are listed on Home, each opens in a tab of its own, and their settings are in Settings, under Meetings: noticing a meeting, the transcript (the model, when, language, speakers) and the summary (who writes it, the local model, on its own).
+
 ## Transcription
 
 - **Live or after**: a setting, and a choice when a recording starts. Live shows the text and speakers while it runs; after transcribes the whole file once it stops, with the best preset. Live can still run the full pass at the end to replace the live text (on by default).
