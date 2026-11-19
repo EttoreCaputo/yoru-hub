@@ -5,6 +5,8 @@
      calendar, and the local network where the board is found over WiFi. -->
 <plist version="1.0">
 <dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Yoru connects to your Pocket recorder over Bluetooth to bring its recordings in as meetings.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Yoru hears you through the microphone when you talk to him in the notch, and records it when you record a meeting.</string>
 	<key>NSAudioCaptureUsageDescription</key>

@@ -32,6 +32,8 @@ import type {
   MeetingEvent,
   Notification,
   Onboarding,
+  PocketEvent,
+  PocketStatus,
   PermissionKind,
   PermissionState,
   Permissions,
@@ -134,6 +136,8 @@ class Store {
   recordingError = $state<{ message: string; code?: string } | null>(null);
   /** The last recording that finished, or meeting that got its transcript, for the Meetings page to pick up. */
   recorded = $state<Meeting | null>(null);
+  /** The Pocket recorder, or null where it can't run. */
+  pocket = $state<PocketStatus | null>(null);
   /** Every meeting, newest first, for the Home's list and the tabs. */
   meetings = $state<Meeting[]>([]);
   /** How far each meeting's transcript is, 0 to 1, while it is made. */
@@ -196,6 +200,7 @@ class Store {
     on<AssistantInfo>("assistant", (info) => (this.info = info));
     on<MeetingEvent>("meeting", (e) => this.#onMeeting(e));
     on<MacEvent>("notch", (e) => this.#onMac(e));
+    on<PocketEvent>("pocket", (e) => (e.kind === "status" ? (this.pocket = e.status) : this.#recorded(e.meeting)));
     void this.#load();
   }
 
@@ -225,6 +230,7 @@ class Store {
     void this.refreshTimers();
     call<TaskEntry[]>("tasks").then((t) => (this.tasks = t), () => {});
     call<Preset[]>("connector_presets").then((p) => (this.presets = p), () => {});
+    call<PocketStatus | null>("pocket_status").then((p) => (this.pocket = p), () => {});
     call<Meeting | null>("meeting_active").then((m) => (this.recording = m), () => {});
     call<string[]>("meetings_transcribing").then((ids) => {
       this.transcribing = Object.fromEntries(ids.filter((id) => !id.startsWith("summary:")).map((id) => [id, 0]));

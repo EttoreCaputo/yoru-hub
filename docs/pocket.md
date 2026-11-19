@@ -1,0 +1,110 @@
+# The Pocket recorder
+
+The Pocket (Open Vision Engineering's PKT01, heypocket.com) is a clip-on voice
+recorder. Its own app syncs it over Bluetooth to a phone and sends the
+recordings to the vendor's cloud. Yoru Hub takes that app's place: it pairs
+with the Pocket with a key of its own, copies the recordings to this Mac over
+Bluetooth, and imports each as a meeting, which the meetings' pipeline
+([meetings.md](meetings.md)) transcribes and summarizes here. The Pocket's
+firmware stays as it is; nothing goes to the vendor.
+
+The code: `core/src/pocket.rs` (the thread, settings, sync), `core/src/pocket/link.rs`
+(Bluetooth, through btleplug), `core/src/pocket/protocol.rs` (the commands and
+answers, tested without a device), `app/src-tauri/src/pocket.rs` (the app's
+commands and the `pocket` event), `app/src/lib/ui/PocketPanel.svelte` (the
+panel on the Meetings page).
+
+## The device and its protocol
+
+The protocol is public, from captures of the vendor app:
+[pocket-libre's PROTOCOL.md](https://github.com/shahcolate/pocket-libre/blob/main/PROTOCOL.md)
+and [openpocket](https://github.com/OmiroAI/openpocket). What Yoru uses, as
+seen on firmware 1.8.9:
+
+- It advertises the 16-bit service `5536`; its name (`PKT01_<colour>_<id>`)
+  shows only once connected. It takes one connection at a time and stops
+  advertising during it, so the phone app and Yoru can't both hold it.
+- Commands are ASCII, `APP&…`, written without response to
+  `001120A3-2233-4455-6677-889912345678`; answers and events, `MCU&…`, come as
+  notifications on the same characteristic, sometimes several in one
+  notification. Recordings arrive on `001120A1-…` (notify).
+- Every connection starts with `APP&SK&<16 hex digits>`, the session key.
+  Without it the device ignores everything; a wrong key gets `MCU&SK&ERR` and
+  a disconnect. After a hardware reset the device keeps the **first** key it
+  hears (answering `MCU&SK&OK`) and drops that connection about a second
+  later; that is the pairing.
+- `BAT`, `FW`, `WF`, `SPACE` (free and total MB), `STE` (0 idle, 1 recording)
+  for the status; `T&<UTC time>` sets its clock; `LIST_DIRS` then `LIST&<date>`
+  for the recordings (`F&<date>&<name>&<seconds>`, closed by a count, so an
+  incomplete listing is told from an empty one); `U&<date>&<name>` downloads
+  one (`MCU&U&<size>`, the MP3 on the audio characteristic, `MCU&OFF`);
+  `D&<date>&<name>` deletes one.
+- While connected, `MCU&STA&<name>` and `MCU&STO` say a recording started and
+  stopped. Yoru then lists and copies it.
+- Recordings are MP3, 16 kHz mono, 32 kbps (4000 bytes a second), named after
+  the UTC time they started (`20261119143012`; some `PH` and a shorter time).
+  Over Bluetooth to a Mac about 55 KB/s: an hour in about four and a half
+  minutes.
+
+Not used: WiFi transfer (the Pocket raises its own access point, which would
+take the Mac off its network), USB mass storage, starting and stopping a
+recording from the Mac (`APP&STA`/`APP&STO` aren't confirmed to do that), and
+firmware updates.
+
+## What Yoru does
+
+A thread of its own (`Pocket::start`), with a tokio runtime:
+
+1. With no key it waits (phase `unpaired`) and doesn't touch Bluetooth, so
+   macOS asks for the Bluetooth permission only when the user pairs.
+2. Pairing (`pocket_pair`): a new random key, sent to the first Pocket found;
+   on `SK&OK` it goes to the keychain and Yoru reconnects.
+3. Otherwise it scans for 20 s, rests 20 s, and again. Found, it connects,
+   sends the key, reads battery, firmware, storage and state, sets the clock
+   (a setting), lists the recordings and copies the new ones, oldest first.
+4. It stays connected: a recording that stops is copied at once; battery and
+   storage are read again every five minutes; the app's commands (sync now,
+   copy these, delete one, settings, forget) are handled in between.
+5. A link that breaks is looked for again five seconds later. A download that
+   ends short or stalls 15 s is skipped and not tried again on its own until
+   the user syncs.
+
+A copied recording is checked against the size the device announced, written
+to `pocket/recordings/<name>.mp3`, imported with `meetings::import_recording`
+(the meeting's start is the recording's, its track's source "Pocket", its
+`origin` `pocket`), and the copy removed. `pocket/synced.json` maps each
+recording to its meeting, so a meeting deleted here doesn't come back while
+the recording is still on the Pocket.
+
+## Where things are
+
+In Yoru's data folder (`~/Library/Application Support/yoru-hub/pocket/`):
+`settings.json`, `synced.json`, `device.json` (the last Pocket's name). The
+session key is in the keychain vault, account `pocket.session-key`. A key from
+a pairing made before Yoru's, kept by `security` under the service
+`pocket-ble-session-key`, is moved into the vault the first time.
+
+## Settings
+
+On the Meetings page's settings, under Pocket:
+
+- **Pocket recorder** (on): look for it and stay connected.
+- **Sync on its own** (on): copy new recordings when the Pocket is near and
+  when one ends; off, only on Sync.
+- **Free the Pocket after copying** (off): delete a recording from the Pocket
+  once it is a meeting.
+- **Set the Pocket's clock** (on): at each connection, in UTC.
+- **Forget this Pocket**: drop the key; pairing again needs a reset.
+
+## The panel
+
+After the vendor app's "device sync": the Pocket's name and connection,
+battery, free storage and firmware; the new recordings, with select all and
+"Sync N recordings"; the copy under way with its progress and how many wait;
+"Everything is synced" when nothing is new; the recordings already in
+Meetings, each with Open and Delete from the Pocket. Unpaired, the three steps
+of the reset and the Pair button.
+
+The app needs `NSBluetoothAlwaysUsageDescription` in `Info.plist`; a binary
+run outside the bundle (`cargo run`) doesn't start the Pocket's thread, since
+macOS would end it.

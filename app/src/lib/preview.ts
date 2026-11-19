@@ -24,6 +24,7 @@ import type {
   ConnectorStatus,
   Meeting,
   MeetingSettings,
+  PocketStatus,
   MeetingSources,
   Notification,
   Preset,
@@ -282,6 +283,53 @@ let meetings: Meeting[] = [
   },
 ];
 let recording: Meeting | null = null;
+// ?pocket=unpaired (or another phase): the Pocket recorder in that state.
+const pocketDay = Date.UTC(2026, 10, 19, 9, 30);
+let pocket: PocketStatus = {
+  phase: (params.get("pocket") as PocketStatus["phase"]) ?? "connected",
+  settings: { enabled: true, auto_sync: true, delete_after_sync: false, set_clock: true },
+  name: "PKT01_GREY_26425893",
+  battery: 86,
+  firmware: "1.8.9",
+  wifi_firmware: "V12",
+  free_mb: 59012,
+  total_mb: 59636,
+  recording: false,
+  recordings: [
+    { date: "2026-11-19", name: "20261119143012", seconds: 1834, started_at: pocketDay + 5 * 3600e3, meeting: null },
+    { date: "2026-11-19", name: "20261119093000", seconds: 642, started_at: pocketDay, meeting: null },
+    { date: "2026-11-18", name: "20261118161502", seconds: 2710, started_at: pocketDay - 17 * 3600e3, meeting: "20261118-171502" },
+  ],
+  checking: false,
+  transfer: null,
+  synced_at: Date.now(),
+  error: null,
+};
+const emitPocket = () => emit("pocket", { kind: "status", status: pocket });
+/** A download, as the Pocket's thread reports it. */
+function pocketDownload(names: string[]) {
+  let i = 0;
+  const next = () => {
+    const name = names[i];
+    if (!name) return void ((pocket = { ...pocket, transfer: null }), emitPocket());
+    const r = pocket.recordings.find((x) => x.name === name)!;
+    const total = r.seconds * 4000;
+    let bytes = 0;
+    const tick = setInterval(() => {
+      bytes = Math.min(total, bytes + total / 8);
+      pocket = { ...pocket, transfer: { name, bytes, total, queued: names.length - i - 1 } };
+      emitPocket();
+      if (bytes >= total) {
+        clearInterval(tick);
+        pocket = { ...pocket, recordings: pocket.recordings.map((x) => (x.name === name ? { ...x, meeting: `pocket-${name}` } : x)) };
+        i++;
+        next();
+      }
+    }, 250);
+  };
+  next();
+}
+
 let meetingSettings: MeetingSettings = { transcribe: "after", language: "", speakers: true, summary_by: "local", auto_summary: true, detect: false };
 let meters: ReturnType<typeof setInterval> | undefined;
 
@@ -699,6 +747,18 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   },
   delete_meeting: (a) => (meetings = meetings.filter((m) => m.id !== a.id)),
   meeting_audio: () => tone(),
+  pocket_status: () => pocket,
+  pocket_settings: () => pocket.settings,
+  set_pocket_settings: (a) => void ((pocket = { ...pocket, settings: a.settings as PocketStatus["settings"] }), emitPocket()),
+  pocket_sync: () => pocketDownload(pocket.recordings.filter((r) => !r.meeting).map((r) => r.name)),
+  pocket_download: (a) => pocketDownload(a.names as string[]),
+  pocket_delete: (a) => void ((pocket = { ...pocket, recordings: pocket.recordings.filter((r) => r.name !== a.name) }), emitPocket()),
+  pocket_pair: (a) => {
+    pocket = { ...pocket, phase: a.on ? "pairing" : "unpaired" };
+    emitPocket();
+    if (a.on) setTimeout(() => ((pocket = { ...pocket, phase: "connected" }), emitPocket()), 2500);
+  },
+  pocket_forget: () => void ((pocket = { ...pocket, phase: "unpaired", recordings: [] }), emitPocket()),
   meeting_settings: () => meetingSettings,
   set_meeting_settings: (a) => (meetingSettings = a.settings),
   meeting_model: () => true,

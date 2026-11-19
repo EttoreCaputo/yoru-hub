@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 ctrlc = { version = "3", features = ["termination"] }
-yoru-core = { version = "0.1.1", path = "../../core", features = ["provision", "mcp", "connectors"] }
+yoru-core = { version = "0.1.1", path = "../../core", features = ["provision", "mcp", "connectors", "pocket"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }

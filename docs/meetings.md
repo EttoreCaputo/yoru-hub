@@ -55,6 +55,7 @@ Leftovers of the retired Yoru app are in `~/Library/Application Support/Yoru/mod
 - **Files**: written as they come (a crash keeps what was recorded), compressed to AAC when done.
 - **Meeting detection**: when an app starts using the microphone (Zoom, Meet in a browser, Teams, FaceTime…), Yoru asks on the board whether to record. Off by default.
 - **Imported files**: audio or video dropped on the Meetings page or opened with the app, and an optional watched folder.
+- **The Pocket recorder**: its recordings, copied over Bluetooth and imported as meetings with origin `pocket` ([pocket.md](pocket.md)).
 
 ## Transcription
 

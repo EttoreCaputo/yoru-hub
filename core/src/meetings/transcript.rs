@@ -332,8 +332,22 @@ pub fn transcript(id: &str) -> io::Result<Option<Transcript>> {
 /// An audio or video file from elsewhere, as a new meeting of one track
 /// named after the file.
 pub fn import(path: &Path) -> io::Result<Meeting> {
-    let now = chrono::Local::now();
-    let (id, folder) = new_folder(now)?;
+    let title = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+    import_as(path, title, chrono::Local::now(), None)
+}
+
+/// A recording made elsewhere (the Pocket, docs/pocket.md), as a new
+/// meeting that started at `started`, untitled until its summary names it,
+/// its track named after the device (`source`).
+pub fn import_recording(path: &Path, started: chrono::DateTime<chrono::Local>, origin: &str, source: &str) -> io::Result<Meeting> {
+    let mut meeting = import_as(path, None, started, Some(origin.to_string()))?;
+    meeting.tracks.iter_mut().for_each(|t| t.source = source.to_string());
+    save(&folder(&meeting.id)?, &meeting)?;
+    Ok(meeting)
+}
+
+fn import_as(path: &Path, title: Option<String>, started: chrono::DateTime<chrono::Local>, origin: Option<String>) -> io::Result<Meeting> {
+    let (id, folder) = new_folder(started)?;
     let done = match run(&["import".as_ref(), path.as_os_str(), folder.as_os_str()], |_, _| {}) {
         Ok(done) => done,
         Err(e) => {
@@ -344,14 +358,15 @@ pub fn import(path: &Path) -> io::Result<Meeting> {
     let tracks: Vec<Track> = serde_json::from_value(done["tracks"].clone()).unwrap_or_default();
     let meeting = Meeting {
         id,
-        title: path.file_stem().map(|s| s.to_string_lossy().into_owned()),
-        started_at: now.timestamp_millis(),
+        title,
+        started_at: started.timestamp_millis(),
         duration_ms: tracks.iter().map(|t| t.duration_ms).max().unwrap_or(0),
         state: State::Done,
         tracks,
         transcribed_at: None,
         summarized_at: None,
         speakers: BTreeMap::new(),
+        origin,
     };
     save(&folder, &meeting)?;
     Ok(meeting)
@@ -442,7 +457,7 @@ mod tests {
     }
 
     fn meeting() -> Meeting {
-        Meeting { id: "m".into(), title: None, started_at: 0, duration_ms: 0, state: State::Done, tracks: vec![], transcribed_at: None, summarized_at: None, speakers: BTreeMap::new() }
+        Meeting { id: "m".into(), title: None, started_at: 0, duration_ms: 0, state: State::Done, tracks: vec![], transcribed_at: None, summarized_at: None, speakers: BTreeMap::new(), origin: None }
     }
 
     #[test]

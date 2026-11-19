@@ -14,6 +14,7 @@
 //! | `<id>.oauth-state`    | the PKCE state of sign-ins in progress, as JSON  |
 //! | `<id>.client-secret`  | our own OAuth client's secret                    |
 //! | `secret.<NAME>`       | a named secret for local servers                 |
+//! | `pocket.session-key`  | the Pocket recorder's session key (docs/pocket.md) |
 //!
 //! Ids have no `.` ([`super::config::is_valid_id`]), so these never collide.
 //! [`SecretStore`] hides the keychain so tests (and a caller without one)

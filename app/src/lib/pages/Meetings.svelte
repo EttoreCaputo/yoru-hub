@@ -15,9 +15,10 @@
   import { call, inPreview, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { Meeting, MeetingRequest, MeetingSettings, MeetingSources, MeetingTrack, Summarizers } from "../types";
+  import type { Meeting, MeetingRequest, MeetingSettings, MeetingSources, MeetingTrack, PocketSettings, Summarizers } from "../types";
   import { tabs } from "../tabs.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
+  import PocketPanel from "../ui/PocketPanel.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import { clock } from "../ui/when";
 
@@ -109,6 +110,15 @@
     if (!settings) return;
     try {
       settings = await call<MeetingSettings>("set_meeting_settings", { settings: { ...settings, ...change } });
+    } catch (e) {
+      error = why(e);
+    }
+  }
+
+  async function savePocket(change: Partial<PocketSettings>) {
+    if (!store.pocket) return;
+    try {
+      await call("set_pocket_settings", { settings: { ...store.pocket.settings, ...change } });
     } catch (e) {
       error = why(e);
     }
@@ -337,6 +347,35 @@
           {/if}
         </div>
       </div>
+      {#if store.pocket}
+        {@const p = store.pocket.settings}
+        {@const tp = i18n.t.pocket}
+        <h3 class="sub">Pocket</h3>
+        <div class="setting">
+          <div class="what"><b>{tp.enabled}</b><span>{tp.enabledHint}</span></div>
+          <div class="how"><Toggle checked={p.enabled} label={tp.enabled} onchange={(on) => savePocket({ enabled: on })} /></div>
+        </div>
+        {#if p.enabled}
+          <div class="setting">
+            <div class="what"><b>{tp.autoSync}</b><span>{tp.autoSyncHint}</span></div>
+            <div class="how"><Toggle checked={p.auto_sync} label={tp.autoSync} onchange={(on) => savePocket({ auto_sync: on })} /></div>
+          </div>
+          <div class="setting">
+            <div class="what"><b>{tp.deleteAfter}</b><span>{tp.deleteAfterHint}</span></div>
+            <div class="how"><Toggle checked={p.delete_after_sync} label={tp.deleteAfter} onchange={(on) => savePocket({ delete_after_sync: on })} /></div>
+          </div>
+          <div class="setting">
+            <div class="what"><b>{tp.setClock}</b><span>{tp.setClockHint}</span></div>
+            <div class="how"><Toggle checked={p.set_clock} label={tp.setClock} onchange={(on) => savePocket({ set_clock: on })} /></div>
+          </div>
+          {#if store.pocket.phase !== "unpaired"}
+            <div class="setting">
+              <div class="what"><b>{tp.forget}</b><span>{tp.forgetHint}</span></div>
+              <div class="how"><ConfirmButton small label={tp.forget} question={tp.forgetConfirm} sure={tp.forget} onconfirm={() => call("pocket_forget").catch((e) => (error = why(e)))} /></div>
+            </div>
+          {/if}
+        {/if}
+      {/if}
     </section>
   {/if}
 
@@ -402,6 +441,8 @@
     {/if}
   </section>
 
+  {#if store.pocket && store.pocket.phase !== "off"}<PocketPanel pocket={store.pocket} />{/if}
+
   {#if error}<p class="error-text">{error}</p>{/if}
   {#if store.recordingError?.code === "no_system_audio"}
     <p class="error-text">
@@ -438,6 +479,7 @@
               {#if m.state === "interrupted"} · <span class="cut">{t.interrupted}</span>{/if}
               {#if m.state === "recording"} · {t.recordingNow}{/if}
             </span>
+            {#if m.origin === "pocket"}<span class="tag">Pocket</span>{/if}
             {#if m.state !== "recording"}
               <span class="end">
                 {#if m.id in store.transcribing}
@@ -488,6 +530,15 @@
   }
   .settings {
     margin-bottom: 14px;
+  }
+  .sub {
+    margin: 18px 0 4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rim);
+    font: 600 var(--fs-small)/1.2 var(--sans);
+    color: var(--haze);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
   .drop {
     position: fixed;

@@ -9,6 +9,7 @@ repository = "https://github.com/EttoreCaputo/yoru-hub"
 
 [dependencies]
 aes-gcm = "0.11.1"
+btleplug = { version = "0.13.5", optional = true }
 async-trait = { version = "0.1.89", optional = true }
 base64 = "0.23.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
@@ -30,6 +31,7 @@ tar = { version = "0.4.46", optional = true }
 tokio = { version = "1.53.1", features = ["rt", "time"], optional = true }
 ureq = "3.4.2"
 url = { version = "2.5.8", optional = true }
+uuid = { version = "1", optional = true }
 http = { version = "1", optional = true }
 futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
 sse-stream = { version = "0.2", optional = true }
@@ -74,3 +76,6 @@ connectors = [
     "dep:tokio", "tokio/rt-multi-thread", "tokio/net", "tokio/io-util", "tokio/sync", "tokio/macros", "tokio/process",
     "dep:reqwest", "dep:keyring", "dep:url", "dep:async-trait", "dep:http", "dep:futures", "dep:sse-stream",
 ]
+# The Pocket voice recorder over Bluetooth (`pocket`): its session key lives
+# in the connectors' keychain vault.
+pocket = ["connectors", "dep:btleplug", "dep:uuid", "tokio/rt", "tokio/time", "tokio/sync", "tokio/macros"]

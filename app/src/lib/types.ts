@@ -333,6 +333,8 @@ export type Meeting = {
   transcribed_at: number | null;
   /** When its summary was made. */
   summarized_at: number | null;
+  /** Where it came from when not recorded here: `pocket`. */
+  origin?: string | null;
 };
 /** A meeting's summary (`meeting_summary`); `by` names the model. */
 export type Summary = {
@@ -380,3 +382,26 @@ export type Permissions = Record<PermissionKind, PermissionState>;
 
 /** A bridge event: `kind` and its fields, plus the board it comes from. */
 export type BridgeEvent = { kind: string; target?: string | null; board?: string | null; [field: string]: unknown };
+
+/** The Pocket recorder's settings (`pocket_settings`). */
+export type PocketSettings = { enabled: boolean; auto_sync: boolean; delete_after_sync: boolean; set_clock: boolean };
+/** A recording on the Pocket; `meeting` is the meeting it became. */
+export type PocketRecording = { date: string; name: string; seconds: number; started_at: number | null; meeting: string | null };
+/** The Pocket and its link (`pocket_status`, the `pocket` event). */
+export type PocketStatus = {
+  phase: "off" | "unpaired" | "pairing" | "searching" | "connecting" | "connected" | "refused" | "no_bluetooth";
+  settings: PocketSettings;
+  name: string | null;
+  battery: number | null;
+  firmware: string | null;
+  wifi_firmware: string | null;
+  free_mb: number | null;
+  total_mb: number | null;
+  recording: boolean;
+  recordings: PocketRecording[];
+  checking: boolean;
+  transfer: { name: string; bytes: number; total: number; queued: number } | null;
+  synced_at: number | null;
+  error: string | null;
+};
+export type PocketEvent = { kind: "status"; status: PocketStatus } | { kind: "imported"; meeting: Meeting };

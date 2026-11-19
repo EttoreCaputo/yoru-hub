@@ -34,6 +34,8 @@ pub mod llm;
 pub mod meetings;
 pub mod models;
 pub mod notch;
+#[cfg(feature = "pocket")]
+pub mod pocket;
 pub(crate) mod paths;
 #[cfg(feature = "mcp")]
 pub mod mcp;

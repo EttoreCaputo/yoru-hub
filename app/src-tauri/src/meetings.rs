@@ -167,6 +167,12 @@ pub fn open_audio_privacy() -> Result<(), String> {
         .map(|_| ())
 }
 
+/// A recording brought in by something else (the Pocket): transcribed
+/// like an import.
+pub fn after_import(app: &AppHandle, id: String) {
+    after_recording(app, id);
+}
+
 /// Transcribe a new recording or import on its own, unless the settings
 /// say to wait to be asked or the model isn't there yet.
 fn after_recording(app: &AppHandle, id: String) {

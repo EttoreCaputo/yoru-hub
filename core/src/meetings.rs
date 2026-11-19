@@ -12,7 +12,7 @@ mod transcript;
 
 pub use summary::{ActionItem, Complete, Summary, summarize, summary};
 
-pub use transcript::{Format, Line, Settings, Speaker, SummaryBy, Transcript, When, download_model, export, import, model_present, rename_speaker, set_settings, settings, transcribe, transcript, voices};
+pub use transcript::{Format, Line, Settings, Speaker, SummaryBy, Transcript, When, download_model, export, import, import_recording, model_present, rename_speaker, set_settings, settings, transcribe, transcript, voices};
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -48,6 +48,10 @@ pub struct Meeting {
     /// The names the user gave the people heard, by [`Line::who`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub speakers: BTreeMap<String, String>,
+    /// Where it was recorded when not on this computer: `pocket` for the
+    /// Pocket recorder (docs/pocket.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,6 +233,7 @@ impl Recording {
             transcribed_at: None,
             summarized_at: None,
             speakers: BTreeMap::new(),
+            origin: None,
         };
         save(&folder, &meeting)?;
         let meeting = Arc::new(Mutex::new(meeting));
@@ -427,6 +432,7 @@ mod tests {
             transcribed_at: None,
             summarized_at: None,
             speakers: BTreeMap::new(),
+            origin: None,
             tracks: vec![Track { name: "mic".into(), source: "Mic".into(), kind: "mic".into(), file: None, duration_ms: 0, rate: 48000, channels: 1 }],
         }
     }
