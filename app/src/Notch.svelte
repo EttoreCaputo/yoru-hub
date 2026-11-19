@@ -62,7 +62,14 @@
    *  pointer on their count, and until the pointer leaves the notch. */
   let sessions = $state(false);
 
-  const ear = $derived(geometry.height + 8);
+  /** Yoru's box: his black disc is lost on the notch's black, so only the
+   *  white sphere in its middle (about 40% of it) shows. */
+  const yoruBox = $derived((geometry.height - 8) * 1.15);
+  /** Each side beside the camera: just past the sphere, the disc's black
+   *  edge may spill over, it can't be seen. */
+  const ear = $derived(Math.round(geometry.height * 0.85));
+  /** The count on the right is as big as the sphere on the left. */
+  const badge = $derived(Math.round(yoruBox * 0.42));
   const closedWidth = $derived(geometry.width + 2 * ear);
   const busy = $derived(voice !== "idle" && voice !== "error");
   const card = $derived(store.confirmations[0] ?? null);
@@ -230,6 +237,7 @@
   style:--bar="{geometry.height}px"
   style:--ear="{ear}px"
   style:--notch="{geometry.width}px"
+  style:--badge="{badge}px"
 >
   <div class="top">
     <div class="side left">
@@ -409,6 +417,15 @@
     min-width: 0;
     max-width: calc((var(--w) - var(--notch)) / 2 - 12px);
   }
+  /* Closed, each side is just its ear, its one thing centred in it. */
+  .shape:not(.open) .top {
+    padding: 0;
+  }
+  .shape:not(.open) .side {
+    justify-content: center;
+    width: var(--ear);
+    max-width: none;
+  }
   .yoru {
     display: grid;
     flex: none;
@@ -487,12 +504,13 @@
     stroke-linecap: round;
   }
   .count {
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: 9px;
+    box-sizing: border-box;
+    min-width: var(--badge);
+    height: var(--badge);
+    padding: 0 3px;
+    border-radius: calc(var(--badge) / 2);
     background: rgba(255, 255, 255, 0.14);
-    font: 600 10.5px/18px var(--sans);
+    font: 600 calc(var(--badge) * 0.68) / var(--badge) var(--sans);
     text-align: center;
   }
   .count.wait {

@@ -51,7 +51,7 @@ Leftovers of the retired Yoru app are in `~/Library/Application Support/Yoru/mod
 ## Recording
 
 - **Sources**: all system audio, one app (picked from the running ones), one or more microphones, together. Each source is a track; the microphone is "you", the rest "the others", so two speakers are told apart for free and diarization only runs on the others' track.
-- **Start and stop**: in the app, from the board (a menu entry, or "Yoru, record the meeting"), and from the menu bar. The board shows a recording mark while it lasts, and Yoru can say that it is recording.
+- **Start and stop**: in the app (the window bar's Record, beside the notifications, since 2026-11-20; what it records is picked on the Meetings page), from the board (a menu entry, or "Yoru, record the meeting"), and from the menu bar. The board shows a recording mark while it lasts, and Yoru can say that it is recording.
 - **Files**: written as they come (a crash keeps what was recorded), compressed to AAC when done.
 - **Meeting detection**: when an app starts using the microphone (Zoom, Meet in a browser, Teams, FaceTime…), Yoru asks on the board whether to record. Off by default.
 - **Imported files**: audio or video dropped on the Meetings page or opened with the app, and an optional watched folder.

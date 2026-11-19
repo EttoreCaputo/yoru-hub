@@ -11,11 +11,10 @@
 -->
 <script lang="ts">
   import Icon from "../ui/Icon.svelte";
-  import { untrack } from "svelte";
   import { call, inPreview, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import type { Meeting, MeetingRequest, MeetingSources } from "../types";
+  import type { Meeting, MeetingSources } from "../types";
   import { tabs } from "../tabs.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import { clock } from "../ui/when";
@@ -23,26 +22,11 @@
   const t = $derived(i18n.t.meetings);
   let error = $state("");
   let sources = $state<MeetingSources | null>(null);
-  /** `system`, an app's bundle id, or `none`. */
-  let played = $state("system");
-  let mics = $state<string[]>([]);
-  let title = $state("");
-  let starting = $state(false);
-  let stopping = $state(false);
   let importing = $state(false);
   let dropping = $state(false);
 
   $effect(() => {
     void readSources();
-  });
-
-  // A recording that just finished ends the stopping.
-  $effect(() => {
-    const done = store.recorded;
-    if (!done) return;
-    untrack(() => {
-      if (done.state !== "recording") stopping = false;
-    });
   });
 
   // Audio or video files dropped on the window become meetings.
@@ -86,45 +70,18 @@
   async function readSources() {
     try {
       sources = await call<MeetingSources>("meeting_sources");
-      if (!mics.length && !store.recording) mics = sources.microphones.filter((m) => m.default).map((m) => m.id);
-      if (played !== "system" && played !== "none" && !sources.apps.some((a) => a.id === played)) played = "system";
+      if (!store.recordMics) store.recordMics = sources.microphones.filter((m) => m.default).map((m) => m.id);
+      const played = store.recordPlayed;
+      if (played !== "system" && played !== "none" && !sources.apps.some((a) => a.id === played)) store.recordPlayed = "system";
     } catch (e) {
       error = why(e);
     }
   }
 
-  const toggleMic = (id: string, on: boolean) => (mics = on ? [...mics, id] : mics.filter((m) => m !== id));
-  const nothing = $derived(played === "none" && !mics.length);
-
-  async function record() {
-    starting = true;
-    error = "";
-    store.recordingError = null;
-    const request: MeetingRequest = {
-      system: played === "system",
-      app: played === "system" || played === "none" ? null : played,
-      microphones: mics,
-      title: title.trim() || null,
-    };
-    try {
-      store.recording = await call<Meeting>("meeting_start", { request });
-      title = "";
-    } catch (e) {
-      error = why(e);
-    } finally {
-      starting = false;
-    }
-  }
-
-  async function stop() {
-    stopping = true;
-    try {
-      await call("meeting_stop");
-    } catch (e) {
-      stopping = false;
-      error = why(e);
-    }
-  }
+  const mics = $derived(store.recordMics ?? []);
+  const toggleMic = (id: string, on: boolean) => (store.recordMics = on ? [...mics, id] : mics.filter((m) => m !== id));
+  const played = $derived(store.recordPlayed);
+  const pick = (id: string) => (store.recordPlayed = id);
 
   const when = (at: number) => `${i18n.date(at)} · ${i18n.time(at)}`;
   const name = (m: Meeting) => m.title ?? t.untitled(when(m.started_at));
@@ -150,7 +107,6 @@
         <span class="rec" aria-hidden="true"></span>
         <b>{name(store.recording)}</b>
         <span class="mono time">{clock(elapsed)}</span>
-        <button class="btn primary stop" disabled={stopping} onclick={stop}>{stopping ? t.stopping : t.stop}</button>
       </div>
       <div class="meters">
         {#each store.recording.tracks as track (track.name)}
@@ -167,12 +123,12 @@
           <div class="how"><button class="btn small quiet" onclick={readSources}>{t.refresh}</button></div>
         </div>
         <div class="tiles-row" role="radiogroup" aria-label={t.played}>
-          <button class="tile inset source" class:on={played === "system"} role="radio" aria-checked={played === "system"} onclick={() => (played = "system")}>
+          <button class="tile inset source" class:on={played === "system"} role="radio" aria-checked={played === "system"} onclick={() => pick("system")}>
             <span class="glyph"><Icon name="monitor" size={24} stroke={1.6} /></span>
             <span class="label">{t.everything}</span>
           </button>
           {#each sources?.apps ?? [] as app (app.id)}
-            <button class="tile inset source" class:on={played === app.id} role="radio" aria-checked={played === app.id} title={app.name} onclick={() => (played = app.id)}>
+            <button class="tile inset source" class:on={played === app.id} role="radio" aria-checked={played === app.id} title={app.name} onclick={() => pick(app.id)}>
               {#if app.icon}
                 <img src="data:image/png;base64,{app.icon}" alt="" />
               {:else}
@@ -182,7 +138,7 @@
               <span class="label">{app.name}</span>
             </button>
           {/each}
-          <button class="tile inset source" class:on={played === "none"} role="radio" aria-checked={played === "none"} onclick={() => (played = "none")}>
+          <button class="tile inset source" class:on={played === "none"} role="radio" aria-checked={played === "none"} onclick={() => pick("none")}>
             <span class="glyph"><Icon name="ban" size={24} stroke={1.6} /></span>
             <span class="label">{t.nothing}</span>
           </button>
@@ -195,12 +151,9 @@
         </div>
       {/each}
       <div class="setting">
-        <input class="title" type="text" placeholder={t.titlePlaceholder} bind:value={title} aria-label={t.titlePlaceholder} />
-        <button class="btn primary" disabled={nothing || starting} onclick={record}>
-          <span class="rec small" aria-hidden="true"></span>{starting ? t.starting : t.record}
-        </button>
+        <input class="title" type="text" placeholder={t.titlePlaceholder} bind:value={store.recordTitle} aria-label={t.titlePlaceholder} />
       </div>
-      <p class="faint note">{t.consent}</p>
+      <p class="faint note">{t.recordAbove} {t.consent}</p>
     {/if}
   </section>
 
@@ -246,9 +199,6 @@
   .time {
     color: var(--haze);
   }
-  .stop {
-    margin-left: auto;
-  }
   .rec {
     width: 10px;
     height: 10px;
@@ -258,10 +208,6 @@
   }
   .live .rec {
     animation: pulse 1.4s ease-in-out infinite;
-  }
-  .rec.small {
-    width: 8px;
-    height: 8px;
   }
   @keyframes pulse {
     50% {

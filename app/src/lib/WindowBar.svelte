@@ -4,7 +4,7 @@
   where the window is dragged from. Over the sidebar, at its right edge, the
   one that folds it away; then, from where the page's card starts, the tabs, as in Pocket: the page's (Home,
   Memory…), each conversation or meeting opened, and + for a new
-  conversation. On the right, Notifications and Settings, a click
+  conversation. On the right, Record (or Stop, while recording), then Notifications and Settings, a click
   away from every page, and the one that folds the activity panel.
 -->
 <script lang="ts">
@@ -14,6 +14,7 @@
   import { store } from "./store.svelte";
   import { tabs, type Tab } from "./tabs.svelte";
   import Icon from "./ui/Icon.svelte";
+  import { clock } from "./ui/when";
 
   const nav = $derived(i18n.t.nav);
   const tw = $derived(i18n.t.window);
@@ -30,6 +31,7 @@
   const sideLabel = $derived(look.sidebar ? tw.hideSidebar : tw.showSidebar);
   const panelLabel = $derived(look.activity ? i18n.t.home.hidePanel : i18n.t.home.showPanel);
   const th = $derived(i18n.t.home);
+  const tm = $derived(i18n.t.meetings);
 
   /** A tab's name: the conversation's title (or its first words), the meeting's. */
   function tabName(tab: Tab) {
@@ -70,6 +72,15 @@
   </div>
 
   <div class="end">
+    {#if store.recording}
+      <button class="record live" disabled={store.recordBusy === "stopping"} title={tm.stop} onclick={() => store.stopRecording()}>
+        <span class="rec" aria-hidden="true"></span>{store.recordBusy === "stopping" ? tm.stopping : tm.stop}<span class="mono time">{clock((store.now - store.recording.started_at) / 1000)}</span>
+      </button>
+    {:else}
+      <button class="record" disabled={!!store.recordBusy || (store.recordPlayed === "none" && store.recordMics?.length === 0)} onclick={() => store.record()}>
+        <span class="rec" aria-hidden="true"></span>{store.recordBusy ? tm.starting : tm.record}
+      </button>
+    {/if}
     <button class="icon-btn" class:on={store.page === "inbox"} aria-label={nav.inbox} title={nav.inbox} onclick={() => store.go("inbox")}>
       <Icon name={PAGE_ICONS.inbox} />
       {#if store.unread}<span class="count small">{store.unread > 99 ? "99+" : store.unread}</span>{/if}
@@ -199,8 +210,51 @@
     flex-shrink: 0;
     color: var(--haze);
   }
+  /* Record, as in Pocket: a white pill with a red dot, beside the bell. */
+  .record {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    margin-right: 8px;
+    padding: 0 16px 0 14px;
+    border: 1px solid var(--rim-2);
+    border-radius: 999px;
+    background: var(--night);
+    color: var(--pearl);
+    font: 500 var(--fs-meta)/1 var(--sans);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 140ms;
+  }
+  .record:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  .record:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .rec {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--wrong);
+    flex-shrink: 0;
+  }
+  .live .rec {
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .time {
+    color: var(--haze);
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
   .end {
     display: flex;
+    align-items: center;
     gap: 2px;
     margin-left: 12px;
     flex-shrink: 0;

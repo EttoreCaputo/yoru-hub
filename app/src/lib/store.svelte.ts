@@ -30,6 +30,7 @@ import type {
   TaskEntry,
   Meeting,
   MeetingEvent,
+  MeetingSources,
   Notification,
   Onboarding,
   PocketEvent,
@@ -136,6 +137,13 @@ class Store {
   recordingError = $state<{ message: string; code?: string } | null>(null);
   /** The last recording that finished, or meeting that got its transcript, for the Meetings page to pick up. */
   recorded = $state<Meeting | null>(null);
+  /** What the window bar's Registra records, picked on the Meetings page:
+   *  everything played (`system`), one app's bundle id, or `none`. */
+  recordPlayed = $state("system");
+  /** Its microphones; null until picked, then the Mac's default ones. */
+  recordMics = $state<string[] | null>(null);
+  recordTitle = $state("");
+  recordBusy = $state<"starting" | "stopping" | null>(null);
   /** The Pocket recorder, or null where it can't run. */
   pocket = $state<PocketStatus | null>(null);
   /** The Pocket's dialog is open (from the sidebar, or its Settings page). */
@@ -311,6 +319,7 @@ class Store {
     }
     else {
       this.recording = null;
+      this.recordBusy = null;
       this.levels = {};
       this.#recorded(e.meeting);
     }
@@ -384,6 +393,42 @@ class Store {
   #onSchedule(e: ScheduleEvent) {
     this.schedule = [{ ...e, at: Date.now() }, ...this.schedule].slice(0, SCHEDULE_LOG);
     if (e.kind === "watched") void this.refreshWatchers();
+  }
+
+  /** Starts recording what was picked on the Meetings page. A failure is
+   *  shown there, so that's where it goes. */
+  async record() {
+    if (this.recording || this.recordBusy) return;
+    this.recordBusy = "starting";
+    this.recordingError = null;
+    try {
+      if (!this.recordMics) {
+        const sources = await call<MeetingSources>("meeting_sources");
+        this.recordMics = sources.microphones.filter((m) => m.default).map((m) => m.id);
+      }
+      const played = this.recordPlayed;
+      this.recording = await call<Meeting>("meeting_start", {
+        request: { system: played === "system", app: played === "system" || played === "none" ? null : played, microphones: this.recordMics, title: this.recordTitle.trim() || null },
+      });
+      this.recordTitle = "";
+    } catch (e) {
+      this.recordingError = { message: why(e) };
+      this.go("meetings");
+    } finally {
+      this.recordBusy = null;
+    }
+  }
+
+  /** Ends it; the busy state lasts until the meeting's `stopped` event. */
+  async stopRecording() {
+    if (!this.recording || this.recordBusy) return;
+    this.recordBusy = "stopping";
+    try {
+      await call("meeting_stop");
+    } catch (e) {
+      this.recordBusy = null;
+      this.recordingError = { message: why(e) };
+    }
   }
 
   go(page: Page) {

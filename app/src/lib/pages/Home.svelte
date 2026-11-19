@@ -115,7 +115,6 @@
           <p class="lede">{t.allLede}</p>
         </div>
         <div class="actions">
-          <button class="btn" onclick={() => store.go("meetings")}><span class="rec" aria-hidden="true"></span>{tm.record}</button>
           <button class="btn primary" onclick={() => store.newChat()}><Icon name="plus" size={15} stroke={2.25} />{t.newChat}</button>
         </div>
       </div>
@@ -198,12 +197,6 @@
   }
   .page {
     padding-bottom: 24px;
-  }
-  .rec {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--wrong);
   }
   .cards {
     display: grid;

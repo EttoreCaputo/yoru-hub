@@ -1,8 +1,8 @@
 <!--
   The sidebar: with two boards or more the list of them to pick the one
   shown, the pages (Notifications and Settings are icons in the window bar),
-  and at the bottom the Pocket recorder (a click opens its dialog), where the
-  board is, and "do not disturb". Yoru himself
+  and at the bottom the Pocket recorder (a click opens its dialog) and the
+  board, each connected or not and by what, and "do not disturb". Yoru himself
   isn't here: he sits at the bottom right of the pages (YoruBubble.svelte).
 -->
 <script lang="ts">
@@ -19,26 +19,22 @@
   // Tasks, Routines, Services, Spoken and Animations.
   const MAIN: Page[] = ["home", "memory", "meetings"];
 
-  const status = $derived.by(() => {
-    if (store.boardState === "live") return { dot: "done", text: t.link.live };
-    if (store.boardState === "boot") return { dot: "think", text: t.link.boot };
-    if (store.link === "offline") return { dot: "wrong", text: t.link.offline };
-    return { dot: "", text: t.link.searching };
+  // The board and the Pocket, alike: a dot, connected or not, and the icon
+  // of what it's connected by.
+  const yoru = $derived.by(() => {
+    const on = store.boardState === "live" || store.boardState === "boot";
+    const by = !on ? null : store.port?.startsWith("wifi:") ? "wifi" : store.port ? "usb" : null;
+    return { dot: store.boardState === "live" ? "done" : on ? "think" : "", text: on ? t.link.live : t.link.offline, by } as const;
   });
-  const via = $derived(store.port?.startsWith("wifi:") ? t.link.wifi : store.port ? t.link.usb : "");
   const quietUntil = $derived(store.info?.quiet_until ?? null);
   const several = $derived(store.boards.length > 1);
   const boardDot = (link: string) => (link === "connected" ? "done" : link === "searching" ? "think" : "wrong");
 
-  // The Pocket recorder, while it is on: connected or not, and its battery.
   const pocket = $derived.by(() => {
     const p = store.pocket;
     if (!p || p.phase === "off") return null;
-    const dot = p.phase === "connected" ? "done" : p.phase === "refused" || p.phase === "no_bluetooth" ? "wrong" : p.phase === "unpaired" ? "" : "think";
-    const tp = t.pocket;
-    const text =
-      p.transfer ? tp.syncing : p.recording ? tp.recordingNow : p.phase === "connected" ? tp.connectedShort : p.phase === "unpaired" ? tp.phases.unpaired : p.phase === "searching" || p.phase === "connecting" ? tp.away : tp.phases[p.phase];
-    return { dot, text, battery: p.phase === "connected" ? p.battery : null };
+    const on = p.phase === "connected";
+    return { dot: on ? "done" : "", text: on ? t.pocket.connectedShort : t.pocket.away, by: on ? "bluetooth" : null } as const;
   });
 
   const badge = (p: Page): { n?: number; dot?: string } | null => {
@@ -71,16 +67,14 @@
 
   <footer>
     {#if pocket}
-      <button class="nav-row pocket" title={t.pocket.openTitle} onclick={() => (store.pocketShown = true)}>
-        <Icon name="mic" size={16} />
-        <span class="pname">Pocket</span>
-        <span class="pstate"><span class="dot {pocket.dot}"></span>{pocket.text}{#if pocket.battery !== null}<span class="faint"> · {pocket.battery}%</span>{/if}</span>
+      <button class="nav-row device" title={t.pocket.openTitle} onclick={() => (store.pocketShown = true)}>
+        {@render device("Pocket", pocket)}
       </button>
     {/if}
-    <div class="status">
-      <span class="dot {status.dot}"></span>{status.text}{#if via && store.boardState === "live"}<span class="faint"> · {via}</span>{/if}
-      {#if store.preview}<span class="preview" title={t.nav.previewTitle}>{t.nav.preview}</span>{/if}
+    <div class="nav-row device yoru">
+      {@render device("Yoru", yoru)}
     </div>
+    {#if store.preview}<div class="status"><span class="preview" title={t.nav.previewTitle}>{t.nav.preview}</span></div>{/if}
     {#if quietUntil}
       <div class="dnd on">
         <Icon name="moon" size={16} />
@@ -96,6 +90,12 @@
     {/if}
   </footer>
 </nav>
+
+{#snippet device(name: string, d: { dot: string; text: string; by: "wifi" | "usb" | "bluetooth" | null })}
+  <span class="dot {d.dot}"></span>
+  <span class="dname">{name}</span>
+  <span class="dstate">{d.text}{#if d.by}<Icon name={d.by} size={14} />{/if}</span>
+{/snippet}
 
 {#snippet item(p: Page)}
   {@const b = badge(p)}
@@ -207,16 +207,23 @@
   footer {
     margin-top: auto;
   }
-  .pocket {
+  /* Pocket and Yoru: the dot on the left, the state and its link on the right. */
+  .device {
     gap: 9px;
-    min-height: 34px;
-    margin-bottom: 8px;
+    min-height: 32px;
     font-size: var(--fs-meta);
   }
-  .pname {
+  .device.yoru {
+    margin-bottom: 8px;
+    cursor: default;
+  }
+  .device.yoru:hover {
+    color: var(--haze);
+  }
+  .dname {
     font-weight: 550;
   }
-  .pstate {
+  .dstate {
     display: inline-flex;
     align-items: center;
     gap: 6px;

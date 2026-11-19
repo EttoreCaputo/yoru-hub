@@ -100,10 +100,10 @@ dialog (Pair when it isn't paired), then:
 
 ## The sidebar and the dialog
 
-While the Pocket is on, the sidebar shows it above the board's state: a dot
-(green connected, grey not paired, blinking while it's looked for, red when
-refused or without Bluetooth), connected or not nearby (or syncing,
-recording), and its battery. A click opens its dialog, after the vendor app's
+While the Pocket is on, the sidebar shows it above the board, in the same
+kind of row: a dot on the left (green when connected, grey otherwise), its
+name, Connected or Not connected, and the Bluetooth icon while connected.
+A click opens its dialog, after the vendor app's
 "device sync": the Pocket's name and connection,
 battery, free storage and firmware; the new recordings, with select all and
 "Sync N recordings"; the copy under way with its progress and how many wait;
