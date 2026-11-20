@@ -1,11 +1,12 @@
 // How the main window looks, kept on this Mac (localStorage): the theme,
-// and whether the sidebar and the Home's activity panel are open. The
+// whether the sidebar and the Home's activity panel are open, and whether
+// Settings shows its advanced options. The
 // notch's window never reads it: it stays dark, it's on the menu bar.
 
 export type Theme = "system" | "light" | "dark";
 export const THEMES: Theme[] = ["system", "light", "dark"];
 
-const KEYS = { theme: "yoru.theme", sidebar: "yoru.sidebar", activity: "yoru.activity" } as const;
+const KEYS = { theme: "yoru.theme", sidebar: "yoru.sidebar", activity: "yoru.activity", advanced: "yoru.advanced" } as const;
 
 function read(key: string): string | null {
   try {
@@ -26,6 +27,8 @@ class Look {
   theme = $state<Theme>((THEMES as string[]).includes(read(KEYS.theme) ?? "") ? (read(KEYS.theme) as Theme) : "system");
   sidebar = $state(read(KEYS.sidebar) !== "closed");
   activity = $state(read(KEYS.activity) !== "closed");
+  /** Settings' models, ports and MCP: hidden until asked for, in every page at once. */
+  advanced = $state(read(KEYS.advanced) === "on");
   #dark = $state(true);
   /** What's on screen: the theme picked, or the Mac's own when it's "system". */
   dark = $derived(this.theme === "system" ? this.#dark : this.theme === "dark");
@@ -49,6 +52,10 @@ class Look {
   toggleSidebar() {
     this.sidebar = !this.sidebar;
     write(KEYS.sidebar, this.sidebar ? "open" : "closed");
+  }
+  setAdvanced(on: boolean) {
+    this.advanced = on;
+    write(KEYS.advanced, on ? "on" : "off");
   }
   toggleActivity() {
     this.activity = !this.activity;

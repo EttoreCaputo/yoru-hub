@@ -1,18 +1,19 @@
 <!--
-  Settings as Yoru's wiring: the mirror in the middle, and each part of the
-  settings a card wired to him by a trace, with what it says right now. On
-  the left what Yoru is (his brain, his voice, the language he answers
-  in, what he does with a meeting); on the right what he's connected to
-  (the services' keys, the Mac, the board, the Pocket, the data folder). A card opens its own page, with the
-  everyday choices first and the technical ones under "Advanced".
+  Settings, sorted by what you want done rather than by how Yoru is built.
+  On top what's wrong right now, each with the button that leads to the fix,
+  or that all is well; then four quick settings (his voice, the language,
+  the brain, do not disturb); then the rest as rows in four groups: Yoru,
+  Devices, Accounts and services, General. Every setting lives in one place
+  only. A row opens its page with the everyday choices; models, ports and
+  MCP show only with "Show advanced options", one switch for every page.
 -->
 <script lang="ts">
   import { look, THEMES } from "../look.svelte";
   import { fly } from "svelte/transition";
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
-  import { store } from "../store.svelte";
-  import type { AssistantInfo, AssistantSettings, Brain, Effort, Gaze, KeySource, McpInfo, MeetingSettings, VoiceInfo, VoiceSettings } from "../types";
+  import { store, type Page } from "../store.svelte";
+  import type { AssistantInfo, AssistantSettings, Brain, Effort, KeySource, McpInfo, MeetingSettings, VoiceInfo } from "../types";
   import YoruBoard from "../YoruBoard.svelte";
   import Board from "../ui/Board.svelte";
   import KeyField from "../ui/KeyField.svelte";
@@ -23,7 +24,7 @@
   import PocketSettingsPage from "../ui/PocketSettings.svelte";
   import Profiles from "../ui/Profiles.svelte";
   import { transcriptionRequirement } from "../meeting-readiness";
-  import { PAGE_ICONS, SETTINGS_PAGES } from "../icons/pages";
+  import { PAGE_ICONS } from "../icons/pages";
   import Icon from "../ui/Icon.svelte";
   import type { IconName } from "../icons/lucide";
 
@@ -39,7 +40,6 @@
   const brain = $derived(store.info?.brain ?? null);
   const BRAIN_NAMES: Record<Brain, string> = { anthropic: "Claude", openai: "OpenAI", google: "Gemini", groq: "Groq", ollama: "Ollama" };
   const BRAINS: Brain[] = ["anthropic", "openai", "google", "groq", "ollama"];
-  const LANG_CHOICES: (Lang | null)[] = [null, ...LANGUAGES.map((l) => l.id)];
   const langName = (id: Lang) => LANGUAGES.find((l) => l.id === id)?.name ?? id;
 
   // Each brain's model, where it's kept, and the models it offers.
@@ -107,47 +107,38 @@
     }
   }
   const registerMcp = (connect: boolean) => run(() => call<McpInfo>("claude_mcp", { connect }), (v) => (mcp = v));
-  const setVoice = (change: Partial<VoiceSettings>) =>
-    voice && run(() => call<VoiceInfo>("set_voice", { settings: { ...$state.snapshot(voice!.settings), ...change } }), (v) => (voice = v));
 
   async function setupAgain() {
     await call("set_onboarding", { done: false, tourVersion: null });
     store.onboarding = { done: false, tour_version: store.onboarding?.tour_version ?? 0 };
   }
 
-  // The parts, wired to Yoru: four on the left, five on the right, top to bottom.
-  type Part = "brain" | "voice" | "language" | "meetings" | "keys" | "mac" | "board" | "pocket" | "about";
-  type Wire = { id: Part; side: -1 | 1; color: string; icon: IconName };
-  const WIRES: Wire[] = [
-    { id: "brain", side: -1, color: "var(--think)", icon: "sparkles" },
-    { id: "voice", side: -1, color: "#c58cff", icon: "audio-waveform" },
-    { id: "language", side: -1, color: "#5fd4c8", icon: "languages" },
-    { id: "meetings", side: -1, color: "#ff9f6b", icon: "users" },
-    { id: "keys", side: 1, color: "var(--wait)", icon: "key-round" },
-    { id: "mac", side: 1, color: "#7fb2ff", icon: "laptop" },
-    { id: "board", side: 1, color: "var(--done)", icon: "cpu" },
-    { id: "pocket", side: 1, color: "#e0559a", icon: "mic" },
-    { id: "about", side: 1, color: "var(--pearl-mid)", icon: "info" },
+  // The parts with a page of their own here; the other rows open an app page.
+  type Part = "brain" | "voice" | "meetings" | "keys" | "mac" | "board" | "pocket";
+  const PART_ICONS: Record<Part, IconName> = { brain: "message-circle", voice: "audio-waveform", meetings: "users", keys: "key-round", mac: "laptop", board: "cpu", pocket: "mic" };
+  type Row = { part: Part } | { page: Page };
+  const GROUPS: { id: string; rows: Row[] }[] = [
+    { id: "yoru", rows: [{ part: "brain" }, { part: "voice" }, { part: "meetings" }, { page: "routines" }, { page: "tasks" }] },
+    { id: "devices", rows: [{ part: "board" }, { part: "pocket" }, { part: "mac" }] },
+    { id: "accounts", rows: [{ page: "connectors" }, { part: "keys" }] },
   ];
-  const PAGES: Part[] = WIRES.map((w) => w.id);
 
   let open = $state<Part | null>(store.settingsSection);
   store.settingsSection = null;
-  let hover = $state<Part | null>(null);
-  const wire = (id: Part) => WIRES.find((w) => w.id === id)!;
 
   function pick(id: Part, e: Event) {
-    hover = null;
     open = id;
     (e.currentTarget as HTMLElement).closest("main")?.scrollTo({ top: 0 });
   }
 
-  // What each card says now, and its dot.
+  // What each row says now, and its dot.
   const brainModel = $derived(brain ? modelOf(brain) : "");
+  const brainModelName = $derived(brain === "anthropic" ? (CLAUDE_MODELS.find(([m]) => m === brainModel)?.[1].split(" — ")[0] ?? brainModel) : brainModel);
   const keyed = $derived(keys.filter((k) => k.source).length);
   const firmware = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   const via = $derived(store.port?.startsWith("wifi:") ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
   const vs = $derived(voice?.settings);
+  const brainProblem = $derived(brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain);
   const pocketSummary = $derived.by(() => {
     const p = store.pocket;
     const tp = i18n.t.pocket;
@@ -156,223 +147,271 @@
     const dot = p.phase === "connected" ? "done" : p.phase === "refused" || p.phase === "no_bluetooth" ? "wrong" : p.phase === "unpaired" ? "" : "think";
     return { text: [tp.phases[p.phase], p.phase === "connected" && p.battery !== null ? `${p.battery}%` : ""].filter(Boolean).join(" · "), dot };
   });
-  const summary = $derived<Record<Part, { text: string; dot: string; warn?: boolean }>>({
+  const meetingProblem = $derived(
+    meetings && transcriptionRequirement(meetings.settings.transcribe_by, meetings.model, !!store.info?.google_key)
+      ? meetings.settings.transcribe_by === "local"
+        ? t.meetingsNoModel
+        : i18n.t.meetings.noGoogleKey
+      : null,
+  );
+  const summary = $derived<Record<Part, { text: string; dot: string }>>({
     brain: !store.info?.ready
-      ? { text: brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain, dot: "wrong", warn: true }
-      : { text: `${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
+      ? { text: brainProblem, dot: "wrong" }
+      : { text: `${brain ? BRAIN_NAMES[brain] : ""}${brainModelName ? " · " + brainModelName : ""}`, dot: store.info?.limited ? "wait" : "" },
     voice: {
       text: !vs ? "—" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "),
-      dot: vs?.enabled ? "done" : "",
+      dot: "",
     },
-    language: { text: i18n.choice ? langName(i18n.choice) : `${t.system} · ${langName(i18n.lang)}`, dot: "" },
     keys: { text: keyed ? t.keysOf(keyed, keys.length) : t.noKeys, dot: "" },
-    mac: { text: [notch ? t.notchOn : t.notchOff, mcp?.registered ? t.claudeCode : ""].filter(Boolean).join(" · "), dot: notch || mcp?.registered ? "done" : "" },
+    mac: { text: [notch ? t.notchOn : t.notchOff, mcp?.registered ? t.claudeCode : ""].filter(Boolean).join(" · "), dot: "" },
     board:
       store.boardState === "off"
         ? { text: t.boardOff, dot: "" }
-        : { text: [store.boardState === "boot" ? i18n.t.link.boot : i18n.t.link.live, via, firmware].filter(Boolean).join(" · "), dot: store.update ? "wait" : store.boardState === "boot" ? "think" : "done" },
+        : { text: [store.boardState === "boot" ? i18n.t.link.boot : i18n.t.link.live, via, firmware].filter(Boolean).join(" · "), dot: store.boardState === "boot" ? "think" : "done" },
     meetings: !meetings
       ? { text: "—", dot: "" }
-      : transcriptionRequirement(meetings.settings.transcribe_by, meetings.model, !!store.info?.google_key)
-        ? { text: meetings.settings.transcribe_by === "local" ? t.meetingsNoModel : i18n.t.meetings.noGoogleKey, dot: "wait" }
-        : { text: `${t.meetingsWhen[meetings.settings.transcribe]} · ${t.meetingsBy(meetings.settings.summary_by.split(":").pop() ?? "")}`, dot: meetings.settings.detect ? "done" : "" },
+      : meetingProblem
+        ? { text: meetingProblem, dot: "wait" }
+        : { text: `${t.meetingsWhen[meetings.settings.transcribe]} · ${t.meetingsBy(meetings.settings.summary_by.split(":").pop() ?? "")}`, dot: "" },
     pocket: pocketSummary,
-    about: { text: t.aboutSummary, dot: "" },
   });
+  const loginNeeded = $derived(store.connectors.filter((c) => c.enabled && (c.state === "needs_login" || c.state === "error")).length);
+  const connectorsOn = $derived(store.connectors.filter((c) => c.enabled).length);
+  const routines = $derived(s?.routines);
+  const pageSummary = (p: Page) =>
+    p === "connectors" ? (connectorsOn ? t.connectorsOn(connectorsOn) : t.moreNotes.connectors) : p === "routines" || p === "tasks" || p === "spoken" || p === "animations" ? t.moreNotes[p] : "";
+  /** A tag at the end of a row: an update for the board, a login for the apps. */
+  const badge = (r: Row): { text: string; tone: string } | null =>
+    "part" in r && r.part === "board" && store.update ? { text: t.updateBadge, tone: "think" } : "page" in r && r.page === "connectors" && loginNeeded ? { text: t.needsLogin, tone: "wait" } : null;
 
-  // The cards sit in two columns either side of Yoru, in the page's flow,
-  // so they never overlap; the traces are drawn after, from where the
-  // cards and Yoru really are. Too narrow for that, the cards go in a grid
-  // under Yoru, without traces.
-  /** Between two rows' traces where they meet the case. */
-  const ANGLE_STEP = (30 * Math.PI) / 180;
-  /** The narrowest stage with Yoru between the columns. */
-  const WIRED_MIN = 640;
-  /** A card's place on its side, from the middle: −1.5 to 1.5 for four, −1 to 1 for three. */
-  function offset(w: Wire) {
-    const side = WIRES.filter((x) => x.side === w.side);
-    return side.indexOf(w) - (side.length - 1) / 2;
-  }
-  let stage: HTMLElement | undefined = $state();
-  let core: HTMLElement | undefined = $state();
-  let stageW = $state(840);
-  const wired = $derived(stageW >= WIRED_MIN);
-  const yoruSize = $derived(wired ? Math.max(110, Math.min(170, stageW * 0.18)) : 120);
-  type Geo = { w: number; h: number; cx: number; cy: number; r: number; cards: Partial<Record<Part, { x: number; y: number }>> };
-  let geo = $state<Geo | null>(null);
-  function measure() {
-    if (!stage || !core) return;
-    const box = stage.getBoundingClientRect();
-    const c = core.getBoundingClientRect();
-    const cards: Geo["cards"] = {};
-    for (const el of stage.querySelectorAll<HTMLElement>(".part")) {
-      const r = el.getBoundingClientRect();
-      const w = wire(el.dataset.part as Part);
-      cards[w.id] = { x: (w.side < 0 ? r.right : r.left) - box.left, y: r.top + r.height / 2 - box.top };
-    }
-    geo = { w: box.width, h: box.height, cx: c.left + c.width / 2 - box.left, cy: c.top + c.height / 2 - box.top, r: (c.width / 2) * 0.92, cards };
-  }
-  $effect(() => {
-    if (!stage) return;
-    void wired;
-    const watch = new ResizeObserver(() => measure());
-    watch.observe(stage);
-    for (const el of stage.querySelectorAll(".part")) watch.observe(el);
-    measure();
-    return () => watch.disconnect();
+  // What's wrong right now, each with where it's fixed. Only what stops
+  // Yoru from doing something: an update is good news, a tag on its row.
+  type Issue = { text: string; tone: "wrong" | "wait"; to: Part | Page };
+  const issues = $derived.by<Issue[]>(() => {
+    const list: Issue[] = [];
+    if (store.info && !store.info.ready) list.push({ text: brainProblem, tone: "wrong", to: "brain" });
+    else if (store.info?.limited) list.push({ text: store.info.limited, tone: "wait", to: "brain" });
+    if (vs && !vs.live && vs.enabled && voice?.stt_error) list.push({ text: t.issueVoice(voice.stt_error), tone: "wait", to: "voice" });
+    if (vs && !vs.live && vs.speak && voice?.tts_error) list.push({ text: t.issueVoice(voice.tts_error), tone: "wait", to: "voice" });
+    if (meetingProblem) list.push({ text: meetingProblem, tone: "wait", to: "meetings" });
+    if (loginNeeded) list.push({ text: t.issueConnectors(loginNeeded), tone: "wait", to: "connectors" });
+    return list;
   });
-  function trace(w: Wire, g: Geo) {
-    const card = g.cards[w.id];
-    if (!card) return null;
-    const { x: ax, y: ay } = card;
-    /** Where the trace meets the case, from straight up (−90°) to straight down. */
-    const a = offset(w) * ANGLE_STEP;
-    const ex = g.cx + w.side * g.r * Math.cos(a);
-    const ey = g.cy + g.r * Math.sin(a);
-    // Out of the card flat, then in at 45°, as copper runs on a board.
-    const bx = w.side < 0 ? Math.max(ax, ex - Math.abs(ey - ay)) : Math.min(ax, ex + Math.abs(ey - ay));
-    return { d: `M ${ax} ${ay} H ${bx} L ${ex} ${ey}`, ax, ay, ex, ey };
+  const PARTS: Part[] = Object.keys(PART_ICONS) as Part[];
+  function goTo(to: Part | Page, e: Event) {
+    if ((PARTS as string[]).includes(to)) pick(to as Part, e);
+    else store.go(to as Page);
   }
-  // The pages that aren't part of Yoru's wiring, opened from the menu under it.
-  const MORE_COLORS: Record<(typeof SETTINGS_PAGES)[number], string> = { tasks: "var(--wait)", routines: "#7fb2ff", connectors: "var(--think)", spoken: "#c58cff", animations: "var(--done)" };
-  const moreDot = (p: (typeof SETTINGS_PAGES)[number]) =>
-    p === "connectors" && store.connectors.some((c) => c.enabled && (c.state === "needs_login" || c.state === "error")) ? "wait" : "";
+  const okLine = $derived([summary.brain.text, summary.voice.text, summary.board.text].filter((x) => x && x !== "—").join(" · "));
 
-  // Yoru looks at the card under the pointer.
-  const gaze = $derived<Gaze | null>(hover ? { x: wire(hover).side * 0.9, y: offset(wire(hover)) * 0.5, movedAt: store.now } : store.gaze);
+  // The quick settings: his voice in the app's language, and do not disturb.
+  const voiceName = $derived.by(() => {
+    if (!vs) return "—";
+    if (vs.live) return `Gemini Live · ${vs.live}`;
+    if (!vs.speak) return t.silent;
+    const id = vs.voices[i18n.lang] ?? Object.values(vs.voices).find(Boolean) ?? "";
+    // Piper's ids read it_IT-paola-medium: the name is the middle part.
+    const piper = /^[a-z]{2}_[A-Z]{2}-([a-z]+)-/.exec(id);
+    if (piper) return piper[1][0].toUpperCase() + piper[1].slice(1);
+    const note = voice?.models.find((m) => m.id === id)?.note;
+    return note?.split(/[,—·]/)[0].trim() || id.replace(/^[^:]+:(voice\/)?/, "") || "—";
+  });
+  const canTry = $derived(!!vs?.speak && voice?.tts === "ready" && store.boardState === "live");
+  let trying = $state(false);
+  async function tryVoice() {
+    trying = true;
+    await run(() => call("test_voice", { board: null, language: i18n.lang }), () => {});
+    trying = false;
+  }
+  const setQuiet = (on: boolean) => store.saveSettings((x) => (x.routines.quiet = on));
 </script>
 
 <div class="page">
   {#if open}
-    {@const w = wire(open)}
-    <div class="sub" style:--c={w.color} in:fly={{ y: 10, duration: 260 }}>
+    <div class="sub" in:fly={{ y: 10, duration: 260 }}>
       <button class="btn quiet small back" onclick={() => ((open = null), readAll())}>
         <Icon name="chevron-left" size={16} />{t.back}
       </button>
       <div class="sub-head">
-        <span class="glyph big"><Icon name={w.icon} size={28} /></span>
+        <span class="glyph big"><Icon name={PART_ICONS[open]} size={26} /></span>
         <div>
           <h1>{t.parts[open]}</h1>
           <p class="lede">{t.partLedes[open]}</p>
         </div>
       </div>
-      <nav class="hop" aria-label={t.title}>
-        {#each PAGES as p (p)}
-          <button class="chip small tint" class:on={open === p} style:--c={wire(p).color} onclick={(e) => pick(p, e)}>{t.parts[p]}</button>
-        {/each}
-      </nav>
       {#if open === "brain"}{@render brainPage()}
-      {:else if open === "voice"}<Voice />
-      {:else if open === "language"}{@render languagePage()}
+      {:else if open === "voice"}<Voice />{@render pageLink("spoken")}
       {:else if open === "keys"}{@render keysPage()}
       {:else if open === "mac"}{@render macPage()}
-      {:else if open === "board"}<Board />
+      {:else if open === "board"}<Board />{@render pageLink("animations")}
       {:else if open === "meetings"}<MeetingSettingsPage />
-      {:else if open === "pocket"}<PocketSettingsPage />
-      {:else}{@render aboutPage()}{/if}
+      {:else}<PocketSettingsPage />{/if}
       {#if error}<p class="error-text note">{error}</p>{/if}
     </div>
   {:else}
     <div class="page-head">
       <div>
         <h1>{t.title}</h1>
-        <p class="lede">{t.guidedLede}</p>
       </div>
     </div>
 
-    <section class="guided panel" aria-labelledby="guided-title">
-      <h2 id="guided-title">{t.guidedTitle}</h2>
-      <p class="dim small">{t.guidedCurrent(brain ? BRAIN_NAMES[brain] : t.noBrain, meetings?.settings.transcribe_by === "local" ? i18n.t.meetings.thisComputer : meetings?.settings.transcribe_by.startsWith("google:") ? "Google" : "—")}</p>
-      <Profiles onchange={readAll} />
-    </section>
-
-    <details class="more-settings">
-      <summary class="section-title">{t.otherSettings}</summary>
-      <p class="dim small">{t.otherSettingsHint}</p>
-    <div class="stage" class:wired bind:this={stage} bind:clientWidth={stageW}>
-      {#if wired && geo}
-        <svg class="wires" viewBox="0 0 {geo.w} {geo.h}" aria-hidden="true">
-          {#each WIRES as w, i (w.id)}
-            {@const p = trace(w, geo)}
-            {#if p}
-              <g class="wire" class:lit={hover === w.id} class:warn={summary[w.id].warn} style:--c={w.color} style:--i={i}>
-                <path class="copper" d={p.d} pathLength="1" />
-                <path class="pulse" d={p.d} pathLength="100" />
-                <circle class="pad" cx={p.ax} cy={p.ay} r="4.5" />
-                <circle class="pad" cx={p.ex} cy={p.ey} r="3.5" />
-              </g>
-            {/if}
-          {/each}
-        </svg>
-      {/if}
-
-      <div class="yoru" bind:this={core}>
-        <YoruBoard board={store.boardState === "off" ? "off" : "live"} size={yoruSize} voice={store.voice} {gaze} />
+    <!-- What's wrong, or that all is well: Yoru's face says it first. -->
+    <section class="status panel" class:bad={issues.length} aria-live="polite">
+      <div class="face">
+        <YoruBoard board={store.boardState === "off" ? "off" : "live"} size={64} voice={store.voice} gaze={store.gaze} />
       </div>
-
-      {#each [-1, 1] as side (side)}
-        <div class="col" class:left={side < 0}>
-          {#each WIRES.filter((w) => w.side === side) as w (w.id)}
-            {@const sum = summary[w.id]}
-            {@const i = WIRES.indexOf(w)}
-            <button
-              class="tile part"
-              class:warn={sum.warn}
-              data-part={w.id}
-              style:--c={w.color}
-              style:--i={i}
-              onmouseenter={() => (hover = w.id)}
-              onmouseleave={() => (hover = null)}
-              onfocus={() => (hover = w.id)}
-              onblur={() => (hover = null)}
-              onclick={(e) => pick(w.id, e)}
-            >
-              <span class="glyph"><Icon name={w.icon} size={20} /></span>
-              <span class="words">
-                <b>{t.parts[w.id]}{#if sum.dot}<span class="dot {sum.dot}"></span>{/if}</b>
-                <span class="says" class:error-text={sum.warn} title={sum.text}>{sum.text}</span>
-              </span>
-              <span class="chev"><Icon name="chevron-right" size={16} /></span>
-            </button>
-          {/each}
-        </div>
-      {/each}
-    </div>
-
-    <h2 class="section-title more-title">{t.more}</h2>
-    <nav class="menu panel" aria-label={t.more}>
-      {#each SETTINGS_PAGES as p (p)}
-        {@const dot = moreDot(p)}
-        <button style:--c={MORE_COLORS[p]} onclick={() => store.go(p)}>
-          <span class="glyph"><Icon name={PAGE_ICONS[p]} size={20} /></span>
-          <span class="words">
-            <b>{i18n.t.nav[p]}{#if dot}<span class="dot {dot}"></span>{/if}</b>
-            <span class="says">{t.moreNotes[p]}</span>
-          </span>
-          <span class="chev"><Icon name="chevron-right" size={16} /></span>
-        </button>
-      {/each}
-    </nav>
-
-    <h2 class="section-title more-title">{t.look}</h2>
-    <div class="panel setting looks">
-      <div class="what"><b>{t.theme}</b><span>{t.lookNote}</span></div>
-      <div class="how seg" role="radiogroup" aria-label={t.look}>
-        {#each THEMES as th (th)}
-          <button role="radio" aria-checked={look.theme === th} class:on={look.theme === th} onclick={() => look.setTheme(th)}>{t.themes[th]}</button>
+      <div class="status-text">
+        <h2>{issues.length ? t.statusIssues(issues.length) : t.statusOk}</h2>
+        {#if !issues.length}<p class="dim">{okLine}</p>{/if}
+        {#each issues as issue, i (i)}
+          <div class="issue">
+            <span class="dot {issue.tone}"></span>
+            <span class="issue-text">{issue.text}</span>
+            <button class="btn small" class:primary={i === 0} onclick={(e) => goTo(issue.to, e)}>{t.fix}</button>
+          </div>
         {/each}
       </div>
+    </section>
+
+    <h2 class="section-title">{t.quick}</h2>
+    <div class="quick">
+      <div class="panel q">
+        <button class="q-open" onclick={(e) => pick("voice", e)}>
+          <span class="q-label">{t.quickVoice}</span>
+          <b>{voiceName}</b>
+        </button>
+        {#if canTry}
+          <button class="btn small" disabled={trying} onclick={tryVoice}><Icon name="play" size={14} />{t.tryVoice}</button>
+        {/if}
+      </div>
+      <div class="panel q">
+        <label class="q-open">
+          <span class="q-label">{t.quickLanguage}</span>
+          <select value={i18n.choice ?? ""} onchange={(e) => i18n.set((e.currentTarget.value || null) as Lang | null)} aria-label={t.quickLanguage}>
+            <option value="">{t.system} · {langName(i18n.lang)}</option>
+            {#each LANGUAGES as l (l.id)}<option value={l.id}>{l.name}</option>{/each}
+          </select>
+        </label>
+      </div>
+      <div class="panel q" class:bad={!store.info?.ready}>
+        <button class="q-open" onclick={(e) => pick("brain", e)}>
+          <span class="q-label">{t.provider}</span>
+          <b class:error-text={!store.info?.ready}>{summary.brain.text}</b>
+        </button>
+      </div>
+      <div class="panel q">
+        <button class="q-open" onclick={() => store.go("routines")}>
+          <span class="q-label">{t.quickQuiet}</span>
+          <b>{routines?.quiet ? `${routines.quiet_from} – ${routines.quiet_to}` : t.quietOff}</b>
+        </button>
+        {#if routines}<Toggle checked={routines.quiet} label={t.quickQuiet} onchange={setQuiet} />{/if}
+      </div>
     </div>
-    </details>
+
+    {#each GROUPS as g (g.id)}
+      <h2 class="section-title">{t.groups[g.id]}</h2>
+      <nav class="menu panel" aria-label={t.groups[g.id]}>
+        {#each g.rows as r ("part" in r ? r.part : r.page)}
+          {@const b = badge(r)}
+          {#if "part" in r}
+            {@const sum = summary[r.part]}
+            <button onclick={(e) => pick(r.part, e)}>
+              <span class="glyph"><Icon name={PART_ICONS[r.part]} size={18} /></span>
+              <span class="words">
+                <b>{t.parts[r.part]}{#if sum.dot}<span class="dot {sum.dot}"></span>{/if}</b>
+                <span class="says" title={sum.text}>{sum.text}</span>
+              </span>
+              {#if b}<span class="tag {b.tone}">{b.text}</span>{/if}
+              <span class="chev"><Icon name="chevron-right" size={16} /></span>
+            </button>
+          {:else}
+            <button onclick={() => store.go(r.page)}>
+              <span class="glyph"><Icon name={PAGE_ICONS[r.page]} size={18} /></span>
+              <span class="words">
+                <b>{i18n.t.nav[r.page]}</b>
+                <span class="says">{pageSummary(r.page)}</span>
+              </span>
+              {#if b}<span class="tag {b.tone}">{b.text}</span>{/if}
+              <span class="chev"><Icon name="chevron-right" size={16} /></span>
+            </button>
+          {/if}
+        {/each}
+      </nav>
+    {/each}
+
+    <h2 class="section-title">{t.groups.general}</h2>
+    <section class="panel">
+      <div class="setting">
+        <div class="what"><b>{t.theme}</b><span>{t.lookNote}</span></div>
+        <div class="how seg" role="radiogroup" aria-label={t.theme}>
+          {#each THEMES as th (th)}
+            <button role="radio" aria-checked={look.theme === th} class:on={look.theme === th} onclick={() => look.setTheme(th)}>{t.themes[th]}</button>
+          {/each}
+        </div>
+      </div>
+      <div class="setting">
+        <div class="what"><b>{t.advancedToggle}</b><span>{t.advancedToggleHint}</span></div>
+        <div class="how"><Toggle checked={look.advanced} label={t.advancedToggle} onchange={(on) => look.setAdvanced(on)} /></div>
+      </div>
+      <div class="setting">
+        <div class="what"><b>{t.setupAgain}</b></div>
+        <div class="how"><button class="btn small" onclick={setupAgain}>{t.setupRun}</button></div>
+      </div>
+      {#if look.advanced}
+        <div class="setting">
+          <div class="what"><b>{t.data}</b><span class="mono">{store.info?.dir ?? "—"}</span></div>
+        </div>
+      {/if}
+    </section>
   {/if}
 </div>
 
-<!-- A setup first (Profiles); its parts, the brain and its model, under "Custom". How hard Claude thinks and whether it searches the web are advanced. -->
+<!-- A page of the app that belongs with this one: Spoken under Voice, Animations under the board. -->
+{#snippet pageLink(p: "spoken" | "animations")}
+  <nav class="menu panel link" aria-label={i18n.t.nav[p]}>
+    <button onclick={() => store.go(p)}>
+      <span class="glyph"><Icon name={PAGE_ICONS[p]} size={18} /></span>
+      <span class="words"><b>{i18n.t.nav[p]}</b><span class="says">{t.moreNotes[p]}</span></span>
+      <span class="chev"><Icon name="chevron-right" size={16} /></span>
+    </button>
+  </nav>
+{/snippet}
+
+<!--
+  The brain in use, with its key where a banner's "Fix" leads; then the
+  guided change of service; the brain's own tiles and model are advanced.
+-->
 {#snippet brainPage()}
   {#if s}
-    <details class="more" open>
-      <summary class="section-title">{t.customize}</summary>
-      <p class="dim small">{t.customizeHint}</p>
+    <section class="panel active">
+      <div class="setting">
+        <div class="what"><b>{t.inUse}</b><span class:error-text={!store.info?.ready}>{summary.brain.text}</span></div>
+      </div>
+      {#if store.info?.ready && store.info?.limited}<p class="error-text note">{store.info.limited}</p>{/if}
+      {#if brain && brain !== "ollama"}
+        {@const k = keyOf(brain)}
+        {#if k}
+          <div class="block">
+            <div class="what"><b>{t.keyOf(k.name)}</b><span class="dim">{k.hint}</span></div>
+            <KeyField provider={k.id} source={k.source} placeholder={k.placeholder} onchange={() => (store.refreshInfo(), readAll())} />
+          </div>
+        {/if}
+      {/if}
+      {#if brain === "ollama"}{@render modelRow("ollama")}{/if}
+      {#if brain === "anthropic"}
+        <div class="setting">
+          <div class="what"><b>{t.webSearch}</b></div>
+          <div class="how"><Toggle checked={s.web_search} label={t.webSearch} onchange={(on) => store.saveSettings((x) => (x.web_search = on))} /></div>
+        </div>
+      {/if}
+    </section>
+
+    <h2 class="section-title">{t.changeService}</h2>
+    <p class="dim small">{t.changeServiceHint}</p>
+    <section class="panel wizard"><Profiles onchange={readAll} /></section>
+
+    {#if look.advanced}
+      <h2 class="section-title">{t.advanced}</h2>
       <section class="tiles" aria-label={t.provider}>
         {#each BRAINS as b (b)}
           <button class="tile" class:on={brain === b} onclick={() => store.saveSettings((x) => (x.provider = b))}>
@@ -382,22 +421,8 @@
           </button>
         {/each}
       </section>
-      {#if !store.info?.ready}
-        <p class="error-text note">{brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain}</p>
-      {:else if store.info?.limited}
-        <p class="error-text note">{store.info.limited}</p>
-      {/if}
-      {#if brain}
-        <section class="panel active">
-          {#if brain !== "ollama"}
-            {@const k = keyOf(brain)}
-            {#if k}
-              <div class="block">
-                <div class="what"><b>{t.keyOf(k.name)}</b><span class="dim">{k.hint}</span></div>
-                <KeyField provider={k.id} source={k.source} placeholder={k.placeholder} onchange={() => (store.refreshInfo(), readAll())} />
-              </div>
-            {/if}
-          {/if}
+      {#if brain && brain !== "ollama"}
+        <section class="panel">
           {@render modelRow(brain)}
           {#if brain === "anthropic"}
             <div class="setting">
@@ -408,16 +433,12 @@
                 </select>
               </div>
             </div>
-            <div class="setting">
-              <div class="what"><b>{t.webSearch}</b></div>
-              <div class="how"><Toggle checked={s.web_search} label={t.webSearch} onchange={(on) => store.saveSettings((x) => (x.web_search = on))} /></div>
-            </div>
           {:else}
             <p class="dim small">{t.groqNote}</p>
           {/if}
         </section>
       {/if}
-    </details>
+    {/if}
   {/if}
 {/snippet}
 
@@ -461,17 +482,6 @@
   {/if}
 {/snippet}
 
-{#snippet languagePage()}
-  <section class="tiles langs" aria-label={t.appLanguage}>
-    {#each LANG_CHOICES as l (l ?? "system")}
-      <button class="tile" class:on={(i18n.choice ?? null) === l} onclick={() => i18n.set(l)}>
-        <b>{l ? langName(l) : t.system}</b>
-        <span>{langName(l ?? i18n.lang)}</span>
-      </button>
-    {/each}
-  </section>
-{/snippet}
-
 <!-- Every service's key, grouped by what it's for. -->
 {#snippet keysPage()}
   <p class="dim small">{t.keysPrivacy}</p>
@@ -491,7 +501,7 @@
   {/each}
 {/snippet}
 
-<!-- Yoru on this Mac: in the notch, and in Claude Code through his MCP server. -->
+<!-- Yoru on this Mac: its permissions, the notch, and Claude Code through his MCP server. -->
 {#snippet macPage()}
   {@const tb = i18n.t.board}
   <h2 class="section-title">{i18n.t.permissions.title}</h2>
@@ -512,150 +522,104 @@
       </div>
     {/if}
   </section>
-  {#if mcp?.command}
-    <details class="more">
-      <summary class="section-title">{t.advanced}</summary>
-      <section class="panel">
-        <div class="setting">
-          <div class="what"><b>{t.mcpCommand}</b><span class="mono">{mcp.command} {mcp.args.join(" ")}</span></div>
-        </div>
-      </section>
-    </details>
+  {#if mcp?.command && look.advanced}
+    <h2 class="section-title">{t.advanced}</h2>
+    <section class="panel">
+      <div class="setting">
+        <div class="what"><b>{t.mcpCommand}</b><span class="mono">{mcp.command} {mcp.args.join(" ")}</span></div>
+      </div>
+    </section>
   {/if}
 {/snippet}
 
-{#snippet aboutPage()}
-  <section class="panel">
-    <div class="setting">
-      <div class="what"><b>{t.data}</b><span class="mono">{store.info?.dir ?? "—"}</span></div>
-    </div>
-    <div class="setting">
-      <div class="what"><b>{t.setupAgain}</b></div>
-      <div class="how"><button class="btn small" onclick={setupAgain}>{t.setupRun}</button></div>
-    </div>
-  </section>
-{/snippet}
 
 <style>
-  .guided { display: grid; gap: 12px; padding: 20px; margin-bottom: 24px; }
-  .guided h2 { font: 600 var(--fs-head)/1.3 var(--display); }
-  .more-settings > summary { cursor: pointer; }
-  /* The wiring. */
-  .stage {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 12px;
-    margin-top: 8px;
-  }
-  /* Wide enough: Yoru in the middle, a column of cards either side, and
-     room between for the traces. */
-  .stage.wired {
-    grid-template-columns: minmax(200px, 1fr) auto minmax(200px, 1fr);
-    column-gap: clamp(44px, 8%, 96px);
-    align-items: center;
-    min-height: 340px;
-  }
-  .col {
+  /* What's wrong, or all is well. */
+  .status {
     display: flex;
-    flex-direction: column;
-    gap: 12px;
+    align-items: center;
+    gap: 18px;
+    padding: 16px 20px;
+    margin-bottom: 8px;
+  }
+  .status.bad {
+    border-color: color-mix(in srgb, var(--wait) 45%, transparent);
+    background: color-mix(in srgb, var(--wait) 6%, var(--ink));
+  }
+  .face {
+    flex-shrink: 0;
+  }
+  .status-text {
+    display: grid;
+    gap: 6px;
+    flex: 1;
     min-width: 0;
   }
-  /* Narrow: every card in one grid under Yoru, rows lined up. */
-  .stage:not(.wired) .col {
-    display: contents;
+  .status-text h2 {
+    font: 600 var(--fs-head)/1.3 var(--display);
   }
-  .stage.wired .col.left {
-    grid-column: 1;
-    grid-row: 1;
+  .issue {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
-  .stage.wired .col:not(.left) {
-    grid-column: 3;
-    grid-row: 1;
-  }
-  .wires {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-    pointer-events: none;
-  }
-  .copper {
-    fill: none;
-    stroke: color-mix(in srgb, var(--c) 30%, var(--ink-3));
-    stroke-width: 2;
-    stroke-linejoin: round;
-    vector-effect: non-scaling-stroke;
-    stroke-dasharray: 1;
-    stroke-dashoffset: 1;
-    animation: draw 700ms cubic-bezier(0.3, 0.7, 0.2, 1) forwards;
-    animation-delay: calc(var(--i) * 90ms + 120ms);
-    transition:
-      stroke 220ms,
-      filter 220ms;
-  }
-  /* A spark runs along each trace into Yoru; faster on the one you point at. */
-  .pulse {
-    fill: none;
-    stroke: var(--c);
-    stroke-width: 2.5;
-    stroke-linecap: round;
-    vector-effect: non-scaling-stroke;
-    stroke-dasharray: 5 95;
-    opacity: 0.45;
-    animation:
-      flow 3.2s linear calc(var(--i) * -530ms) infinite,
-      appear 500ms ease 1s backwards;
-    filter: drop-shadow(0 0 4px var(--c));
-    transition: opacity 300ms;
-  }
-  .pad {
-    fill: var(--night);
-    stroke: color-mix(in srgb, var(--c) 45%, var(--ink-3));
-    stroke-width: 2;
-    vector-effect: non-scaling-stroke;
-    transition: stroke 220ms;
-  }
-  .wire.lit .copper {
-    stroke: var(--c);
-    filter: drop-shadow(0 0 6px var(--c));
-  }
-  .wire.lit .pulse {
-    opacity: 1;
-    stroke-width: 3;
-    animation-duration: 1.4s, 500ms;
-  }
-  .wire.lit .pad {
-    stroke: var(--c);
-  }
-  .wire.warn {
-    --c: var(--wrong);
+  .issue-text {
+    flex: 1;
+    min-width: 0;
   }
 
-  .yoru {
-    position: relative;
+  /* The quick settings: two by two. */
+  .quick {
     display: grid;
-    place-items: center;
-    justify-self: center;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
-  .stage:not(.wired) .yoru {
-    grid-column: 1 / -1;
-    grid-row: 1;
+  .q {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
   }
-  .stage.wired .yoru {
-    grid-column: 2;
-    grid-row: 1;
+  .q.bad {
+    border-color: color-mix(in srgb, var(--wrong) 40%, transparent);
+  }
+  .q-open {
+    display: grid;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--pearl);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .q-open b {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .q-open select {
+    justify-self: start;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .q-label {
+    color: var(--haze);
+    font-size: var(--fs-meta);
   }
 
-  /* A part: a card wired to Yoru. */
-  .more-title {
-    margin-top: 28px;
-  }
+  /* The groups' rows. */
   .menu {
     display: grid;
     padding: 4px;
+  }
+  .menu.link {
+    margin-top: 22px;
   }
   .menu button {
     display: flex;
@@ -676,55 +640,30 @@
   }
   .menu button:hover,
   .menu button:focus-visible {
-    background: color-mix(in srgb, var(--c) 7%, var(--ink-2));
+    background: var(--hover);
     outline: none;
-  }
-  .part {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px;
-    animation: arrive 480ms cubic-bezier(0.2, 0.8, 0.2, 1) calc(var(--i) * 90ms) backwards;
-    transition:
-      border-color 200ms,
-      background 200ms,
-      box-shadow 200ms;
-  }
-  .part:hover,
-  .part:focus-visible {
-    border-color: color-mix(in srgb, var(--c) 55%, transparent);
-    background: color-mix(in srgb, var(--c) 7%, var(--ink));
-    box-shadow: 0 0 28px -8px color-mix(in srgb, var(--c) 60%, transparent);
-    outline: none;
-  }
-  .part.warn {
-    --c: var(--wrong);
-    border-color: color-mix(in srgb, var(--wrong) 35%, transparent);
   }
   .glyph {
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     flex-shrink: 0;
     border-radius: 50%;
-    background: color-mix(in srgb, var(--c) 14%, transparent);
-    color: var(--c);
+    background: var(--ink-2);
+    color: var(--haze);
   }
   .glyph.big {
-    width: 56px;
-    height: 56px;
-    box-shadow: 0 0 40px -10px var(--c);
+    width: 52px;
+    height: 52px;
+    color: var(--think);
+    background: color-mix(in srgb, var(--think) 14%, transparent);
   }
   .words {
     display: grid;
     gap: 2px;
     min-width: 0;
     flex: 1;
-  }
-  .words {
     color: var(--pearl);
     font-size: var(--fs-body);
   }
@@ -735,25 +674,23 @@
     font: 600 var(--fs-body)/1.3 var(--sans);
   }
   .says {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--haze);
     font-size: var(--fs-meta);
     line-height: 1.35;
   }
+  .tag.wait {
+    color: var(--wait);
+    border-color: color-mix(in srgb, var(--wait) 40%, transparent);
+  }
   .chev {
     flex-shrink: 0;
     color: var(--dusk);
-    transition:
-      stroke 200ms,
-      transform 200ms;
+    transition: transform 200ms;
   }
-  .menu button:hover .chev,
-  .part:hover .chev {
-    color: var(--c);
+  .menu button:hover .chev {
     transform: translateX(2px);
   }
 
@@ -766,7 +703,7 @@
     display: flex;
     align-items: center;
     gap: 18px;
-    margin: 14px 0 18px;
+    margin: 14px 0 22px;
   }
   .sub-head h1 {
     font: 600 var(--fs-title)/1.1 var(--display);
@@ -777,11 +714,8 @@
     color: var(--haze);
     max-width: 580px;
   }
-  .hop {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-bottom: 22px;
+  .wizard {
+    padding: 16px 18px;
   }
 
   .perm-hint {
@@ -794,9 +728,6 @@
   .panel .small {
     margin: 4px 0 8px;
   }
-  .langs {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 220px));
-  }
   .note {
     margin-top: 12px;
   }
@@ -806,11 +737,13 @@
     gap: 12px;
     padding: 6px 0 16px;
   }
+  .setting + .block,
   .block + .setting,
   .block + .block {
     border-top: 1px solid var(--rim);
   }
-  .block + .block {
+  .block + .block,
+  .setting + .block {
     padding-top: 16px;
   }
   .block .what {
@@ -837,30 +770,5 @@
     font-size: var(--fs-meta);
     margin-right: 4px;
     white-space: nowrap;
-  }
-
-  @keyframes draw {
-    to {
-      stroke-dashoffset: 0;
-    }
-  }
-  @keyframes flow {
-    from {
-      stroke-dashoffset: 100;
-    }
-    to {
-      stroke-dashoffset: 0;
-    }
-  }
-  @keyframes appear {
-    from {
-      opacity: 0;
-    }
-  }
-  @keyframes arrive {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
   }
 </style>

@@ -10,6 +10,7 @@
   import { call, why } from "../api";
   import { BUNDLED_VERSION } from "../bundled";
   import { i18n } from "../i18n/index.svelte";
+  import { look } from "../look.svelte";
   import { store } from "../store.svelte";
   import type { DeviceInfo, PortInfo, Transport, WifiInfo, WifiNetwork, YoruSetting, YoruSettings } from "../types";
   import { boldParts } from "../updates";
@@ -255,8 +256,8 @@
     </section>
   {/if}
 
-  <details class="more">
-    <summary class="section-title">{i18n.t.settings.advanced}</summary>
+  {#if look.advanced}
+    <h2 class="section-title">{i18n.t.settings.advanced}</h2>
     <section class="panel">
       <div class="setting">
         <div class="what"><b>{t.transport}</b>{#if live}<span class="mono">{store.port}</span>{/if}</div>
@@ -278,7 +279,7 @@
     </section>
     <h3 class="section-title">{t.logs}</h3>
     <pre class="well mono log">{store.logs.length ? store.logs.slice(-120).join("\n") : t.noLogs}</pre>
-  </details>
+  {/if}
 </div>
 
 <style>

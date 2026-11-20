@@ -1,14 +1,15 @@
 <!--
-  Yoru's voice, laid out as the brain is: tiles pick the service he listens
-  with and the one he speaks with (or neither), then his voice in each
-  language, how a conversation goes (follow-ups, the board's volume and
-  chime) and Gemini Live. The models that transcribe and judge a turn are
-  advanced; the services' keys are in Settings' keys page. Local models need
-  a download, which shows its progress while it runs.
+  Yoru's voice: first whether he listens and whether he answers aloud, his
+  voice in each language and how a conversation goes (follow-ups, the
+  board's volume and chime). Which service listens and which speaks, and the
+  models that transcribe and judge a turn, show only with Settings' advanced
+  switch; the services' keys are in Settings' AI services page. Local models
+  need a download, which shows its progress while it runs.
 -->
 <script lang="ts">
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
+  import { look } from "../look.svelte";
   import { store } from "../store.svelte";
   import type { AccountVoice, BoardVoice, ModelInfo, SidecarState, VoiceInfo, VoiceSettings, YoruSettings } from "../types";
   import Toggle from "./Toggle.svelte";
@@ -122,6 +123,12 @@
     }
     set({ speak: true, voices: next });
   }
+  // Answering aloud again keeps the voices picked before; with none yet, this Mac's.
+  function speakOn() {
+    if (!info) return;
+    if (Object.values(info.settings.voices).some(Boolean)) set({ speak: true });
+    else speakWith(LOCAL);
+  }
 </script>
 
 {#if info}
@@ -132,9 +139,6 @@
     {#if !s.live && info.stt_error}<div class="setting"><p class="error-text">{info.stt_error}</p></div>{/if}
     {#if !s.live && info.tts_error}<div class="setting"><p class="error-text">{info.tts_error}</p></div>{/if}
   </section>
-  <details class="more">
-    <summary class="section-title">{t.customServices}</summary>
-    <p class="dim hint">{t.customServicesHint}</p>
   {#if s.live}
     <section class="panel active live-on">
       <div class="setting">
@@ -142,58 +146,50 @@
         <div class="how"><button class="btn small" onclick={() => set({ live: "" })}>{t.liveTurnOff}</button></div>
       </div>
     </section>
-  {/if}
-  <h2 class="section-title first">{t.listenWith}</h2>
-  <section class="tiles" aria-label={t.listenWith}>
-    {@render tile(null, heard === null, t.offListen, info.stt, hearWith)}
-    {#each hearing as svc (svc)}{@render tile(svc, heard === svc, noteOf(svc), info.stt, hearWith)}{/each}
-  </section>
-  {#if s.enabled}<p class="dim note">{wakeWord ? t.wakeWord(wakeWord) : t.listenHint}</p>{/if}
-  {#if s.enabled && sttModel && missing(sttModel)}
+  {:else}
+    <!-- The everyday choices: whether he listens, whether he answers aloud, and with which voice. -->
     <section class="panel">
       <div class="setting">
-        <div class="what"><b>{t.sttToDownload}</b><span class="mono">{sttModel.id}</span></div>
-        <div class="how">{@render fetch(sttModel)}</div>
+        <div class="what"><b>{t.listensToggle}</b><span>{s.enabled ? (wakeWord ? t.wakeWord(wakeWord) : t.listenHint) : t.listensOffHint}</span></div>
+        <div class="how"><Toggle checked={s.enabled} label={t.listensToggle} onchange={(on) => hearWith(on ? (serviceOf(s.model) ?? LOCAL) : null)} /></div>
       </div>
-    </section>
-  {/if}
-  {#if info.stt_error}<p class="error-text note">{info.stt_error}</p>{/if}
-
-  <h2 class="section-title">{t.speakWith}</h2>
-  <section class="tiles" aria-label={t.speakWith}>
-    {@render tile(null, spoken === null, t.offSpeak, info.tts, speakWith)}
-    {#each speaking as svc (svc)}{@render tile(svc, spoken === svc, noteOf(svc), info.tts, speakWith, !canSpeak(svc))}{/each}
-  </section>
-  {#if [...hearing, ...speaking].some((svc) => !keyed(svc))}<p class="dim note">{t.addKeys}</p>{/if}
-  {#if info.tts_error}<p class="error-text note">{info.tts_error}</p>{/if}
-  {#if s.speak}
-    <section class="panel" class:active={!!spoken}>
-      {#each LANGS as lang (lang)}
-        {@const m = model(s.voices[lang])}
-        {@const options = groups(speaking, (svc) => voicesIn(svc, lang), s.voices[lang])}
+      {#if s.enabled && sttModel && missing(sttModel)}
         <div class="setting">
-          <div class="what"><b>{t.voiceFor(lang)}</b></div>
-          <div class="how">
-            {#if m && missing(m)}{@render fetch(m)}{/if}
-            <select value={s.voices[lang] ?? ""} onchange={(e) => set({ speak: true, voices: { ...s.voices, [lang]: e.currentTarget.value } })} aria-label={t.voiceFor(lang)}>
-              {#if !s.voices[lang]}<option value="" disabled>—</option>{/if}
-              {#each options as g (g.svc)}
-                <optgroup label={nameOf(g.svc)}>{#each g.options as v (v.id)}<option value={v.id}>{v.label}</option>{/each}</optgroup>
-              {/each}
-              {#if s.voices[lang]?.startsWith(ACCOUNT) && !account.length}<option value={s.voices[lang]}>{s.voices[lang].slice(ACCOUNT.length)}</option>{/if}
-            </select>
+          <div class="what"><b>{t.sttToDownload}</b><span class="mono">{sttModel.id}</span></div>
+          <div class="how">{@render fetch(sttModel)}</div>
+        </div>
+      {/if}
+      <div class="setting">
+        <div class="what"><b>{t.speaksToggle}</b><span>{s.speak ? t.speaksHint : t.speaksOffHint}</span></div>
+        <div class="how"><Toggle checked={s.speak} label={t.speaksToggle} onchange={(on) => (on ? speakOn() : speakWith(null))} /></div>
+      </div>
+      {#if s.speak}
+        {#each LANGS as lang (lang)}
+          {@const m = model(s.voices[lang])}
+          {@const options = groups(speaking, (svc) => voicesIn(svc, lang), s.voices[lang])}
+          <div class="setting">
+            <div class="what"><b>{t.voiceFor(lang)}</b></div>
+            <div class="how">
+              {#if m && missing(m)}{@render fetch(m)}{/if}
+              <select value={s.voices[lang] ?? ""} onchange={(e) => set({ speak: true, voices: { ...s.voices, [lang]: e.currentTarget.value } })} aria-label={t.voiceFor(lang)}>
+                {#if !s.voices[lang]}<option value="" disabled>—</option>{/if}
+                {#each options as g (g.svc)}
+                  <optgroup label={nameOf(g.svc)}>{#each g.options as v (v.id)}<option value={v.id}>{v.label}</option>{/each}</optgroup>
+                {/each}
+                {#if s.voices[lang]?.startsWith(ACCOUNT) && !account.length}<option value={s.voices[lang]}>{s.voices[lang].slice(ACCOUNT.length)}</option>{/if}
+              </select>
+            </div>
           </div>
-        </div>
-      {/each}
-      {#if spoken === LOCAL && !info.piper}
-        <div class="setting">
-          <div class="what"><b>Piper</b>{#if info.piper_install}<span>{info.piper_install}</span>{/if}</div>
-          <div class="how"><button class="btn small" disabled={!!info.piper_install} onclick={() => act("install_engine", { engine: "piper" })}>{t.installPiper}</button></div>
-        </div>
+        {/each}
+        {#if spoken === LOCAL && !info.piper}
+          <div class="setting">
+            <div class="what"><b>{t.localVoiceEngine}</b>{#if info.piper_install}<span>{info.piper_install}</span>{/if}</div>
+            <div class="how"><button class="btn small" disabled={!!info.piper_install} onclick={() => act("install_engine", { engine: "piper" })}>{t.installPiper}</button></div>
+          </div>
+        {/if}
       {/if}
     </section>
   {/if}
-  </details>
 
   {#if s.speak || board?.volume != null || board?.wake_sound != null}
     <h2 class="section-title">{t.conversation}</h2>
@@ -222,9 +218,22 @@
     </section>
   {/if}
 
-  {#if s.enabled}
-    <details class="more">
-      <summary class="section-title">{i18n.t.settings.advanced}</summary>
+  <!-- Which service listens and which speaks, and the models behind a turn: Settings' advanced switch. -->
+  {#if look.advanced}
+    <h2 class="section-title">{i18n.t.settings.advanced}</h2>
+    <p class="dim hint">{t.customServicesHint}</p>
+    <h3 class="section-title first">{t.listenWith}</h3>
+    <section class="tiles" aria-label={t.listenWith}>
+      {@render tile(null, heard === null, t.offListen, info.stt, hearWith)}
+      {#each hearing as svc (svc)}{@render tile(svc, heard === svc, noteOf(svc), info.stt, hearWith)}{/each}
+    </section>
+    <h3 class="section-title">{t.speakWith}</h3>
+    <section class="tiles" aria-label={t.speakWith}>
+      {@render tile(null, spoken === null, t.offSpeak, info.tts, speakWith)}
+      {#each speaking as svc (svc)}{@render tile(svc, spoken === svc, noteOf(svc), info.tts, speakWith, !canSpeak(svc))}{/each}
+    </section>
+    {#if [...hearing, ...speaking].some((svc) => !keyed(svc))}<p class="dim note">{t.addKeys}</p>{/if}
+    {#if s.enabled}
       <p class="dim hint">{t.advancedHint}</p>
       <section class="panel">
         <div class="setting">
@@ -243,7 +252,7 @@
           {@render picker(t.intentModel, t.intentHint, s.intent_model, t.intentPhrases, intents, (id) => set({ intent_model: id }), !info.llm_server ? t.needsLlamaServer : "")}
         {/if}
       </section>
-    </details>
+    {/if}
   {/if}
   {#if error}<p class="error-text note">{error}</p>{/if}
 {/if}

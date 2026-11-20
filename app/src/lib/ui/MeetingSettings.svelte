@@ -7,6 +7,7 @@
 <script lang="ts">
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
+  import { look } from "../look.svelte";
   import { store } from "../store.svelte";
   import type { MeetingSettings, Summarizers } from "../types";
   import Toggle from "./Toggle.svelte";
@@ -166,8 +167,8 @@
       <div class="how"><Toggle checked={settings.auto_summary} label={t.autoSummary} onchange={(on) => save({ auto_summary: on })} /></div>
     </div>
   </section>
-  <details class="more">
-    <summary class="section-title">{i18n.t.settings.advanced}</summary>
+  {#if look.advanced}
+    <h2 class="section-title">{i18n.t.settings.advanced}</h2>
     <p class="dim note">{t.modelsAdvanced}</p>
     <section class="panel">
       <div class="setting">
@@ -192,7 +193,7 @@
         </div>
       </div>
     </section>
-  </details>
+  {/if}
 {/if}
 {#if error}<p class="error-text note">{error}</p>{/if}
 
