@@ -132,9 +132,28 @@ fn ready(key: &str, mut file: Value) -> io::Result<Value> {
     Ok(file)
 }
 
-/// Ask `model` for the transcript of the uploaded `file`.
+/// Ask `model` for the transcript of the uploaded `file`. It thinks a little
+/// if it can: a model that only transcribes refuses any thinking setting, so
+/// that refusal is asked again without one.
 fn generate(key: &str, model: &str, file: &Value, mime: &str, language: Option<&str>, speakers: bool) -> io::Result<Value> {
-    let request = json!({
+    let mut request = request(file, mime, language, speakers);
+    match send(key, model, &request) {
+        Err(e) if refuses_thinking(&e.to_string()) => {
+            request["generationConfig"].as_object_mut().map(|c| c.remove("thinkingConfig"));
+            send(key, model, &request)
+        }
+        answer => answer,
+    }
+}
+
+/// Google's 400 for a thinking setting the model doesn't have.
+fn refuses_thinking(error: &str) -> bool {
+    let error = error.to_lowercase();
+    error.contains("thinking") && error.contains("not supported")
+}
+
+fn request(file: &Value, mime: &str, language: Option<&str>, speakers: bool) -> Value {
+    json!({
         "contents": [{"role": "user", "parts": [
             {"fileData": {"mimeType": mime, "fileUri": file["uri"]}},
             {"text": prompt(language, speakers)},
@@ -145,7 +164,10 @@ fn generate(key: &str, model: &str, file: &Value, mime: &str, language: Option<&
             "maxOutputTokens": 65_536,
             "thinkingConfig": {"thinkingLevel": "low"},
         },
-    });
+    })
+}
+
+fn send(key: &str, model: &str, request: &Value) -> io::Result<Value> {
     let sent = agent()
         .post(format!("{ROOT}/v1beta/models/{model}:generateContent"))
         .header("x-goog-api-key", key)
@@ -247,6 +269,12 @@ fn body(mut response: ureq::http::Response<ureq::Body>) -> io::Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_without_thinking_is_told_apart() {
+        assert!(refuses_thinking("Google (400): Thinking level is not supported for this model"));
+        assert!(!refuses_thinking("Google (400): Request contains an invalid argument"));
+    }
 
     #[test]
     fn reads_times() {

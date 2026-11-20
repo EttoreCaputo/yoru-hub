@@ -196,11 +196,35 @@ fn sign_tool_calls(messages: &mut [Value]) {
     }
 }
 
+/// Send a chat `body`. A model that doesn't think (a listed Gemini one
+/// without thinking, say) refuses the params' `reasoning_effort` with a 400:
+/// then it's sent again without it.
+fn post_chat(client: &Client, agent: &ureq::Agent, mut body: Value) -> Result<ureq::http::Response<ureq::Body>, CloudError> {
+    let provider = client.model.provider.name;
+    loop {
+        let bytes = serde_json::to_vec(&body).map_err(|e| CloudError::Invalid { provider, why: e.to_string() })?;
+        let sent = authorized(client, agent.post(url(client, "/chat/completions"))).header("Content-Type", "application/json").send(&bytes[..]);
+        match open(client, sent) {
+            Err(CloudError::Status { status: 400, message, .. }) if refuses_thinking(&message) && body.get("reasoning_effort").is_some() => {
+                body.as_object_mut().map(|b| b.remove("reasoning_effort"));
+            }
+            answer => return answer,
+        }
+    }
+}
+
+/// The 400 for a thinking setting the model doesn't have.
+pub(super) fn refuses_thinking(message: &str) -> bool {
+    let message = message.to_lowercase();
+    (message.contains("thinking") || message.contains("reasoning")) && (message.contains("not supported") || message.contains("unsupported"))
+}
+
 pub(super) fn chat(client: &Client, request: &Value) -> Result<Value, CloudError> {
-    let body = serde_json::to_vec(&chat_request(client, request)).map_err(|e| CloudError::Invalid { provider: client.model.provider.name, why: e.to_string() })?;
+    let provider = client.model.provider.name;
     let agent = if request.get("response_format").is_some() { json_agent() } else { agent() };
-    let sent = authorized(client, agent.post(url(client, "/chat/completions"))).header("Content-Type", "application/json").send(&body[..]);
-    let reply = json(client, &read(client, sent)?)?;
+    let mut response = post_chat(client, agent, chat_request(client, request))?;
+    let bytes = response.body_mut().with_config().limit(32 * 1024 * 1024).read_to_vec().map_err(|e| CloudError::Network { provider, why: e.to_string() })?;
+    let reply = json(client, &bytes)?;
     reply.pointer("/choices/0/message").cloned().ok_or_else(|| CloudError::Invalid {
         provider: client.model.provider.name,
         why: format!("no message in {}", reply.to_string().chars().take(300).collect::<String>()),
@@ -212,9 +236,7 @@ pub(super) fn chat_stream(client: &Client, request: &Value, on: OnDelta) -> Resu
     let provider = client.model.provider.name;
     let mut body = chat_request(client, request);
     body["stream"] = true.into();
-    let body = serde_json::to_vec(&body).map_err(|e| CloudError::Invalid { provider, why: e.to_string() })?;
-    let sent = authorized(client, agent().post(url(client, "/chat/completions"))).header("Content-Type", "application/json").send(&body[..]);
-    let response = open(client, sent)?;
+    let response = post_chat(client, agent(), body)?;
     stream::chat_message(response.into_body().into_reader(), on).map_err(|why| CloudError::Network { provider, why })
 }
 
@@ -282,6 +304,13 @@ mod tests {
         assert_eq!(parse_wait("1h2m3s"), Some(Duration::from_secs(3723)));
         assert_eq!(parse_wait("450ms"), Some(Duration::from_millis(450)));
         assert_eq!(limit_of("too many"), (None, false));
+    }
+
+    #[test]
+    fn a_model_without_thinking_is_told_apart() {
+        assert!(refuses_thinking("Thinking level is not supported for this model"));
+        assert!(refuses_thinking("Unsupported value: 'reasoning_effort' does not support 'low' with this model."));
+        assert!(!refuses_thinking("Request contains an invalid argument."));
     }
 
     #[test]
