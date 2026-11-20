@@ -346,6 +346,18 @@ pub fn meeting_summarize(app: AppHandle, id: String, style: Option<String>) {
     queue_summary(&app, id, style);
 }
 
+/// Every summarized meeting's to-dos, for the To-do page.
+#[tauri::command]
+pub fn meeting_todos() -> Vec<meetings::Todo> {
+    meetings::todos()
+}
+
+#[tauri::command]
+pub fn set_meeting_todo(id: String, text: String, done: bool) -> Result<Vec<meetings::Todo>, String> {
+    meetings::set_todo_done(&id, &text, done).map_err(|e| e.to_string())?;
+    Ok(meetings::todos())
+}
+
 #[tauri::command]
 pub fn meeting_summary(id: String) -> Result<Option<Summary>, String> {
     meetings::summary(&id).map_err(|e| e.to_string())

@@ -28,6 +28,7 @@ import type {
   Link,
   Task,
   TaskEntry,
+  Todo,
   Meeting,
   MeetingEvent,
   MeetingSources,
@@ -56,7 +57,7 @@ type MacEvent =
   | { event: "fetch"; state: string; source: string; kind: string }
   | { event: "error"; message: string };
 
-export type Page = "home" | "inbox" | "connectors" | "tasks" | "routines" | "memory" | "meetings" | "spoken" | "animations" | "settings";
+export type Page = "home" | "inbox" | "connectors" | "tasks" | "routines" | "memory" | "meetings" | "todos" | "spoken" | "animations" | "settings";
 
 /** Opening the port resets the S3: it's up again after about this long. */
 const BOOT_MS = 1100;
@@ -161,6 +162,9 @@ class Store {
   /** How far each meeting's summary is, 0 to 1, while it is written. */
   summarizing = $state<Record<string, number>>({});
   summaryErrors = $state<Record<string, string>>({});
+  /** Every summarized meeting's to-dos, for the To-do page and its count. */
+  todos = $state<Todo[]>([]);
+  openTodos = $derived(this.todos.filter((x) => !x.done).length);
   /** The last summary written, for the Meetings page to pick up. */
   summarized = $state<{ id: string; summary: Summary } | null>(null);
 
@@ -270,6 +274,17 @@ class Store {
     } catch {
       // The list stays as it was.
     }
+    void this.refreshTodos();
+  }
+
+  async refreshTodos() {
+    this.todos = (await call<Todo[]>("meeting_todos").catch(() => null)) ?? this.todos;
+  }
+
+  /** Tick a meeting's to-do off, or open it again. */
+  async setTodo(todo: Todo, done: boolean) {
+    this.todos = this.todos.map((x) => (x === todo ? { ...x, done } : x));
+    this.todos = await call<Todo[]>("set_meeting_todo", { id: todo.meeting, text: todo.item.text, done });
   }
 
   // Conversations.
@@ -317,6 +332,7 @@ class Store {
       else {
         this.#recorded(e.meeting);
         this.summarized = { id, summary: e.summary };
+        void this.refreshTodos();
       }
     }
     else {

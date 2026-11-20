@@ -17,7 +17,7 @@
 
   // Notifications and Settings are icons in the window bar; Settings opens
   // Tasks, Routines, Services, Spoken and Animations.
-  const MAIN: Page[] = ["home", "memory", "meetings"];
+  const MAIN: Page[] = ["home", "memory", "meetings", "todos"];
 
   // The board and the Pocket, alike: a dot, connected or not, and the icon
   // of what it's connected by.
@@ -40,6 +40,7 @@
   const badge = (p: Page): { n?: number; dot?: string } | null => {
     if (p === "home" && store.confirmations.length) return { dot: "wait" };
     if (p === "meetings" && store.recording) return { dot: "wrong" };
+    if (p === "todos" && store.openTodos) return { n: store.openTodos };
     return null;
   };
 </script>

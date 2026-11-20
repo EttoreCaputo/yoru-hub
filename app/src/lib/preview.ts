@@ -10,6 +10,7 @@
 //               first run's permissions step, the gate, the notch's row
 
 import type {
+  ActionItem,
   Action,
   AccountVoice,
   ActiveAgent,
@@ -283,6 +284,16 @@ let meetings: Meeting[] = [
   },
 ];
 let recording: Meeting | null = null;
+// The to-dos ticked off, as `<meeting>/<text>` (done.json in the app).
+const todosDone = new Set<string>();
+function todosNow() {
+  return meetings
+    .filter((m) => m.summarized_at)
+    .flatMap((m) => {
+      const s = COMMANDS.meeting_summary({ id: m.id }) as { title: string; actions: ActionItem[] } | null;
+      return (s?.actions ?? []).map((item) => ({ meeting: m.id, title: m.title ?? s!.title, started_at: m.started_at, item, done: todosDone.has(`${m.id}/${item.text}`) }));
+    });
+}
 // ?pocket=unpaired (or another phase): the Pocket recorder in that state.
 const pocketDay = Date.UTC(2026, 10, 19, 9, 30);
 let pocket: PocketStatus = {
@@ -820,6 +831,13 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
         }
       : null,
   meeting_summarize: () => undefined,
+  meeting_todos: () => todosNow(),
+  set_meeting_todo: (a) => {
+    const key = `${a.id}/${a.text}`;
+    if (a.done) todosDone.add(key);
+    else todosDone.delete(key);
+    return todosNow();
+  },
   rename_speaker: (a) => {
     const t = COMMANDS.meeting_transcript(a) as { speakers: { key: string; name: string | null }[] };
     t.speakers = t.speakers.map((s) => (s.key === a.key ? { ...s, name: String(a.name).trim() || null } : s));

@@ -355,6 +355,8 @@ export type Summary = {
 };
 /** A to-do from a meeting: `due` as said, `date` as `YYYY-MM-DD` when it can be told; `draft` the text of a message or an email. */
 export type ActionItem = { text: string; owner: string; due: string; date: string; kind: "task" | "reminder" | "message" | "email"; draft: string };
+/** A meeting's to-do on the To-do page (`meeting_todos`): the meeting it came from, and whether it's ticked off. */
+export type Todo = { meeting: string; title: string; started_at: number; item: ActionItem; done: boolean };
 /** What can summarize (`meeting_summarizers`): the local model, the brain's name, and every model of a provider with a key. */
 export type Summarizers = { local: boolean; brain: string | null; models: { id: string; provider: string; model: string; note: string }[] };
 /** A stretch of speech: `kind` `mic` is the user's track; `speaker` who, within the track (0: first heard). */

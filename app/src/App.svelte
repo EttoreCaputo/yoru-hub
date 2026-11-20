@@ -7,6 +7,7 @@
   import MeetingView from "./lib/pages/MeetingView.svelte";
   import Inbox from "./lib/pages/Inbox.svelte";
   import Meetings from "./lib/pages/Meetings.svelte";
+  import Todos from "./lib/pages/Todos.svelte";
   import Memory from "./lib/pages/Memory.svelte";
   import Routines from "./lib/pages/Routines.svelte";
   import Tasks from "./lib/pages/Tasks.svelte";
@@ -29,7 +30,7 @@
   i18n.start();
   look.start();
 
-  const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, spoken: Spoken, animations: Animations, settings: Settings };
+  const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, todos: Todos, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
   // Tasks, Routines, Services, Spoken and Animations are opened from Settings, and lead back to it.
   const fromSettings = $derived(!tabs.shown && (SETTINGS_PAGES as readonly string[]).includes(store.page));

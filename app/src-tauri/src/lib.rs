@@ -1976,7 +1976,7 @@ pub fn run() {
             spoken_clips, spoken_audio, delete_spoken, clear_spoken, export_spoken,
             meetings::meeting_sources, meetings::meetings_list, meetings::meeting_active, meetings::meeting_start, meetings::meeting_stop,
             meetings::rename_meeting, meetings::delete_meeting, meetings::meeting_audio, meetings::open_audio_privacy,
-            meetings::meeting_transcribe, meetings::meetings_transcribing, meetings::meeting_transcript, meetings::meeting_export, meetings::rename_speaker, meetings::meeting_summarize, meetings::meeting_summary, meetings::meeting_summarizers,
+            meetings::meeting_transcribe, meetings::meetings_transcribing, meetings::meeting_transcript, meetings::meeting_export, meetings::rename_speaker, meetings::meeting_summarize, meetings::meeting_summary, meetings::meeting_todos, meetings::set_meeting_todo, meetings::meeting_summarizers,
             meetings::meeting_settings, meetings::set_meeting_settings, meetings::meeting_model, meetings::meeting_model_download, meetings::meeting_import,
             pocket::pocket_status, pocket::pocket_sync, pocket::pocket_download, pocket::pocket_delete, pocket::pocket_pair, pocket::pocket_forget,
             pocket::pocket_settings, pocket::set_pocket_settings,

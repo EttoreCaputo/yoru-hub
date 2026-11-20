@@ -12,6 +12,7 @@ export const PAGE_ICONS: Record<Page, IconName> = {
   routines: "alarm-clock",
   memory: "brain",
   meetings: "users",
+  todos: "list-todo",
   spoken: "audio-lines",
   animations: "eye",
   settings: "settings",

@@ -9,9 +9,11 @@
 pub mod detect;
 mod gemini;
 mod summary;
+mod todos;
 mod transcript;
 
 pub use summary::{ActionItem, Complete, STYLES, Section, Summary, summarize, summary};
+pub use todos::{Todo, set_done as set_todo_done, todos};
 
 pub use transcript::{Format, Line, Settings, Speaker, SummaryBy, Transcript, When, download_model, export, import, import_recording, model_present, rename_speaker, set_settings, settings, transcribe, transcript, voices};
 

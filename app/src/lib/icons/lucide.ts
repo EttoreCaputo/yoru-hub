@@ -38,6 +38,7 @@ export const ICONS = {
   "scan": `<path d="M3 7V5a2 2 0 0 1 2-2h2"/> <path d="M17 3h2a2 2 0 0 1 2 2v2"/> <path d="M21 17v2a2 2 0 0 1-2 2h-2"/> <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>`,
   "maximize-2": `<polyline points="15 3 21 3 21 9"/> <polyline points="9 21 3 21 3 15"/> <line x1="21" x2="14" y1="3" y2="10"/> <line x1="3" x2="10" y1="21" y2="14"/>`,
   "check": `<path d="M20 6 9 17l-5-5"/>`,
+  "list-todo": `<rect x="3" y="5" width="6" height="6" rx="1"/> <path d="m3 17 2 2 4-4"/> <path d="M13 6h8"/> <path d="M13 12h8"/> <path d="M13 18h8"/>`,
   "x": `<path d="M18 6 6 18"/> <path d="m6 6 12 12"/>`,
   "moon": `<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>`,
   "panel-left": `<rect width="18" height="18" x="3" y="3" rx="2"/> <path d="M9 3v18"/>`,
