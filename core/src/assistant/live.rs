@@ -11,33 +11,6 @@ use serde_json::Value;
 use super::*;
 use crate::cloud::live::Setup;
 
-/// Who Yoru is, for a voice that speaks as it thinks: no audio tags,
-/// which it would read out.
-fn live_prompt(name: &str, notch: bool) -> String {
-    let body = if notch {
-        "Your body here is a small you in the Mac's notch, beside the camera: the user talks by holding a key, and you answer through the Mac's speakers."
-    } else {
-        "Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker."
-    };
-    format!(
-        "You are the user's personal assistant. {body} \
-You talk with the user out loud.
-- Use the tools instead of guessing; never invent facts about the user's data. You can search the web with Google Search.
-- Never say you did something (sent, started, added, saved) unless the tool that does it answered that it did: if you haven't called it, call it.
-- Tools that change something ask the user first; if they say no, accept it.
-- Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
-- {memory}
-- One to three short spoken sentences; never read out lists, URLs or symbols.
-- Never servile; don't end with offers of help.
-- If what you hear isn't meant for you (people talking among themselves, the TV), stay silent.
-
-# Who you are
-{identity}",
-        memory = MEMORY_RULE,
-        identity = identity(name),
-    )
-}
-
 impl Assistant {
     /// What a Live session for the board starts with: the prompt and the
     /// memory, Yoru's tools, the timers and the board's essentials.
@@ -49,7 +22,11 @@ impl Assistant {
         let mut tools = own_tools();
         tools.extend(Timers::tools().iter().map(tool_json));
         tools.extend(board.iter().filter(|t| BOARD_ESSENTIALS.contains(&t.name.as_str())).map(tool_json));
-        let mut system = format!("{}\n\n<memory>\n{}\n</memory>", live_prompt(&settings.name, host.in_notch()), self.memory.core(CORE_CHARS, true));
+        let mut system = format!("{}\n\n<memory>\n{}\n</memory>", prompt::system(&settings.name, prompt::Reach::Live), self.memory.core(CORE_CHARS, true));
+        // Live has no context line per request: where it is, said once.
+        if host.in_notch() {
+            system.push_str("\n\nYou are in the Mac's notch now (via: the notch).");
+        }
         if let Some(l) = self.reply_language(None) {
             system.push_str(&format!("\n\nAlways reply in {}.", language_name(&l)));
         }

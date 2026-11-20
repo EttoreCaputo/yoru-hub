@@ -121,46 +121,6 @@ pub fn brain_error(e: &CloudError) -> String {
     }
 }
 
-/// Who Yoru is, in fewer words than Claude's prompt: on Groq every token
-/// counts against the free plan's minute.
-fn system_prompt(name: &str, services: &str, web: bool) -> String {
-    let services = if services.is_empty() {
-        "No services are connected yet.".to_string()
-    } else {
-        format!(
-            "Beyond your own tools you can reach: {services}. Their tools aren't loaded until you need them: find them with find_tools, \
-then load the ones you'll call with load_tools; the ones already loaded are in your tools."
-        )
-    };
-    let web = if web {
-        "You can search the web, news included, with tavily__tavily_search: it is always loaded, call it directly. \
-For several topics call it once per topic in the same turn: the searches run at the same time. For the news use topic \"news\" and a plain query \
-(\"main news Italy and world\"), with time_range \"day\" for today's. \
-Current facts (news, weather, prices, scores, events) come only from a search made for this question, never from an earlier answer or what you know: asked again, search again. \
-After a search, answer with what the results say: the specific facts (who, what, where, numbers); for the news the three or four main stories, a short line each. \
-Never add anything the results don't say. If they are thin or off the point, say so or search again with a better query."
-    } else {
-        "You can't search the web: if a question needs it, say so."
-    };
-    format!(
-        "You are the user's personal assistant. Your body is a small round screen on their desk (a sphere with two eyes), with a microphone and a speaker; \
-when the context line says via: the notch, you are the small you in the Mac's notch instead: no screen of your own, the user talks by holding a key. \
-{services} {web}
-- Use the tools instead of guessing; never invent facts about the user's data.
-- Never say you did something (sent, started, added, saved) unless the tool that does it answered that it did: if you haven't called it, call it.
-- Tools that change something ask the user first; if they say no, accept it.
-- Too long to say aloud? Say the gist and put the details in the inbox with notify (urgency: low inbox only, normal banner, high knock, urgent said aloud; be sparing).
-- {memory}
-- Always reply in the language the context line names (reply in: ...), even when the user speaks another one; without one, in the user's. Channel voice: one to three plain sentences a text-to-speech voice reads well: no markdown, lists, emoji, URLs, symbols or special characters; units and abbreviations written as they are said. Channel text: short Markdown is fine.
-- Never servile; don't end with offers of help or questions to keep the chat going, and no small talk the user didn't start.
-
-# Who you are
-{identity}",
-        identity = super::identity(name),
-        memory = super::MEMORY_RULE,
-    )
-}
-
 /// Whether a connected service searches the web: Tavily's search is the one
 /// these brains have, since they get no server tool for it.
 fn searches_web(tools: &[ExternalTool]) -> bool {
@@ -341,7 +301,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     let tags = if a.audio_tags() { format!("\n\n{}", super::audio_tags_rule()) } else { String::new() };
     let system = json!({"role": "system", "content": format!(
         "{}\n\n<memory>\n{}\n</memory>{language}{tags}",
-        system_prompt(&settings.name, &services_line(&findable), searches_web(&external_tools)),
+        super::prompt::system(&settings.name, super::prompt::Reach::Compat { services: &services_line(&findable), web: searches_web(&external_tools) }),
         a.memory.core(budget.memory_max, brain != Brain::Ollama)
     )});
     let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));
@@ -606,7 +566,7 @@ mod tests {
         // The services are named; none of their tools is loaded yet.
         assert!(names.contains(&"notify") && names.contains(&"find_tools") && names.contains(&"load_tools"));
         assert!(!names.contains(&"gmail__send") && !names.contains(&"web_search"));
-        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach: Gmail (2 tools)."));
+        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach the user's services: Gmail (2 tools)."));
         // The second carries the calls back without the reasoning, then the results.
         let second = requests.recv().unwrap();
         let back = &second["messages"][2];
@@ -752,7 +712,7 @@ mod tests {
         let first = requests.recv().unwrap();
         assert!(names(&first).contains(&"react".to_string()) && names(&first).contains(&"get_state".to_string()));
         assert!(!names(&first).contains(&"set_volume".to_string()) && names(&first).contains(&"find_tools".to_string()));
-        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach: Yoru's board (1 tool)."));
+        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach the user's services: Yoru's board (1 tool)."));
         assert!(names(&requests.recv().unwrap()).contains(&"set_volume".to_string()));
     }
 

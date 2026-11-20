@@ -1,6 +1,6 @@
 # One agent, and a second brain for its memory
 
-Decided on 2026-11-21; not built yet. Yoru becomes one general agent with one system prompt. Everything Yoru does with a language model is a request to that agent, which works in a loop with tools until the job is done. Its memory is the transcripts of every conversation and meeting, searchable, with a second brain of Markdown notes on top, kept the way [COG](https://github.com/huytieu/COG-second-brain) (MIT) keeps one, and a small layer always in the prompt. Meetings feed it from their whole transcript, not only from their summary. Why this shape: [memory-research.md](memory-research.md).
+Decided on 2026-11-21; being built in phases (below). Yoru becomes one general agent with one system prompt. Everything Yoru does with a language model is a request to that agent, which works in a loop with tools until the job is done. Its memory is the transcripts of every conversation and meeting, searchable, with a second brain of Markdown notes on top, kept the way [COG](https://github.com/huytieu/COG-second-brain) (MIT) keeps one, and a small layer always in the prompt. Meetings feed it from their whole transcript, not only from their summary. Why this shape: [memory-research.md](memory-research.md).
 
 ## Why
 
@@ -102,7 +102,7 @@ Public benchmarks are too noisy to choose by (the reader model and the judge mov
 
 ## Phases
 
-1. **One prompt, skills and the app's tools.** `prompt.rs` replaces the three system prompts; `load_skill` and `skills/`; the tools for meetings, to-dos, tasks, routines, the inbox and the settings. Summaries and titles become requests to the agent; `summary_by` and the local summarizer go. Done when a meeting is summarized by the agent with the same quality, and a chat can answer "what did Marco say on Friday?" from the transcript.
+1. **One prompt, skills and the app's tools.** `prompt.rs` replaces the three system prompts (done on 2026-11-21: Claude, the compatible brains and Gemini Live share it; the model on this Mac, `agent.rs`, a small local model the board's voice falls back to, keeps its short one until it goes, since a silent fallback is another model behind the brain); `load_skill` and `skills/`; the tools for meetings, to-dos, tasks, routines, the inbox and the settings. Summaries and titles become requests to the agent; `summary_by` and the local summarizer go. Done when a meeting is summarized by the agent with the same quality, and a chat can answer "what did Marco say on Friday?" from the transcript.
 2. **The transcripts searchable.** The index of every conversation and meeting turn (words, meaning, dates, speakers), `history_search` and `history_read`. Done when the agent answers about a past conversation or meeting from the transcript.
 3. **The notes.** `brain/`, its tools, git, `me.md` and `index.md` in the prompt, the migration of `memory.db`, writing during conversations, `process-meeting`. Done when the memory is the notes, nothing is lost from the graph, and a week leaves people and project notes with sources.
 4. **Dreaming and the measure.** `dream` every night on a branch; Yoru's own questions and answers to measure the memory. The old pipelines (`sleep.rs`'s extraction, `summary.rs`'s prompts, `title.rs`) are removed.
