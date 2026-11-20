@@ -89,18 +89,19 @@
 
 <style>
   /* Over the page's card, at its bottom right; only Yoru and his chat take clicks. */
+  /* The page's card, laid over it: the chat is measured against the card,
+     so it never spills over the sidebar or the activity. Only Yoru and his
+     chat take clicks. */
   .spot {
     grid-column: 2;
     grid-row: 2;
-    align-self: end;
-    justify-self: end;
+    position: relative;
     z-index: 6;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0;
-    margin: 0 10px 6px 0;
+    margin: 0 10px 10px 0;
     pointer-events: none;
+  }
+  :global(.folded) .spot {
+    margin-left: 10px;
   }
   .spot > * {
     pointer-events: auto;
@@ -111,32 +112,58 @@
     stroke: transparent;
   }
   .yoru {
+    position: absolute;
+    right: 10px;
+    bottom: 0;
     transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
-  .yoru:hover {
+  .yoru:hover,
+  .yoru.open {
     transform: translateY(-2px);
   }
+  /* A speech bubble over Yoru: lifted off the black page by a lighter ink,
+     a rim and a shadow, its tail pointing down at him, growing from him. */
   .chat {
+    --bubble-rim: rgba(236, 233, 245, 0.15);
+    position: absolute;
+    right: 14px;
+    bottom: 93px;
     display: flex;
     flex-direction: column;
-    width: min(400px, calc(100vw - 340px));
-    height: min(540px, calc(100vh - 250px));
-    border: 1px solid var(--rim-2);
-    border-radius: var(--r-lg);
-    background: var(--night);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-    transform-origin: bottom right;
-    animation: pop 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    width: min(390px, calc(100% - 28px));
+    height: min(540px, calc(100% - 93px - 64px));
+    border: 1px solid var(--bubble-rim);
+    border-radius: var(--r-xl);
+    background: var(--ink);
+    box-shadow: var(--shadow), var(--lift);
+    transform-origin: calc(100% - 52px) calc(100% + 30px);
+    animation: pop 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  :global(:root[data-theme="light"]) .chat {
+    --bubble-rim: rgba(26, 24, 44, 0.14);
+  }
+  .chat::after {
+    content: "";
+    position: absolute;
+    right: 46px;
+    bottom: -7px;
+    width: 12px;
+    height: 12px;
+    background: var(--ink);
+    border-right: 1px solid var(--bubble-rim);
+    border-bottom: 1px solid var(--bubble-rim);
+    border-bottom-right-radius: 3px;
+    transform: rotate(45deg);
   }
   @keyframes pop {
     from {
       opacity: 0;
-      transform: translateY(8px) scale(0.97);
+      transform: translateY(10px) scale(0.94);
     }
   }
   header {
     display: flex;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
     align-items: center;
     gap: 2px;
     height: 48px;
@@ -154,6 +181,7 @@
   }
   .log {
     flex: 1;
+    overscroll-behavior: contain;
     min-height: 0;
     overflow-y: auto;
     padding: 14px 16px 8px;
@@ -165,5 +193,6 @@
   }
   .field {
     padding: 8px 12px 12px;
+    border-radius: 0 0 var(--r-xl) var(--r-xl);
   }
 </style>
