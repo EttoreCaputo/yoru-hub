@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { i18n } from "../i18n/index.svelte";
-  import type { IconName } from "../icons/lucide";
+  import type { IconName } from "../icons/icons";
   import Icon from "./Icon.svelte";
 
   let {

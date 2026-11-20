@@ -27,7 +27,7 @@
   import { transcriptionRequirement } from "../meeting-readiness";
   import { PAGE_ICONS } from "../icons/pages";
   import Icon from "../ui/Icon.svelte";
-  import type { IconName } from "../icons/lucide";
+  import type { IconName } from "../icons/icons";
 
   const t = $derived(i18n.t.settings);
   const s = $derived(store.info?.settings);

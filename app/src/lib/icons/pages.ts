@@ -1,8 +1,8 @@
-// Each page's icon, from Lucide (lucide.ts): the sidebar, the window bar
+// Each page's icon (icons.ts): the sidebar, the window bar
 // and the Settings menu draw the same ones.
 
 import type { Page } from "../store.svelte";
-import type { IconName } from "./lucide";
+import type { IconName } from "./icons";
 
 export const PAGE_ICONS: Record<Page, IconName> = {
   home: "house",

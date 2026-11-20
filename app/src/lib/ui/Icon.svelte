@@ -1,6 +1,6 @@
-<!-- One Lucide icon (icons/lucide.ts), in the text's colour. -->
+<!-- One Untitled UI icon (icons/icons.ts), in the text's colour. -->
 <script lang="ts">
-  import { ICONS, type IconName } from "../icons/lucide";
+  import { ICONS, type IconName } from "../icons/icons";
 
   let { name, size = 18, stroke = 1.75 }: { name: IconName; size?: number; stroke?: number } = $props();
 </script>
