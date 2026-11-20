@@ -417,6 +417,13 @@
     min-width: 0;
     max-width: calc((var(--w) - var(--notch)) / 2 - 12px);
   }
+  /* Open, the right side's one thing is centred in a box as wide as Yoru's
+     on the left, so the two mirror each other rather than the count
+     hugging the edge. */
+  .shape.open .side.right {
+    justify-content: center;
+    width: calc(var(--bar) - 8px);
+  }
   /* Closed, each side is just its ear, its one thing centred in it. */
   .shape:not(.open) .top {
     padding: 0;
