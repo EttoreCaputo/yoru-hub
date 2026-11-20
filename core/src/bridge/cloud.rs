@@ -49,20 +49,22 @@ pub(super) fn services(config: &BridgeConfig) -> Value {
 
 /// The voice's cloud Whisper, else the first of Groq's and OpenAI's with a key.
 fn stt(engine: Option<&SttEngine>, language: Option<&str>) -> Option<Value> {
+    // The board speaks OpenAI's transcription API: Google's isn't.
     let chosen = match engine {
-        Some(SttEngine::Cloud(client)) if client.model.provider.api == Api::OpenAi => Some(client.model),
+        Some(SttEngine::Cloud(client)) if client.model.provider.api == Api::OpenAi && client.model.provider.id != crate::cloud::GOOGLE.id => Some((client.model, client.model_name().to_string())),
         _ => None,
     };
-    let model = chosen.or_else(|| {
+    let (model, name) = chosen.or_else(|| {
         ["groq:whisper-large-v3-turbo", "openai:whisper-1"]
             .into_iter()
             .filter_map(CloudRef::by_id)
             .find(|r| r.provider.api_key().is_some())
+            .map(|r| (r, r.model.model.to_string()))
     })?;
     let mut out = json!({
         "url": format!("{}/audio/transcriptions", model.provider.url()),
         "key": model.provider.api_key()?,
-        "model": model.model.model,
+        "model": name,
     });
     if let Some(l) = language {
         out["language"] = l.into();

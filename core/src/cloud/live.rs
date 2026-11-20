@@ -411,13 +411,18 @@ pub const TRANSCRIBE_MODEL: &str = "gemini-3.5-transcribe-live";
 /// Write down `samples` (16 kHz) with [`TRANSCRIBE_MODEL`]: `languages` are
 /// BCP-47 codes to expect (none: any), `words` names to spell as given.
 pub fn transcribe(key: &str, samples: &[i16], languages: &[&str], words: &[&str]) -> Result<String, String> {
-    transcribe_at(&format!("{URL}?key={key}"), samples, languages, words)
+    transcribe_with(key, TRANSCRIBE_MODEL, samples, languages, words)
 }
 
-/// [`transcribe`] at `url` (a test's server).
-pub fn transcribe_at(url: &str, samples: &[i16], languages: &[&str], words: &[&str]) -> Result<String, String> {
+/// [`transcribe`] with another of Google's Live transcription models.
+pub fn transcribe_with(key: &str, model: &str, samples: &[i16], languages: &[&str], words: &[&str]) -> Result<String, String> {
+    transcribe_at(&format!("{URL}?key={key}"), model, samples, languages, words)
+}
+
+/// [`transcribe_with`] at `url` (a test's server).
+pub fn transcribe_at(url: &str, model: &str, samples: &[i16], languages: &[&str], words: &[&str]) -> Result<String, String> {
     let setup = json!({"setup": {
-        "model": format!("models/{TRANSCRIBE_MODEL}"),
+        "model": format!("models/{model}"),
         "generationConfig": {"responseModalities": ["TEXT"]},
         "inputAudioTranscription": {"languageCodes": languages, "customVocabulary": words},
         "realtimeInputConfig": {"automaticActivityDetection": {"disabled": true}},
@@ -692,7 +697,7 @@ mod tests {
             ws.send(Message::text(json!({"serverContent": {"turnComplete": true}}).to_string())).unwrap();
             let _ = ws.read();
         });
-        let accepted = thread::spawn(move || transcribe_at(&url, &[0; 4000], &["it-IT"], &["Yoru"]));
+        let accepted = thread::spawn(move || transcribe_at(&url, TRANSCRIBE_MODEL, &[0; 4000], &["it-IT"], &["Yoru"]));
         server.join().unwrap();
         assert_eq!(accepted.join().unwrap().unwrap(), "Ciao Yoru.");
     }

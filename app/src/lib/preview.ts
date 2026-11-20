@@ -908,6 +908,23 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   dismiss_timers: () => timers,
   voice_info: () => voice,
   ollama_models: async () => (await sleep(300), ["llama3.1:8b", "qwen3:8b"]),
+  provider_models: async (a) => {
+    await sleep(400);
+    const m = (model: string, name: string, chat: boolean, stt: boolean, note = "") => ({ id: `${a.provider}:${model}`, model, name, note, chat, stt, known: !!note });
+    const lists: Record<string, ReturnType<typeof m>[]> = {
+      google: [
+        m("gemini-3.6-flash", "Gemini 3.6 Flash", true, true, "Fast and cheap"),
+        m("gemini-3.6-pro", "Gemini 3.6 Pro", true, false),
+        m("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", true, true),
+        m("gemini-3.5-transcribe-live", "Gemini Transcribe Live", false, true),
+        m("gemma-4-27b-it", "Gemma 4 27B", true, false),
+      ],
+      openai: [m("gpt-5.2", "gpt-5.2", true, false), m("gpt-5-mini", "gpt-5-mini", true, false), m("gpt-4o-transcribe", "gpt-4o-transcribe", false, true), m("whisper-1", "whisper-1", false, true)],
+      anthropic: [m("claude-opus-5-5", "Claude Opus 5.5", true, false), m("claude-sonnet-5-5", "Claude Sonnet 5.5", true, false), m("claude-haiku-5-5", "Claude Haiku 5.5", true, false)],
+      groq: [m("whisper-large-v3-turbo", "whisper-large-v3-turbo", false, true), m("llama-3.3-70b-versatile", "llama-3.3-70b-versatile", true, false)],
+    };
+    return lists[a.provider] ?? [];
+  },
   set_voice: (a) => ((voice.settings = a.settings), voice),
   set_api_key: (a) => {
     const p = voice.providers.find((p) => p.id === a.provider);

@@ -194,6 +194,13 @@ pub fn check_key(key: &str) -> Result<(), CloudError> {
     read(agent().get(format!("{}/v1/models", base_url())).header("x-api-key", key).header("anthropic-version", VERSION).call()).map(|_| ())
 }
 
+/// Every Claude model the key can use: its id and the name Anthropic gives it.
+pub fn list_models(key: &str) -> Result<Vec<(String, String)>, CloudError> {
+    let body = read(agent().get(format!("{}/v1/models?limit=1000", base_url())).header("x-api-key", key).header("anthropic-version", VERSION).call())?;
+    let reply: Value = serde_json::from_slice(&body).map_err(|e| CloudError::Invalid { provider: ANTHROPIC.name, why: e.to_string() })?;
+    Ok(reply["data"].as_array().into_iter().flatten().filter_map(|m| Some((m["id"].as_str()?.to_string(), m["display_name"].as_str().unwrap_or_default().to_string()))).collect())
+}
+
 fn retryable(e: &CloudError) -> bool {
     match e {
         CloudError::RateLimited { .. } | CloudError::Network { .. } => true,

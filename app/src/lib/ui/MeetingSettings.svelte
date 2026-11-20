@@ -7,9 +7,9 @@
 <script lang="ts">
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
-  import { look } from "../look.svelte";
   import { store } from "../store.svelte";
   import type { MeetingSettings, Summarizers } from "../types";
+  import ModelPicker, { type Choice } from "./ModelPicker.svelte";
   import Toggle from "./Toggle.svelte";
 
   const t = $derived(i18n.t.meetings);
@@ -63,17 +63,30 @@
     }
   }
 
-  /** The models to summarize with, by provider. */
-  const providers = $derived.by(() => {
-    const by = new Map<string, Summarizers["models"]>();
-    for (const m of summarizers?.models ?? []) by.set(m.provider, [...(by.get(m.provider) ?? []), m]);
-    return [...by];
+  /** The services with a key: every model of theirs can summarize. */
+  const SERVICES = [
+    ["anthropic", "Anthropic"],
+    ["openai", "OpenAI"],
+    ["google", "Google"],
+    ["groq", "Groq"],
+  ] as const;
+  const keyed = $derived.by(() => {
+    const i = store.info;
+    const has: Record<string, unknown> = { anthropic: i?.key, openai: i?.openai_key, google: i?.google_key, groq: i?.groq_key };
+    const out: { id: string; name: string }[] = SERVICES.filter(([id]) => has[id]).map(([id, name]) => ({ id, name }));
+    if (summarizers?.models.some((m) => m.id.startsWith("ollama:"))) out.push({ id: "ollama", name: "Ollama" });
+    return out;
   });
-  /** The chosen model when its provider's key is gone: still shown, as missing. */
-  /** Gemini's models, which can transcribe: Google's, with its key. */
-  const gemini = $derived((summarizers?.models ?? []).filter((m) => m.id.startsWith("google:")));
+  const described = (m: Summarizers["models"][number]): Choice => ({ value: m.id, label: m.note.split(":")[0] || m.model, note: m.note.split(":").slice(1).join(":").trim(), group: i18n.t.picker.suggested });
+  /** A transcript: Parakeet here, or a Gemini model that hears a whole recording (not a Live one). */
+  const transcribers = $derived<Choice[]>([{ value: "local", label: t.parakeet, note: t.simpleLocal }, ...(summarizers?.models ?? []).filter((m) => m.id.startsWith("google:")).map(described)]);
+  /** A summary: this computer, the brain, or the catalog's described models. */
+  const summarizerChoices = $derived<Choice[]>([
+    { value: "local", label: t.thisComputer, note: t.simpleLocalSummary },
+    ...(summarizers?.brain ? [{ value: "brain", label: `${t.brain} (${summarizers.brain})`, note: t.simpleBrainSummary }] : []),
+    ...(summarizers?.models ?? []).map(described),
+  ]);
   const parakeet = $derived(settings?.transcribe_by === "local");
-  const lost = $derived(!!settings && !!summarizers && !["local", "brain"].includes(settings.summary_by) && !summarizers.models.some((m) => m.id === settings!.summary_by));
   const percent = (f: number) => Math.round(f * 100);
   const LANGUAGES = ["", "it", "en", "es", "fr", "de", "pt"];
   const WHEN = $derived([
@@ -85,10 +98,20 @@
 
 {#if settings}
   <section class="panel">
-    <div class="setting"><div class="what"><b>{t.simpleTranscript}</b><span>{settings.transcribe_by === "local" ? t.simpleLocal : settings.transcribe_by.startsWith("google:") ? t.simpleGoogle : t.unknownTranscriber}</span></div></div>
-    <div class="setting"><div class="what"><b>{t.simpleSummary}</b><span>{settings.summary_by === "local" ? t.simpleLocalSummary : settings.summary_by === "brain" ? t.simpleBrainSummary : settings.summary_by}</span></div></div>
+    <div class="setting">
+      <div class="what"><b>{t.simpleTranscript}</b><span>{t.transcribeByHint}</span></div>
+      <div class="how">
+        <ModelPicker value={settings.transcribe_by} choices={transcribers} providers={store.info?.google_key ? [{ id: "google", name: "Google" }] : []} need="stt" accept={(m) => !m.model.includes("-live")} label={t.simpleTranscript} onchange={(v) => save({ transcribe_by: v })} />
+      </div>
+    </div>
+    <div class="setting">
+      <div class="what"><b>{t.simpleSummary}</b><span>{t.summaryByHint}</span></div>
+      <div class="how">
+        <ModelPicker value={settings.summary_by} choices={summarizerChoices} providers={keyed} need="chat" label={t.simpleSummary} onchange={(v) => save({ summary_by: v })} />
+      </div>
+    </div>
     {#if settings.transcribe_by.startsWith("google:") && !store.info?.google_key}<div class="setting"><p class="error-text">{t.noGoogleKey}</p></div>{/if}
-    {#if summarizers && ((settings.summary_by === "local" && !summarizers.local) || (settings.summary_by === "brain" && !summarizers.brain) || lost)}<div class="setting"><p class="error-text">{t.needSummarizer}</p></div>{/if}
+    {#if summarizers && ((settings.summary_by === "local" && !summarizers.local) || (settings.summary_by === "brain" && !summarizers.brain))}<div class="setting"><p class="error-text">{t.needSummarizer}</p></div>{/if}
   </section>
   <h2 class="section-title">{t.stepNotice}</h2>
   <section class="panel">
@@ -167,33 +190,6 @@
       <div class="how"><Toggle checked={settings.auto_summary} label={t.autoSummary} onchange={(on) => save({ auto_summary: on })} /></div>
     </div>
   </section>
-  {#if look.advanced}
-    <h2 class="section-title">{i18n.t.settings.advanced}</h2>
-    <p class="dim note">{t.modelsAdvanced}</p>
-    <section class="panel">
-      <div class="setting">
-        <div class="what"><b>{t.transcribeBy}</b><span>{t.transcribeByHint}</span></div>
-        <div class="how">
-          <select value={settings.transcribe_by} onchange={(e) => save({ transcribe_by: e.currentTarget.value })} aria-label={t.transcribeBy}>
-            <option value="local">{t.parakeet}</option>
-            {#if gemini.length}<optgroup label="Google">{#each gemini as m (m.id)}<option value={m.id} title={m.note || m.model}>{m.note.split(":")[0] || m.model}</option>{/each}</optgroup>{:else if summarizers}<option disabled>{t.noGoogleKey}</option>{/if}
-            {#if !parakeet && summarizers && !gemini.some((m) => m.id === settings!.transcribe_by)}<option value={settings.transcribe_by}>{settings.transcribe_by} ({t.noKey})</option>{/if}
-          </select>
-        </div>
-      </div>
-      <div class="setting">
-        <div class="what"><b>{t.summaryBy}</b><span>{t.summaryByHint}</span></div>
-        <div class="how">
-          <select value={settings.summary_by} onchange={(e) => save({ summary_by: e.currentTarget.value })} aria-label={t.summaryBy}>
-            <option value="local">{t.thisComputer}</option>
-            <option value="brain" disabled={!summarizers?.brain}>{summarizers?.brain ? `${t.brain} (${summarizers.brain})` : t.noBrain}</option>
-            {#each providers as [provider, models] (provider)}<optgroup label={provider}>{#each models as m (m.id)}<option value={m.id} title={m.note || m.model}>{m.note.split(":")[0] || m.model}</option>{/each}</optgroup>{/each}
-            {#if lost}<option value={settings.summary_by}>{settings.summary_by} ({t.noKey})</option>{/if}
-          </select>
-        </div>
-      </div>
-    </section>
-  {/if}
 {/if}
 {#if error}<p class="error-text note">{error}</p>{/if}
 

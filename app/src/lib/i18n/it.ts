@@ -80,6 +80,16 @@ const it: Messages = {
     listening: "Ti ascolto… clicca di nuovo il microfono quando hai finito",
   },
 
+  picker: {
+    search: "Cerca un modello",
+    loading: "Chiedo al servizio i suoi modelli…",
+    none: "Nessun modello corrisponde",
+    use: (name: string) => `Usa «${name}»`,
+    suggested: "Consigliati",
+    all: (provider: string) => `Tutti i modelli di ${provider}`,
+    unreachable: (why: string) => `Non riesco a leggere l'elenco completo: ${why}`,
+    current: "In uso",
+  },
   bubble: {
     title: "Yoru",
     hello: "Chiedimi qualcosa, o dimmi cosa correggere di quello che so.",

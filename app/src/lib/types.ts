@@ -76,6 +76,8 @@ export type AssistantSettings = {
 };
 
 export type KeySource = "env" | "saved";
+/** A model a service offers now (`provider_models`): `id` is `provider:model`; `known` when Yoru describes it. */
+export type ListedModel = { id: string; model: string; name: string; note: string; chat: boolean; stt: boolean; known: boolean };
 
 export type AssistantInfo = {
   settings: AssistantSettings;

@@ -23,6 +23,7 @@
   import MeetingSettingsPage from "../ui/MeetingSettings.svelte";
   import PocketSettingsPage from "../ui/PocketSettings.svelte";
   import Profiles from "../ui/Profiles.svelte";
+  import ModelPicker, { type Choice } from "../ui/ModelPicker.svelte";
   import { transcriptionRequirement } from "../meeting-readiness";
   import { PAGE_ICONS } from "../icons/pages";
   import Icon from "../ui/Icon.svelte";
@@ -47,6 +48,13 @@
   const modelOf = (b: Brain) => (s ? s[MODEL_FIELD[b]] : "");
   const setModel = (b: Brain, v: string) => store.saveSettings((x: AssistantSettings) => (x[MODEL_FIELD[b]] = v));
   const catalog = (b: Brain) => (b === "openai" ? store.info?.openai_models : b === "google" ? store.info?.google_models : b === "groq" ? store.info?.groq_models : undefined) ?? [];
+  /** A brain's described models, first in its picker; the service lists the rest. */
+  const brainChoices = (b: Brain): Choice[] =>
+    b === "anthropic"
+      ? CLAUDE_MODELS.map(([m, label]) => ({ value: m, label: label.split(" — ")[0], note: label.split(" — ").slice(1).join(" — "), group: i18n.t.picker.suggested }))
+      : b === "ollama"
+        ? (ollamaModels ?? []).map((m) => ({ value: m, label: m }))
+        : catalog(b).map((m) => ({ value: m.id, label: m.note.split(":")[0] || m.id, note: m.note.split(":").slice(1).join(":").trim(), group: i18n.t.picker.suggested }));
 
   let voice = $state<VoiceInfo | null>(null);
   let mcp = $state<McpInfo | null>(null);
@@ -452,8 +460,7 @@
           {#if ollamaError}<span class="error-text">{ollamaError}</span>{:else if ollamaModels && !ollamaModels.length}<span class="error-text">{t.ollamaNone}</span>{/if}
         </div>
         <div class="how">
-          <input class="model mono" type="text" list="ollama-models" value={s.ollama_model} placeholder={t.ollamaPick} spellcheck="false" onchange={(e) => setModel("ollama", e.currentTarget.value.trim())} aria-label={name} />
-          <datalist id="ollama-models">{#each ollamaModels ?? [] as m (m)}<option value={m}></option>{/each}</datalist>
+          <ModelPicker value={s.ollama_model} choices={brainChoices("ollama")} bare custom label={name} onchange={(v) => setModel("ollama", v)} />
           <button class="btn small" onclick={readOllama}>{t.ollamaRefresh}</button>
           <button class="btn small" onclick={() => call("open_key_page", { provider: "ollama" })}>{t.ollamaGet}</button>
         </div>
@@ -466,16 +473,7 @@
       <div class="setting">
         <div class="what"><b>{name}</b></div>
         <div class="how">
-          {#if b === "anthropic"}
-            <select value={s.model} onchange={(e) => setModel("anthropic", e.currentTarget.value)} aria-label={name}>
-              {#each CLAUDE_MODELS as [m, label] (m)}<option value={m}>{label}</option>{/each}
-              {#if !CLAUDE_MODELS.some(([m]) => m === s.model)}<option value={s.model}>{s.model}</option>{/if}
-            </select>
-          {:else}
-            <select value={modelOf(b)} onchange={(e) => setModel(b, e.currentTarget.value)} aria-label={name}>
-              {#each catalog(b) as m (m.id)}<option value={m.id}>{m.id} — {m.note}</option>{/each}
-            </select>
-          {/if}
+          <ModelPicker value={modelOf(b)} choices={brainChoices(b)} providers={keyOf(b)?.source ? [{ id: b, name: BRAIN_NAMES[b] }] : []} bare custom={b === "anthropic"} label={name} onchange={(v) => setModel(b, v)} />
         </div>
       </div>
     {/if}

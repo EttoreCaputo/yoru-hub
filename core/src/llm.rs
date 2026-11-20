@@ -61,7 +61,7 @@ impl LlmConfig {
     pub fn label(&self) -> String {
         match self {
             LlmConfig::Local(local) => local.model.display().to_string(),
-            LlmConfig::Cloud(client) => client.model.id(),
+            LlmConfig::Cloud(client) => client.id(),
         }
     }
 }

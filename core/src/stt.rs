@@ -90,7 +90,7 @@ impl SttEngine {
     pub fn label(&self) -> String {
         match self {
             SttEngine::Local { model, .. } => model.display().to_string(),
-            SttEngine::Cloud(client) => client.model.id(),
+            SttEngine::Cloud(client) => client.id(),
         }
     }
 }

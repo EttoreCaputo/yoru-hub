@@ -257,6 +257,14 @@ pub async fn ollama_models() -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(|| cloud::list_models(&cloud::OLLAMA).map_err(|e| assistant::compat::brain_error(&e))).await.map_err(|e| e.to_string())?
 }
 
+/// Every model a service offers the key now, for the model pickers: the
+/// catalog's first, then the rest by name.
+#[tauri::command]
+pub async fn provider_models(provider: String) -> Result<Vec<cloud::ListedModel>, String> {
+    let provider = cloud::Provider::by_id(&provider).ok_or_else(|| format!("unknown service {provider}"))?;
+    tauri::async_runtime::spawn_blocking(move || cloud::provider_models(provider).map_err(|e| e.to_string())).await.map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn assistant_info(state: State<AppState>) -> AssistantInfo {
     info_of(&state.assistant)

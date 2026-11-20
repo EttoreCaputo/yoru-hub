@@ -18,7 +18,7 @@ const JSON_TIMEOUT: Duration = Duration::from_secs(300);
 /// `chat_template_kwargs`) are refused by most services.
 const CHAT_FIELDS: &[&str] = &["messages", "tools", "tool_choice", "temperature", "top_p", "max_tokens", "seed", "stop", "response_format"];
 
-fn agent() -> &'static ureq::Agent {
+pub(super) fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     // Error statuses are read like any answer, for the provider's message.
     AGENT.get_or_init(|| ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(TIMEOUT)).build()))
@@ -133,7 +133,7 @@ fn parse_wait(text: &str) -> Option<Duration> {
     (number.is_empty() && total > 0.0).then(|| Duration::from_secs_f64(total))
 }
 
-fn json(client: &Client, body: &[u8]) -> Result<Value, CloudError> {
+pub(super) fn json(client: &Client, body: &[u8]) -> Result<Value, CloudError> {
     serde_json::from_slice(body).map_err(|e| CloudError::Invalid { provider: client.model.provider.name, why: e.to_string() })
 }
 

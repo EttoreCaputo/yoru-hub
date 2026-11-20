@@ -12,6 +12,7 @@
   import { look } from "../look.svelte";
   import { store } from "../store.svelte";
   import type { AccountVoice, BoardVoice, ModelInfo, SidecarState, VoiceInfo, VoiceSettings, YoruSettings } from "../types";
+  import ModelPicker, { type Choice } from "./ModelPicker.svelte";
   import Toggle from "./Toggle.svelte";
 
   const t = $derived(i18n.t.board);
@@ -94,6 +95,18 @@
     if (svc === "elevenlabs") list.push(...account.map((a) => ({ id: accountId(a), label: `${a.name}${a.category ? ` · ${a.category}` : ""}` })));
     return list;
   }
+  /** The transcribers to pick: the catalog's, by service, then every one a keyed service offers. */
+  const sttChoices = $derived<Choice[]>(
+    groups(hearing, (svc) => of(whispers, svc).map((h) => ({ id: h.id, label: "" })), info?.settings.model).flatMap((g) =>
+      of(whispers, g.svc).map((h) => ({
+        value: h.id,
+        label: h.id.replace(/^[^:]+:/, ""),
+        note: [h.note, missing(h) ? t.toDownload(mb(h)) : ""].filter(Boolean).join(" · "),
+        group: nameOf(g.svc),
+      })),
+    ),
+  );
+  const sttServices = $derived(hearing.filter((svc) => svc !== LOCAL && keyed(svc)).map((svc) => ({ id: svc, name: nameOf(svc) })));
   const model = (id: string | undefined) => info?.models.find((m) => m.id === id);
   const mb = (m: ModelInfo) => Math.round(m.bytes / 1e6);
   const missing = (m: ModelInfo | undefined) => !!m && !m.installed && !m.provider;
@@ -240,11 +253,7 @@
           <div class="what"><b>{t.sttModel}</b></div>
           <div class="how">
             {#if sttModel && missing(sttModel)}{@render fetch(sttModel)}{/if}
-            <select value={s.model} onchange={(e) => set({ enabled: true, model: e.currentTarget.value })} aria-label={t.sttModel}>
-              {#each groups(hearing, (svc) => of(whispers, svc).map((h) => ({ id: h.id, label: label(h) })), s.model) as g (g.svc)}
-                <optgroup label={nameOf(g.svc)}>{#each g.options as h (h.id)}<option value={h.id}>{h.label}</option>{/each}</optgroup>
-              {/each}
-            </select>
+            <ModelPicker value={s.model} choices={sttChoices} providers={sttServices} need="stt" accept={(m) => !m.model.includes("-live")} label={t.sttModel} onchange={(model) => set({ enabled: true, model })} />
           </div>
         </div>
         {@render picker(t.turnModel, t.turnHint, s.turn_model, t.turnPause, turns, (id) => set({ turn_model: id }))}

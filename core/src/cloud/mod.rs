@@ -26,6 +26,7 @@
 
 pub mod anthropic;
 pub mod elevenlabs;
+mod google;
 pub mod live;
 mod ollama;
 mod openai;
@@ -265,6 +266,7 @@ pub const GOOGLE: Provider = Provider {
         chat("gemini-4-hydrogen", "Gemini 4 Hydrogen: fast, made for agents; free tier, then $1.50 / $7.50", GEMINI_LOW),
         chat("gemini-4-argon", "Gemini 4 Argon: frontier reasoning, quicker than Carbon; paid only ($2 / $10, $4 / $20 from December)", GEMINI_LOW),
         chat("gemini-4-carbon", "Gemini 4 Carbon: Google's strongest; paid only ($2 / $10, $4 / $20 from December)", GEMINI_LOW),
+        whisper(live::TRANSCRIBE_MODEL, "Gemini Transcribe: Google's speech to text, free with no daily limit"),
     ],
     needs_key: true,
     any_model: false,
@@ -291,8 +293,29 @@ pub const OLLAMA: Provider = Provider {
 };
 
 /// What `ollama:<model>` names: a model the person has, not in the catalog.
-/// Its name is the [`Client`]'s.
+/// Its name is the [`Client`]'s. A model of another service that isn't in
+/// its catalog, picked from the ones it lists ([`provider_models`]), is one
+/// of these too, or [`ANY_GEMINI`], or [`ANY_STT`].
 const ANY_MODEL: CloudModel = CloudModel { id: "model", kind: Kind::Llm, model: "", voice: None, language: None, note: "A model you have", params: "", max_chars: 0 };
+/// A Gemini model not in the catalog: it thinks briefly, like the catalog's.
+const ANY_GEMINI: CloudModel = CloudModel { params: GEMINI_LOW, note: "A model of your Google account", ..ANY_MODEL };
+/// A speech-to-text model not in the catalog.
+const ANY_STT: CloudModel = CloudModel { id: "stt", kind: Kind::Whisper, note: "A speech-to-text model of the service", ..ANY_MODEL };
+
+/// What a model the catalog doesn't know is likely to be, from its name.
+fn is_transcriber(model: &str) -> bool {
+    model.contains("whisper") || model.contains("transcribe")
+}
+
+/// Whether a model only makes something other than words from words
+/// (pictures, speech, embeddings) or works only in ways Yoru doesn't speak.
+fn is_not_chat(model: &str) -> bool {
+    const NOT: &[&str] = &[
+        "embed", "tts", "image", "imagen", "veo", "dall-e", "moderation", "realtime", "audio", "aqa", "search", "computer-use", "guard", "sora", "lyria", "robotics", "live", "codex", "babbage", "davinci",
+        "orpheus", "playai", "distil", "transcribe", "whisper", "deep-research", "gemma-3n",
+    ];
+    NOT.iter().any(|n| model.contains(n))
+}
 
 /// Every service Yoru can use.
 pub const PROVIDERS: &[Provider] = &[ANTHROPIC, OPENAI, GOOGLE, GROQ, OLLAMA, ELEVENLABS, TAVILY];
@@ -382,8 +405,25 @@ impl CloudRef {
         if provider.any_model && !model.is_empty() {
             return Some(Self { provider, model: &ANY_MODEL });
         }
-        let model = provider.models.iter().find(|m| m.id == model)?;
-        Some(Self { provider, model })
+        match provider.models.iter().find(|m| m.id == model) {
+            Some(model) => Some(Self { provider, model }),
+            None => Self::any(provider, model, if is_transcriber(model) { Kind::Whisper } else { Kind::Llm }),
+        }
+    }
+
+    /// A model of `provider` the catalog doesn't know (or knows as another
+    /// kind: a Gemini model hears as well as it writes), used as `kind`.
+    fn any(provider: &'static Provider, model: &str, kind: Kind) -> Option<Self> {
+        if provider.api != Api::OpenAi || model.is_empty() || model.contains(char::is_whitespace) {
+            return None;
+        }
+        let template = match kind {
+            Kind::Whisper if provider.id == GOOGLE.id || is_transcriber(model) => &ANY_STT,
+            Kind::Llm if provider.id == GOOGLE.id => &ANY_GEMINI,
+            Kind::Llm => &ANY_MODEL,
+            _ => return None,
+        };
+        Some(Self { provider, model: template })
     }
 
     /// Every cloud model of `kind`.
@@ -411,6 +451,64 @@ pub fn is_cloud_id(id: &str) -> bool {
 pub fn list_models(provider: &'static Provider) -> Result<Vec<String>, CloudError> {
     let key = provider.key_or_none()?;
     openai::list_models(&provider.client(&ANY_MODEL, key))
+}
+
+/// A model a service has now ([`provider_models`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct ListedModel {
+    /// `provider:model`.
+    pub id: String,
+    /// The service's id for it.
+    pub model: String,
+    /// What the service calls it, or the catalog's description.
+    pub name: String,
+    /// The catalog's note, or the service's description.
+    pub note: String,
+    /// It can be a brain or summarize.
+    pub chat: bool,
+    /// It can write down speech.
+    pub stt: bool,
+    /// Yoru knows it (it's in the catalog): tried and described.
+    pub known: bool,
+}
+
+/// Every model `provider` offers the key now, the catalog's first: for the
+/// person to pick any, not only the ones Yoru describes.
+pub fn provider_models(provider: &'static Provider) -> Result<Vec<ListedModel>, CloudError> {
+    let key = provider.key_or_none()?;
+    let listed: Vec<(String, String, String, bool, bool)> = match provider.api {
+        Api::OpenAi if provider.id == GOOGLE.id => google::list_models(&provider.client(&ANY_GEMINI, key))?
+            .into_iter()
+            .map(|m| {
+                let stt = m.model.contains("transcribe") || (m.generates && m.model.contains("flash") && !is_not_chat(&m.model));
+                let chat = m.generates && !is_not_chat(&m.model);
+                (m.model, m.name, m.description, chat, stt)
+            })
+            .collect(),
+        Api::OpenAi => openai::list_models(&provider.client(&ANY_MODEL, key))?
+            .into_iter()
+            .map(|m| {
+                let stt = is_transcriber(&m) && !m.contains("realtime") && !m.contains("tts");
+                let chat = provider.any_model || !is_not_chat(&m);
+                (m, String::new(), String::new(), chat, stt)
+            })
+            .collect(),
+        Api::Anthropic => anthropic::list_models(&key)?.into_iter().map(|(m, name)| (m, name, String::new(), true, false)).collect(),
+        Api::ElevenLabs | Api::Tavily => Vec::new(),
+    };
+    let known = |m: &str| provider.models.iter().find(|c| c.id == m);
+    let mut out: Vec<ListedModel> = listed
+        .into_iter()
+        .filter(|(_, _, _, chat, stt)| *chat || *stt)
+        .map(|(model, name, note, chat, stt)| {
+            let catalog = known(&model);
+            let note = catalog.map(|c| c.note.to_string()).unwrap_or(note);
+            let name = if name.is_empty() { model.clone() } else { name };
+            ListedModel { id: format!("{}:{model}", provider.id), known: catalog.is_some(), model, name, note, chat, stt }
+        })
+        .collect();
+    out.sort_by(|a, b| b.known.cmp(&a.known).then_with(|| a.model.cmp(&b.model)));
+    Ok(out)
 }
 
 fn keys_file() -> Option<PathBuf> {
@@ -521,6 +619,15 @@ static LIMITED: Mutex<BTreeMap<String, (Instant, bool)>> = Mutex::new(BTreeMap::
 /// whisper-server's `verbose_json`.
 pub type TranscriptionReply = Value;
 
+/// The model `id` names as `kind`, and its name when the catalog doesn't
+/// know it (it goes by the name the id gave).
+fn resolve(id: &str, kind: Kind) -> Result<(CloudRef, Option<String>), String> {
+    let by_name = || id.split_once(':').and_then(|(p, m)| CloudRef::any(Provider::by_id(p)?, m, kind));
+    let model = CloudRef::by_id(id).filter(|r| r.model.kind == kind).or_else(by_name).ok_or_else(|| format!("unknown cloud model {id}"))?;
+    let name = id.split_once(':').map(|(_, m)| m.to_string()).filter(|_| model.model.model.is_empty());
+    Ok((model, name))
+}
+
 /// One cloud model and the key to use it with. Its [`fmt::Debug`] leaves
 /// the key out.
 #[derive(Clone, PartialEq, Eq)]
@@ -535,18 +642,25 @@ pub struct Client {
 
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Client").field("model", &self.model.id()).finish_non_exhaustive()
+        f.debug_struct("Client").field("model", &self.id()).finish_non_exhaustive()
     }
 }
 
 impl Client {
     /// The cloud model `id` (`groq:hannah`) of `kind`, with its provider's key.
     pub fn new(id: &str, kind: Kind) -> Result<Self, String> {
-        let model = CloudRef::by_id(id).filter(|r| r.model.kind == kind).ok_or_else(|| format!("unknown cloud model {id}"))?;
+        let (model, name) = resolve(id, kind)?;
         let key = model.provider.key_or_none().map_err(|e| e.to_string())?;
         let voice_id = id.split_once(':').and_then(|(_, m)| account_voice_id(m)).filter(|_| model.provider.api == Api::ElevenLabs).map(str::to_string);
-        let name = id.split_once(':').map(|(_, m)| m.to_string()).filter(|_| model.provider.any_model);
         Ok(Self { model, key, voice_id, name })
+    }
+
+    /// Its `provider:model` id, with the name of a model not in the catalog.
+    pub fn id(&self) -> String {
+        match &self.name {
+            Some(name) => format!("{}:{name}", self.model.provider.id),
+            None => self.model.id(),
+        }
     }
 
     /// The provider's name for the model: the catalog's, or the one the id gave.
@@ -591,6 +705,7 @@ impl Client {
     /// Transcribe a WAV, in `language` (`it`, `en`) or whichever it hears (`None`).
     pub fn transcribe(&self, wav: &[u8], language: Option<&str>, prompt: &str) -> Result<TranscriptionReply, CloudError> {
         self.limited(|| match self.model.provider.api {
+            Api::OpenAi if self.model.provider.id == GOOGLE.id => google::transcribe(self, wav, language, prompt),
             Api::OpenAi => openai::transcribe(self, wav, language, prompt),
             Api::ElevenLabs | Api::Anthropic | Api::Tavily => Err(self.unsupported("transcription")),
         })
@@ -636,7 +751,7 @@ impl Client {
     /// The limit the model is waiting out, as the error its requests get.
     pub fn limit(&self) -> Option<CloudError> {
         let mut limited = LIMITED.lock().unwrap();
-        let id = self.model.id();
+        let id = self.id();
         let left = limited.get(&id).and_then(|(until, per_day)| Some((until.checked_duration_since(Instant::now())?, *per_day)));
         if left.is_none() {
             limited.remove(&id);
@@ -652,7 +767,7 @@ impl Client {
         }
         let reply = request();
         if let Err(CloudError::RateLimited { retry_after, per_day, .. }) = &reply {
-            LIMITED.lock().unwrap().insert(self.model.id(), (Instant::now() + retry_after.unwrap_or(COOLDOWN), *per_day));
+            LIMITED.lock().unwrap().insert(self.id(), (Instant::now() + retry_after.unwrap_or(COOLDOWN), *per_day));
         }
         reply
     }
@@ -704,7 +819,30 @@ mod tests {
         let r = CloudRef::by_id("elevenlabs:voice/JBFqnCBsd6RMkjVDRZzb").unwrap();
         assert_eq!((r.provider.id, r.model.kind), ("elevenlabs", Kind::Voice));
         assert!(CloudRef::by_id("elevenlabs:voice/").is_none());
-        assert!(CloudRef::by_id("groq:voice/x").is_none());
+        // A model the catalog doesn't know, as its service lists it.
+        assert_eq!(CloudRef::by_id("groq:voice/x").map(|r| r.model.kind), Some(Kind::Llm));
+        assert_eq!(CloudRef::by_id("openai:gpt-4o-transcribe").map(|r| r.model.kind), Some(Kind::Whisper));
+        assert!(CloudRef::by_id("elevenlabs:other").is_none());
+        assert!(CloudRef::by_id("google:").is_none());
+    }
+
+    #[test]
+    fn any_model_of_a_service_works() {
+        let (gemini, name) = resolve("google:gemini-2.5-pro", Kind::Llm).unwrap();
+        assert_eq!((name.as_deref(), gemini.model.params), (Some("gemini-2.5-pro"), GEMINI_LOW));
+        // A Gemini model hears too: the catalog's chat model, as speech to text, by its name.
+        let (heard, name) = resolve("google:gemini-3.6-flash", Kind::Whisper).unwrap();
+        assert_eq!((name.as_deref(), heard.model.kind), (Some("gemini-3.6-flash"), Kind::Whisper));
+        // OpenAI's chat models don't hear; its transcription models do.
+        assert!(resolve("openai:gpt-6-luna", Kind::Whisper).is_err());
+        assert_eq!(resolve("openai:gpt-4o-transcribe", Kind::Whisper).unwrap().1.as_deref(), Some("gpt-4o-transcribe"));
+        // The catalog's keep their own params and name.
+        let (known, name) = resolve("google:gemini-3.6-flash", Kind::Llm).unwrap();
+        assert_eq!((name, known.model.params), (None, GEMINI_LOW));
+        assert_eq!(resolve("google:gemini-3.5-transcribe-live", Kind::Whisper).unwrap().1, None);
+        assert!(!is_not_chat("gemini-3.6-flash") && is_not_chat("gemini-3.5-transcribe-live") && is_not_chat("text-embedding-3-small"));
+        let client = Client { model: heard, key: "k".into(), voice_id: None, name: Some("gemini-3.6-flash".into()) };
+        assert_eq!(client.id(), "google:gemini-3.6-flash");
     }
 
     #[test]
@@ -736,7 +874,7 @@ mod tests {
         let reply = client.limited(|| -> Result<(), CloudError> { panic!("asked") });
         assert!(reply.is_err_and(|e| e.is_limit()));
         // Only its own: other tests keep limits of their own models.
-        LIMITED.lock().unwrap().remove(&client.model.id());
+        LIMITED.lock().unwrap().remove(&client.id());
         assert_eq!(client.limited(|| Ok(1)), Ok(1));
     }
 

@@ -82,6 +82,16 @@ const en = {
     listening: "Listening… click the microphone again when you're done",
   },
 
+  picker: {
+    search: "Search models",
+    loading: "Asking the service for its models…",
+    none: "No model matches",
+    use: (name: string) => `Use “${name}”`,
+    suggested: "Suggested",
+    all: (provider: string) => `All of ${provider}'s models`,
+    unreachable: (why: string) => `The full list couldn't be read: ${why}`,
+    current: "In use",
+  },
   bubble: {
     title: "Yoru",
     hello: "Ask me something, or tell me what to fix in what I know.",
