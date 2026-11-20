@@ -446,6 +446,13 @@ const en = {
   },
 
   meetings: {
+    simpleTranscript: "Meeting transcription",
+    simpleLocal: "On this computer. Audio stays here.",
+    simpleGoogle: "Google Gemini. The recording is sent to Google.",
+    simpleSummary: "Meeting summaries",
+    simpleLocalSummary: "On this computer.",
+    simpleBrainSummary: "Uses the conversation provider. The transcript is sent to that provider if it is online.",
+    modelsAdvanced: "Override the guided setup and choose a different model for each task.",
     title: "Meetings",
     lede: "Record a call or bring in a file: Yoru transcribes and sums it up.",
     played: "What the computer plays",
@@ -702,6 +709,11 @@ const en = {
   },
 
   board: {
+    currentVoice: "Current voice setup",
+    currentLive: (voice: string) => `Gemini Live hears and speaks on the computer · ${voice}`,
+    currentPipeline: (hearing: string, speaking: string) => `Listening: ${hearing} · Spoken answers: ${speaking}`,
+    customServices: "Customize voice services",
+    customServicesHint: "Advanced: choose separate services and voices, independently of the guided setup.",
     mac: "On the Mac",
     notch: "Yoru in the notch",
     notchHint: "A small Yoru beside the camera. Hold ⌥ Space to talk to him through the Mac's microphone.",
@@ -823,15 +835,20 @@ const en = {
   settings: {
     title: "Settings",
     lede: "Everything about Yoru, one part at a time.",
+    guidedTitle: "Set up Yoru",
+    guidedLede: "Choose your provider and Yoru will suggest the models for you.",
+    guidedCurrent: (brain: string, meetings: string) => `Current conversation: ${brain} · Meeting transcription: ${meetings}`,
+    otherSettings: "Other settings and advanced configuration",
+    otherSettingsHint: "Change individual models, voice, meetings, devices, language and keys.",
     parts: { brain: "Thinks and talks", voice: "Voice", language: "Language", meetings: "Meetings", keys: "Keys", mac: "On the Mac", board: "The board", pocket: "Pocket", about: "About" },
     partLedes: {
-      brain: "What Yoru thinks, hears and answers with: pick a setup, then change the details if you like.",
+      brain: "Choose a conversation provider and model yourself.",
       voice: "How Yoru hears you and answers aloud.",
       language: "The app's language, and the one Yoru answers in.",
       keys: "The keys of the services Yoru uses. They stay on this Mac.",
       mac: "Yoru in the notch, and in Claude Code.",
       board: "The board on your desk: firmware, WiFi and how it behaves.",
-      meetings: "What happens to a meeting: Yoru notices it, transcribes it on this Mac and summarizes it.",
+      meetings: "How Yoru notices, transcribes and summarizes a meeting.",
       pocket: "The Pocket recorder: how Yoru brings its recordings here, where they become meetings.",
       about: "Where Yoru keeps his data, and the first setup.",
     },

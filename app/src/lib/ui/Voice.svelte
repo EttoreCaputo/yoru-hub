@@ -127,6 +127,14 @@
 {#if info}
   {@const s = info.settings}
   {@const sttModel = model(s.model)}
+  <section class="panel">
+    <div class="setting"><div class="what"><b>{t.currentVoice}</b><span>{s.live ? t.currentLive(s.live) : t.currentPipeline(heard ? nameOf(heard) : t.off, spoken ? nameOf(spoken) : t.off)}</span></div></div>
+    {#if !s.live && info.stt_error}<div class="setting"><p class="error-text">{info.stt_error}</p></div>{/if}
+    {#if !s.live && info.tts_error}<div class="setting"><p class="error-text">{info.tts_error}</p></div>{/if}
+  </section>
+  <details class="more">
+    <summary class="section-title">{t.customServices}</summary>
+    <p class="dim hint">{t.customServicesHint}</p>
   {#if s.live}
     <section class="panel active live-on">
       <div class="setting">
@@ -185,6 +193,7 @@
       {/if}
     </section>
   {/if}
+  </details>
 
   {#if s.speak || board?.volume != null || board?.wake_sound != null}
     <h2 class="section-title">{t.conversation}</h2>

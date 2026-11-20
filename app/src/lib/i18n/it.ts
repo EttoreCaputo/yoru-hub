@@ -444,6 +444,13 @@ const it: Messages = {
   },
 
   meetings: {
+    simpleTranscript: "Trascrizione delle riunioni",
+    simpleLocal: "Su questo computer. L'audio rimane qui.",
+    simpleGoogle: "Google Gemini. La registrazione viene inviata a Google.",
+    simpleSummary: "Riassunti delle riunioni",
+    simpleLocalSummary: "Su questo computer.",
+    simpleBrainSummary: "Usa il servizio della conversazione. Se è online, riceve la trascrizione.",
+    modelsAdvanced: "Modifica la configurazione guidata e scegli un modello diverso per ogni funzione.",
     title: "Riunioni",
     lede: "Registra una chiamata o porta un file: Yoru la trascrive e la riassume.",
     played: "Quello che suona il computer",
@@ -700,6 +707,11 @@ const it: Messages = {
   },
 
   board: {
+    currentVoice: "Configurazione vocale attuale",
+    currentLive: (voice: string) => `Gemini Live ascolta e parla tramite il computer · ${voice}`,
+    currentPipeline: (hearing: string, speaking: string) => `Ascolto: ${hearing} · Risposte vocali: ${speaking}`,
+    customServices: "Personalizza i servizi vocali",
+    customServicesHint: "Avanzate: scegli servizi e voci separati, indipendentemente dalla configurazione guidata.",
     mac: "Sul Mac",
     notch: "Yoru nella notch",
     notchHint: "Un piccolo Yoru accanto alla fotocamera. Tieni premuto ⌥ Spazio per parlargli col microfono del Mac.",
@@ -821,15 +833,20 @@ const it: Messages = {
   settings: {
     title: "Impostazioni",
     lede: "Tutto di Yoru, una parte alla volta.",
+    guidedTitle: "Configura Yoru",
+    guidedLede: "Scegli il tuo servizio e Yoru ti proporrà i modelli adatti.",
+    guidedCurrent: (brain: string, meetings: string) => `Conversazione attuale: ${brain} · Trascrizione riunioni: ${meetings}`,
+    otherSettings: "Altre impostazioni e configurazione avanzata",
+    otherSettingsHint: "Modifica singoli modelli, voce, riunioni, dispositivi, lingua e chiavi.",
     parts: { brain: "Pensa e parla", voice: "Voce", language: "Lingua", meetings: "Riunioni", keys: "Chiavi", mac: "Sul Mac", board: "La scheda", pocket: "Pocket", about: "Informazioni" },
     partLedes: {
-      brain: "Con cosa Yoru pensa, ti sente e ti risponde: scegli un profilo, poi cambia i dettagli se vuoi.",
+      brain: "Scegli personalmente il servizio e il modello per la conversazione.",
       voice: "Come Yoru ti sente e ti risponde a voce.",
       language: "La lingua dell'app, e quella in cui Yoru ti risponde.",
       keys: "Le chiavi dei servizi che Yoru usa. Restano su questo Mac.",
       mac: "Yoru nella notch, e in Claude Code.",
       board: "La scheda sulla scrivania: firmware, WiFi e come si comporta.",
-      meetings: "Cosa succede a una riunione: Yoru se ne accorge, la trascrive su questo Mac e la riassume.",
+      meetings: "Come Yoru rileva, trascrive e riassume una riunione.",
       pocket: "Il registratore Pocket: come Yoru porta qui le sue registrazioni, che diventano riunioni.",
       about: "Dove Yoru tiene i suoi dati, e la prima configurazione.",
     },

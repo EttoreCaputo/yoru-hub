@@ -25,7 +25,7 @@ const TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// How long Google may take to make an uploaded file ready.
 const PROCESSING: Duration = Duration::from_secs(5 * 60);
 /// Formats Gemini reads as they are; anything else becomes AAC first.
-const READABLE: &[(&str, &str)] = &[("mp3", "audio/mp3"), ("wav", "audio/wav"), ("aiff", "audio/aiff"), ("aif", "audio/aiff"), ("flac", "audio/flac"), ("ogg", "audio/ogg"), ("aac", "audio/aac")];
+const READABLE: &[(&str, &str)] = &[("mp3", "audio/mp3"), ("wav", "audio/wav"), ("aiff", "audio/aiff"), ("aif", "audio/aiff"), ("flac", "audio/flac"), ("ogg", "audio/ogg"), ("aac", "audio/aac"), ("m4a", "audio/m4a")];
 
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
@@ -39,12 +39,10 @@ fn agent() -> &'static ureq::Agent {
 pub(super) fn transcribe(path: &Path, model: &str, language: Option<&str>, speakers: bool, mut on_progress: impl FnMut(&str, f64)) -> io::Result<Value> {
     let key = GOOGLE.api_key().ok_or_else(|| io::Error::other("Google: no API key (add one in Settings)"))?;
     on_progress("load", 0.0);
-    let (audio, mime, made) = readable(path)?;
-    let uploaded = upload(&key, &audio, mime);
-    if made {
-        let _ = fs::remove_file(&audio);
-    }
-    let file = uploaded?;
+    let audio = readable(path)?;
+    let file = upload(&key, &audio.path, audio.mime)?;
+    let mime = audio.mime;
+    drop(audio);
     let name = file["name"].as_str().unwrap_or_default().to_string();
     let result = ready(&key, file).and_then(|file| {
         on_progress("transcribe", 0.5);
@@ -58,25 +56,38 @@ pub(super) fn transcribe(path: &Path, model: &str, language: Option<&str>, speak
     Ok(segments)
 }
 
-/// The file to send and its type: the track itself, or a copy in AAC
-/// (mono, 16 kHz, made with `afconvert`) when Gemini can't read it, as
-/// with M4A and CAF; `true` when it is a copy, to delete.
-fn readable(path: &Path) -> io::Result<(PathBuf, &'static str, bool)> {
+/// A private temporary directory owns any converted audio and removes it even
+/// if conversion or uploading fails. The original track is never touched.
+struct Readable {
+    path: PathBuf,
+    mime: &'static str,
+    _temp: Option<tempfile::TempDir>,
+}
+
+/// Gemini accepts M4A directly. For CAF and other formats, decode to mono
+/// PCM first: afconvert can't transcode some stereo AAC sources to mono AAC
+/// in one step (ExtAudioFileSetProperty cclo, -66564).
+fn readable(path: &Path) -> io::Result<Readable> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     if let Some((_, mime)) = READABLE.iter().find(|(e, _)| *e == ext) {
-        return Ok((path.to_path_buf(), mime, false));
+        return Ok(Readable { path: path.to_path_buf(), mime, _temp: None });
     }
-    let copy = path.with_extension("gemini.aac");
-    let status = Command::new("/usr/bin/afconvert")
-        .args(["-f", "adts", "-d", "aac@16000", "-c", "1", "-b", "48000"])
-        .arg(path)
-        .arg(&copy)
-        .status()?;
-    if !status.success() {
-        let _ = fs::remove_file(&copy);
-        return Err(io::Error::other("couldn't convert the audio for Gemini"));
+    let temp = tempfile::Builder::new().prefix("yoru-gemini-").tempdir()?;
+    let pcm = temp.path().join("audio.wav");
+    let copy = temp.path().join("audio.aac");
+    convert(&["-f", "WAVE", "-d", "LEI16@16000", "-c", "1"], path, &pcm)?;
+    convert(&["-f", "adts", "-d", "aac@16000", "-c", "1", "-b", "48000"], &pcm, &copy)?;
+    fs::remove_file(&pcm)?;
+    Ok(Readable { path: copy, mime: "audio/aac", _temp: Some(temp) })
+}
+
+fn convert(options: &[&str], input: &Path, output: &Path) -> io::Result<()> {
+    let result = Command::new("/usr/bin/afconvert").args(options).arg(input).arg(output).output().map_err(|e| io::Error::other(format!("couldn't start audio conversion for Gemini: {e}")))?;
+    if result.status.success() {
+        return Ok(());
     }
-    Ok((copy, "audio/aac", true))
+    let detail: String = String::from_utf8_lossy(&result.stderr).trim().chars().take(300).collect();
+    Err(io::Error::other(if detail.is_empty() { format!("couldn't convert the audio for Gemini ({})", result.status) } else { format!("couldn't convert the audio for Gemini: {detail}") }))
 }
 
 /// Send `audio` with the Files API's resumable upload: its `file` record.
@@ -250,6 +261,76 @@ mod tests {
         let answer = json!([{"start": "00:01", "end": "00:04", "speaker": 1, "text": "Ciao."}, {"start": "x", "text": "?"}]);
         let segments = segments_of(&answer);
         assert_eq!(segments, json!([{"text": "Ciao.", "start_ms": 1000, "end_ms": 4000, "speaker": 1}]));
+    }
+
+    #[test]
+    fn m4a_is_sent_without_conversion_or_deleting_the_original() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("meeting.M4A");
+        fs::write(&path, b"original").unwrap();
+        let audio = readable(&path).unwrap();
+        assert_eq!(audio.path, path);
+        assert_eq!(audio.mime, "audio/m4a");
+        drop(audio);
+        assert_eq!(fs::read(path).unwrap(), b"original");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn converts_stereo_and_mono_caf_without_touching_the_original() {
+        let folder = tempfile::tempdir().unwrap();
+        // Speech only on the right: downmixing must not silently drop it.
+        for channels in [1u16, 2] {
+            let wav = folder.path().join(format!("{channels}-input.wav"));
+            let mut samples = Vec::new();
+            for i in 0..48_000 {
+                let right = ((i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 12_000.0) as i16;
+                if channels == 2 { samples.extend_from_slice(&0i16.to_le_bytes()); }
+                samples.extend_from_slice(&right.to_le_bytes());
+            }
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36u32 + samples.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&channels.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&(48_000u32 * channels as u32 * 2).to_le_bytes());
+            bytes.extend_from_slice(&(channels * 2).to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&samples);
+            fs::write(&wav, bytes).unwrap();
+            let input = folder.path().join(format!("{channels}.caf"));
+            convert(&["-f", "caff", "-d", "aac@48000", "-c", &channels.to_string(), "-b", "128000"], &wav, &input).unwrap();
+            let original = fs::read(&input).unwrap();
+            let audio = readable(&input).unwrap();
+            assert_eq!(audio.mime, "audio/aac");
+            assert!(fs::metadata(&audio.path).unwrap().len() > 0);
+            let decoded = folder.path().join(format!("{channels}-decoded.wav"));
+            convert(&["-f", "WAVE", "-d", "LEI16@16000", "-c", "1"], &audio.path, &decoded).unwrap();
+            let bytes = fs::read(decoded).unwrap();
+            let data = bytes.windows(4).position(|x| x == b"data").unwrap() + 8;
+            let peak = bytes[data..].chunks_exact(2).map(|v| i16::from_le_bytes([v[0], v[1]]).unsigned_abs()).max().unwrap();
+            assert!(peak > 100, "the audio was lost with {channels} channels");
+            let converted = audio.path.clone();
+            drop(audio);
+            assert!(!converted.exists());
+            assert_eq!(fs::read(input).unwrap(), original);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn conversion_error_keeps_the_original_and_reports_the_cause() {
+        let folder = tempfile::tempdir().unwrap();
+        let input = folder.path().join("broken.caf");
+        fs::write(&input, b"not audio").unwrap();
+        let error = match readable(&input) { Ok(_) => panic!("invalid audio was accepted"), Err(e) => e.to_string() };
+        assert!(error.contains("couldn't convert the audio for Gemini:"));
+        assert_eq!(fs::read(input).unwrap(), b"not audio");
     }
 }
 

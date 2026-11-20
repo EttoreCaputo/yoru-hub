@@ -83,6 +83,12 @@
 </script>
 
 {#if settings}
+  <section class="panel">
+    <div class="setting"><div class="what"><b>{t.simpleTranscript}</b><span>{settings.transcribe_by === "local" ? t.simpleLocal : settings.transcribe_by.startsWith("google:") ? t.simpleGoogle : t.unknownTranscriber}</span></div></div>
+    <div class="setting"><div class="what"><b>{t.simpleSummary}</b><span>{settings.summary_by === "local" ? t.simpleLocalSummary : settings.summary_by === "brain" ? t.simpleBrainSummary : settings.summary_by}</span></div></div>
+    {#if settings.transcribe_by.startsWith("google:") && !store.info?.google_key}<div class="setting"><p class="error-text">{t.noGoogleKey}</p></div>{/if}
+    {#if summarizers && ((settings.summary_by === "local" && !summarizers.local) || (settings.summary_by === "brain" && !summarizers.brain) || lost)}<div class="setting"><p class="error-text">{t.needSummarizer}</p></div>{/if}
+  </section>
   <h2 class="section-title">{t.stepNotice}</h2>
   <section class="panel">
     <div class="setting">
@@ -94,22 +100,6 @@
   <h2 class="section-title">{t.stepTranscript}</h2>
   <p class="dim note">{t.stepTranscriptNote}</p>
   <section class="panel">
-    <div class="setting">
-      <div class="what"><b>{t.transcribeBy}</b><span>{t.transcribeByHint}</span></div>
-      <div class="how">
-        <select value={settings.transcribe_by} onchange={(e) => save({ transcribe_by: e.currentTarget.value })} aria-label={t.transcribeBy}>
-          <option value="local">{t.parakeet}</option>
-          {#if gemini.length}
-            <optgroup label="Google">
-              {#each gemini as m (m.id)}<option value={m.id} title={m.note || m.model}>{m.note.split(":")[0] || m.model}</option>{/each}
-            </optgroup>
-          {:else if summarizers}
-            <option disabled>{t.noGoogleKey}</option>
-          {/if}
-          {#if !parakeet && summarizers && !gemini.some((m) => m.id === settings!.transcribe_by)}<option value={settings.transcribe_by}>{settings.transcribe_by} ({t.noKey})</option>{/if}
-        </select>
-      </div>
-    </div>
     {#if parakeet}
       <div class="setting">
         <div class="what"><b>{t.model}</b><span>{t.modelHint}</span></div>
@@ -157,21 +147,6 @@
   <h2 class="section-title">{t.stepSummary}</h2>
   <p class="dim note">{t.stepSummaryNote}</p>
   <section class="panel">
-    <div class="setting">
-      <div class="what"><b>{t.summaryBy}</b><span>{t.summaryByHint}</span></div>
-      <div class="how">
-        <select value={settings.summary_by} onchange={(e) => save({ summary_by: e.currentTarget.value })} aria-label={t.summaryBy}>
-          <option value="local">{t.thisComputer}</option>
-          <option value="brain" disabled={!summarizers?.brain}>{summarizers?.brain ? `${t.brain} (${summarizers.brain})` : t.noBrain}</option>
-          {#each providers as [provider, models] (provider)}
-            <optgroup label={provider}>
-              {#each models as m (m.id)}<option value={m.id} title={m.note || m.model}>{m.note.split(":")[0] || m.model}</option>{/each}
-            </optgroup>
-          {/each}
-          {#if lost}<option value={settings.summary_by}>{settings.summary_by} ({t.noKey})</option>{/if}
-        </select>
-      </div>
-    </div>
     {#if settings.summary_by === "local" && summarizers && !summarizers.local}
       <div class="setting">
         <div class="what"><b>{t.llm}</b><span>{t.llmHint}</span></div>
@@ -191,6 +166,33 @@
       <div class="how"><Toggle checked={settings.auto_summary} label={t.autoSummary} onchange={(on) => save({ auto_summary: on })} /></div>
     </div>
   </section>
+  <details class="more">
+    <summary class="section-title">{i18n.t.settings.advanced}</summary>
+    <p class="dim note">{t.modelsAdvanced}</p>
+    <section class="panel">
+      <div class="setting">
+        <div class="what"><b>{t.transcribeBy}</b><span>{t.transcribeByHint}</span></div>
+        <div class="how">
+          <select value={settings.transcribe_by} onchange={(e) => save({ transcribe_by: e.currentTarget.value })} aria-label={t.transcribeBy}>
+            <option value="local">{t.parakeet}</option>
+            {#if gemini.length}<optgroup label="Google">{#each gemini as m (m.id)}<option value={m.id} title={m.note || m.model}>{m.note.split(":")[0] || m.model}</option>{/each}</optgroup>{:else if summarizers}<option disabled>{t.noGoogleKey}</option>{/if}
+            {#if !parakeet && summarizers && !gemini.some((m) => m.id === settings!.transcribe_by)}<option value={settings.transcribe_by}>{settings.transcribe_by} ({t.noKey})</option>{/if}
+          </select>
+        </div>
+      </div>
+      <div class="setting">
+        <div class="what"><b>{t.summaryBy}</b><span>{t.summaryByHint}</span></div>
+        <div class="how">
+          <select value={settings.summary_by} onchange={(e) => save({ summary_by: e.currentTarget.value })} aria-label={t.summaryBy}>
+            <option value="local">{t.thisComputer}</option>
+            <option value="brain" disabled={!summarizers?.brain}>{summarizers?.brain ? `${t.brain} (${summarizers.brain})` : t.noBrain}</option>
+            {#each providers as [provider, models] (provider)}<optgroup label={provider}>{#each models as m (m.id)}<option value={m.id} title={m.note || m.model}>{m.note.split(":")[0] || m.model}</option>{/each}</optgroup>{/each}
+            {#if lost}<option value={settings.summary_by}>{settings.summary_by} ({t.noKey})</option>{/if}
+          </select>
+        </div>
+      </div>
+    </section>
+  </details>
 {/if}
 {#if error}<p class="error-text note">{error}</p>{/if}
 

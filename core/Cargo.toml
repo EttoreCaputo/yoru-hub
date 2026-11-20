@@ -39,6 +39,7 @@ tract-onnx = "0.23"
 rustfft = "6"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+tempfile = "3.27.0"
 # Gemini Live's TLS provider, chosen by hand: the app's connectors also bring
 # in aws-lc-rs, and with two providers rustls refuses to pick one.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
@@ -58,7 +59,6 @@ mach2 = "0.4.3"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 rmcp = { version = "3.5.0", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
 tokio = { version = "1.53.1", features = ["full"] }
-tempfile = "3.27.0"
 
 [features]
 # Download a private Python and install esptool into a virtualenv on first use,

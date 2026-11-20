@@ -276,10 +276,19 @@
     <div class="page-head">
       <div>
         <h1>{t.title}</h1>
-        <p class="lede">{t.lede}</p>
+        <p class="lede">{t.guidedLede}</p>
       </div>
     </div>
 
+    <section class="guided panel" aria-labelledby="guided-title">
+      <h2 id="guided-title">{t.guidedTitle}</h2>
+      <p class="dim small">{t.guidedCurrent(brain ? BRAIN_NAMES[brain] : t.noBrain, meetings?.settings.transcribe_by === "local" ? i18n.t.meetings.thisComputer : meetings?.settings.transcribe_by.startsWith("google:") ? "Google" : "—")}</p>
+      <Profiles onchange={readAll} />
+    </section>
+
+    <details class="more-settings">
+      <summary class="section-title">{t.otherSettings}</summary>
+      <p class="dim small">{t.otherSettingsHint}</p>
     <div class="stage" class:wired bind:this={stage} bind:clientWidth={stageW}>
       {#if wired && geo}
         <svg class="wires" viewBox="0 0 {geo.w} {geo.h}" aria-hidden="true">
@@ -354,14 +363,14 @@
         {/each}
       </div>
     </div>
+    </details>
   {/if}
 </div>
 
 <!-- A setup first (Profiles); its parts, the brain and its model, under "Custom". How hard Claude thinks and whether it searches the web are advanced. -->
 {#snippet brainPage()}
   {#if s}
-    <Profiles onchange={readAll} />
-    <details class="more">
+    <details class="more" open>
       <summary class="section-title">{t.customize}</summary>
       <p class="dim small">{t.customizeHint}</p>
       <section class="tiles" aria-label={t.provider}>
@@ -528,6 +537,9 @@
 {/snippet}
 
 <style>
+  .guided { display: grid; gap: 12px; padding: 20px; margin-bottom: 24px; }
+  .guided h2 { font: 600 var(--fs-head)/1.3 var(--display); }
+  .more-settings > summary { cursor: pointer; }
   /* The wiring. */
   .stage {
     position: relative;
