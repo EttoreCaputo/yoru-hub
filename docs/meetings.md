@@ -2,6 +2,8 @@
 
 Decided on 2026-10-29. Yoru records what you hear and say on the computer (a call, a video, a talk), transcribes it, tells who said what, and summarizes it. Everything runs on this computer by default; a provider is an option, never a requirement. The model is MacWhisper (Good Snooze, "Whisper Transcription" on the Mac App Store), studied from the installed app 15.8; Yoru adds what only an assistant with a body can do: it notices the call, asks on the board, turns action items into tasks, and answers questions about past meetings.
 
+Planned on 2026-11-21: the summary becomes a request to Yoru's one agent, which also feeds the memory from the whole transcript; the separate summary model goes. See [agent.md](agent.md).
+
 macOS only, like the rest of Yoru (see "Left" in [assistant.md](assistant.md)): the capture uses Core Audio's process taps and the models run on Core ML.
 
 ## What MacWhisper does, and how

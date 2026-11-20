@@ -6,7 +6,7 @@
 
 Yoru is a personal assistant that lives on your computer and has a body: [a round ESP32-S3 board](https://github.com/EttoreCaputo/Yoru) on the desk, a pearl sphere on true black. It connects to the services you use (mail, calendar, issues, documents…) through MCP connectors, keeps an eye on them, tells you when something is worth knowing, and answers when you ask, typed in the app or said to the board.
 
-This repository is its host program: the Rust core, the `yoru` command line and the desktop app. The plan and where it stands: [assistant.md](assistant.md); recording and summarizing meetings, planned: [meetings.md](meetings.md); the memory as a graph, with voices: [memory.md](memory.md); the app's code: [app.md](app.md).
+This repository is its host program: the Rust core, the `yoru` command line and the desktop app. The plan and where it stands: [assistant.md](assistant.md); recording and summarizing meetings, planned: [meetings.md](meetings.md); the memory as a graph, with voices: [memory.md](memory.md); one agent and a second brain, planned: [agent.md](agent.md); the app's code: [app.md](app.md).
 
 Status: early development (0.1.0).
 

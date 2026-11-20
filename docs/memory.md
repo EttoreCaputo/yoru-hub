@@ -2,6 +2,8 @@
 
 Decided and built on 2026-11-08 (where it stands: How it works, below). Yoru's memory was one Markdown file (`memory.md`) put whole into every prompt; it is now a graph of the people and things in your life, with facts that know when they were true, searched for what each answer needs, consolidated after each conversation and tidied once a night. Yoru also knows who is speaking by their voice.
 
+Planned on 2026-11-21: this graph gives way to a second brain of Markdown notes, kept by Yoru's one agent and fed from conversations and meetings' whole transcripts. See [agent.md](agent.md).
+
 ## What was wrong with the file
 
 - The whole file goes into every prompt, cut from its head past the brain's budget (12,000 characters for Claude, OpenAI and Gemini, 3,000 for Groq and Ollama, 1,200 for the board): the Notes go first.

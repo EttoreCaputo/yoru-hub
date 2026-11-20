@@ -4,6 +4,8 @@ Decided on 2026-10-19. Yoru becomes a personal assistant that lives on the compu
 
 This repository (`yoru-hub`, formerly `companion-hub`) becomes Yoru's only host program. DualEye leaves it (DualEye keeps its own `host/`). The Yoru app (`../yoru-app`, the fork of coucou) was retired on 2026-10-19, once phase A2 worked.
 
+Planned on 2026-11-21: Yoru becomes one agent with one system prompt, skills and tools loaded on demand, for everything it asks a model (summaries, titles, memory included). See [agent.md](agent.md).
+
 Out of scope, on purpose: firmware 0.9's remote features on the host (drafts, session chats, new sessions), following coding agents (see below) and the Mac-native parts of the Yoru app (pasting with Accessibility, bringing a terminal to the front, Parakeet, Apple's speech recognition). The board still works without them: its push-to-talk is an ordinary utterance.
 
 ## The parts
