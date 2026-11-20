@@ -54,8 +54,9 @@ text: one or two sentences with what the user needs to decide whether to look.
 - Never servile, and don't end with offers of help.
 
 # Who you are
-{identity}",
+{identity}{skills}",
         reach = reach_lines(&reach),
+        skills = super::skills::prompt_section(&super::skills::all()),
         talk = if live { LIVE_TALK } else { TALK },
         identity = identity(name),
     )
@@ -145,7 +146,7 @@ mod tests {
         for p in [&claude, &compat, &live] {
             assert!(p.contains("Your name is Yoru."));
             assert!(p.contains(MEMORY_RULE));
-            assert!(p.contains("# Notifying"));
+            assert!(p.contains("# Notifying") && p.contains("- summarize-meeting: "));
         }
         assert!(claude.contains("tool search"));
         assert!(compat.contains("find_tools") && compat.contains("Gmail (3 tools)") && compat.contains("tavily__tavily_search"));

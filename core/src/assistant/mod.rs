@@ -41,6 +41,7 @@ pub mod inbox;
 mod live;
 pub mod memory;
 pub mod prompt;
+pub mod skills;
 pub mod routines;
 pub mod select;
 pub mod tasks;
@@ -1131,6 +1132,7 @@ impl Assistant {
                 }
                 return result;
             }
+            "load_skill" => return skills::load(input),
             "get_inbox" => {
                 let items: Vec<Value> = self
                     .inbox
@@ -1348,6 +1350,7 @@ Says the fact's id, or the one that already says it.",
             "input_schema": {"type": "object", "properties": {}},
         }),
         Tasks::tool(),
+        skills::tool(),
     ];
     tools.extend(coding::Coding::tools());
     tools
