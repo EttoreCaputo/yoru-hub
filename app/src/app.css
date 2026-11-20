@@ -150,11 +150,17 @@ a {
   width: 10px;
   height: 10px;
 }
+/* Like the Mac's own: the thumb shows while the list scrolls (main.ts marks
+   it `data-scrolling`) or under the pointer, and goes away after. */
 ::-webkit-scrollbar-thumb {
-  background: var(--rim-2);
+  background: transparent;
   border-radius: 10px;
   border: 3px solid transparent;
   background-clip: padding-box;
+}
+[data-scrolling]::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--rim-2);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
