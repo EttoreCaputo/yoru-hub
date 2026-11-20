@@ -604,8 +604,8 @@
     white-space: nowrap;
   }
   .q-open select {
-    justify-self: start;
-    max-width: 100%;
+    justify-self: stretch;
+    width: 100%;
     min-width: 0;
   }
   .q-label {

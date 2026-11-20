@@ -57,6 +57,8 @@
   --r: 12px;
   --r-lg: 18px;
   --r-xl: 24px;
+  /* The chevron drawn in every select, in --haze. */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a19cba' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   color-scheme: dark;
 }
 
@@ -91,6 +93,7 @@
   --shadow: 0 30px 80px -24px rgba(26, 24, 44, 0.28);
   --field: #ffffff;
   --lift: 0 8px 24px -14px rgba(26, 24, 44, 0.14);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236a6878' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   color-scheme: light;
 }
 
@@ -395,10 +398,35 @@ select:focus {
 textarea {
   resize: vertical;
 }
+/* Selects drawn like the other fields, not as the Mac's pop-up button:
+   the same rim and fill, a chevron of the app's icons, a hover like the
+   buttons'. */
 select {
+  appearance: none;
+  -webkit-appearance: none;
   width: auto;
   min-width: 160px;
   max-width: 100%;
+  padding-right: 36px;
+  background-image: var(--chevron);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 160ms, background-color 160ms;
+}
+select:hover:not(:disabled) {
+  border-color: var(--pearl-deep);
+}
+select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+select option {
+  background: var(--ink-2);
+  color: var(--pearl);
 }
 label.stack select {
   width: 100%;
@@ -409,6 +437,11 @@ label.stack select {
   padding: 3px 10px;
   border-radius: var(--r-sm);
   font-size: var(--fs-meta);
+}
+select.compact {
+  padding-right: 28px;
+  background-position: right 8px center;
+  background-size: 14px;
 }
 /* Text edited in place: looks like the text until it's pointed at. */
 :is(input, textarea).bare {
