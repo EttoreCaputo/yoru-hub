@@ -82,11 +82,11 @@
       </button>
     {/if}
     <button class="icon-btn" class:on={store.page === "inbox"} aria-label={nav.inbox} title={nav.inbox} onclick={() => store.go("inbox")}>
-      <Icon name={PAGE_ICONS.inbox} />
+      <Icon name={PAGE_ICONS.inbox} filled={store.page === "inbox"} />
       {#if store.unread}<span class="count small">{store.unread > 99 ? "99+" : store.unread}</span>{/if}
     </button>
     <button class="icon-btn" class:on={inSettings} aria-label={nav.settings} title={nav.settings} onclick={() => store.go("settings")}>
-      <Icon name={PAGE_ICONS.settings} />
+      <Icon name={PAGE_ICONS.settings} filled={inSettings} />
       {#if settingsDot}<span class="dot {settingsDot}"></span>{/if}
     </button>
     <button class="icon-btn" aria-label={panelLabel} title={panelLabel} aria-pressed={look.activity} onclick={() => look.toggleActivity()}>
