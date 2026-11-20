@@ -25,6 +25,9 @@
       onchange?.();
     } catch (e) {
       error = why(e);
+      // The key is stored before the provider is checked, even if the
+      // check fails or the service is unreachable. Refresh its real state.
+      onchange?.();
     } finally {
       busy = false;
     }

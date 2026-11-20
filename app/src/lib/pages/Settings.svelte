@@ -22,7 +22,7 @@
   import MeetingSettingsPage from "../ui/MeetingSettings.svelte";
   import PocketSettingsPage from "../ui/PocketSettings.svelte";
   import Profiles from "../ui/Profiles.svelte";
-  import { currentProfile } from "../profiles";
+  import { transcriptionRequirement } from "../meeting-readiness";
   import { PAGE_ICONS, SETTINGS_PAGES } from "../icons/pages";
   import Icon from "../ui/Icon.svelte";
   import type { IconName } from "../icons/lucide";
@@ -131,7 +131,8 @@
   ];
   const PAGES: Part[] = WIRES.map((w) => w.id);
 
-  let open = $state<Part | null>(null);
+  let open = $state<Part | null>(store.settingsSection);
+  store.settingsSection = null;
   let hover = $state<Part | null>(null);
   const wire = (id: Part) => WIRES.find((w) => w.id === id)!;
 
@@ -141,7 +142,6 @@
     (e.currentTarget as HTMLElement).closest("main")?.scrollTo({ top: 0 });
   }
 
-  const profile = $derived(currentProfile(brain, voice));
   // What each card says now, and its dot.
   const brainModel = $derived(brain ? modelOf(brain) : "");
   const keyed = $derived(keys.filter((k) => k.source).length);
@@ -159,7 +159,7 @@
   const summary = $derived<Record<Part, { text: string; dot: string; warn?: boolean }>>({
     brain: !store.info?.ready
       ? { text: brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain, dot: "wrong", warn: true }
-      : { text: profile ? i18n.t.profiles.names[profile] : `${t.customShort} · ${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
+      : { text: `${brain ? BRAIN_NAMES[brain] : ""}${brainModel ? " · " + brainModel : ""}`, dot: store.info?.limited ? "wait" : "done" },
     voice: {
       text: !vs ? "—" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "),
       dot: vs?.enabled ? "done" : "",
@@ -173,8 +173,8 @@
         : { text: [store.boardState === "boot" ? i18n.t.link.boot : i18n.t.link.live, via, firmware].filter(Boolean).join(" · "), dot: store.update ? "wait" : store.boardState === "boot" ? "think" : "done" },
     meetings: !meetings
       ? { text: "—", dot: "" }
-      : !meetings.model
-        ? { text: t.meetingsNoModel, dot: "wait" }
+      : transcriptionRequirement(meetings.settings.transcribe_by, meetings.model, !!store.info?.google_key)
+        ? { text: meetings.settings.transcribe_by === "local" ? t.meetingsNoModel : i18n.t.meetings.noGoogleKey, dot: "wait" }
         : { text: `${t.meetingsWhen[meetings.settings.transcribe]} · ${t.meetingsBy(meetings.settings.summary_by.split(":").pop() ?? "")}`, dot: meetings.settings.detect ? "done" : "" },
     pocket: pocketSummary,
     about: { text: t.aboutSummary, dot: "" },
@@ -361,7 +361,7 @@
 {#snippet brainPage()}
   {#if s}
     <Profiles onchange={readAll} />
-    <details class="more" open={!profile}>
+    <details class="more">
       <summary class="section-title">{t.customize}</summary>
       <p class="dim small">{t.customizeHint}</p>
       <section class="tiles" aria-label={t.provider}>

@@ -755,11 +755,12 @@ async fn set_api_key(app: AppHandle, provider: String, key: Option<String>) -> R
         let state = app.state::<AppState>();
         let p = Provider::by_id(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
         cloud::set_api_key(p, key.as_deref()).map_err(|e| e.to_string())?;
+        // The key is already stored even if the provider check fails.
+        apply_voice(&state);
         // Something free of it: it only proves the key works.
         if key.as_deref().is_some_and(|k| !k.trim().is_empty()) {
             p.check_key().map_err(|e| e.to_string())?;
         }
-        apply_voice(&state);
         Ok(voice_info_of(&state))
     })
     .await

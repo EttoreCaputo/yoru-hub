@@ -106,6 +106,9 @@ pub fn settings() -> Settings {
 }
 
 pub fn set_settings(settings: &Settings) -> io::Result<()> {
+    if settings.transcribe_by != "local" && settings.gemini().is_none() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "unsupported meeting transcription service"));
+    }
     let file = settings_file()?;
     fs::create_dir_all(file.parent().unwrap())?;
     fs::write(file, serde_json::to_vec_pretty(settings)?)

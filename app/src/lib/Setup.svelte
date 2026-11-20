@@ -54,7 +54,10 @@
   /** The choices on the Mac, kept when leaving the permissions step. */
   async function saveMac() {
     await call("set_notch", { on: notch }).catch(() => {});
-    if (meetings) await call("set_meeting_settings", { settings: meetings }).catch(() => {});
+    if (meetings) {
+      const current = await call<MeetingSettings>("meeting_settings").catch(() => null);
+      if (current) await call("set_meeting_settings", { settings: { ...current, detect: meetings.detect } }).catch(() => {});
+    }
   }
 
   const next = async () => {

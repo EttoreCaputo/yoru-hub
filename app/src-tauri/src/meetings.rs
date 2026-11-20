@@ -199,10 +199,14 @@ fn queue(app: &AppHandle, id: String) {
         let settings = meetings::settings();
         board(&app, "transcribing", None);
         let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
-        let result = meetings::transcribe(&id, settings.gemini(), language, settings.speakers, |track, phase, fraction| {
-            let event = Event::Progress { id: id.clone(), track: track.into(), phase: phase.into(), fraction };
-            let _ = app.emit("meeting", &event);
-        });
+        let result = if settings.transcribe_by != "local" && settings.gemini().is_none() {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported meeting transcription service"))
+        } else {
+            meetings::transcribe(&id, settings.gemini(), language, settings.speakers, |track, phase, fraction| {
+                let event = Event::Progress { id: id.clone(), track: track.into(), phase: phase.into(), fraction };
+                let _ = app.emit("meeting", &event);
+            })
+        };
         state.queued.lock().unwrap().remove(&id);
         let event = match result {
             Ok(meeting) => {

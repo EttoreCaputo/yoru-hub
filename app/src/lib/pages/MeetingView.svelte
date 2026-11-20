@@ -12,6 +12,7 @@
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
+  import { transcriptionRequirement } from "../meeting-readiness";
   import type { ActionItem, Meeting, MeetingSettings, MeetingTrack, Speaker, Summarizers, Summary, Transcript, TranscriptLine } from "../types";
   import { clock } from "../ui/when";
 
@@ -81,6 +82,12 @@
       !!summarizers &&
       (settings.summary_by === "local" ? summarizers.local : settings.summary_by === "brain" ? !!summarizers.brain : summarizers.models.some((x) => x.id === settings!.summary_by)),
   );
+  const requirement = $derived(settings ? transcriptionRequirement(settings.transcribe_by, model, !!store.info?.google_key) : "loading");
+  const transcriptionHint = $derived(requirement === "local" ? t.needModel : requirement === "google" ? t.noGoogleKey : requirement === "unsupported" ? t.unknownTranscriber : t.loadingTranscriber);
+  function openMeetingSettings() {
+    store.settingsSection = "meetings";
+    store.go("settings");
+  }
 
   const STYLES = ["auto", "meeting", "call", "interview", "lecture", "note"] as const;
   /** The style shown in the picker: chosen here, else the summary's, else the settings'. */
@@ -93,6 +100,8 @@
       await call("meeting_summarize", { id, style: picked });
     } catch (e) {
       error = why(e);
+      const { [id]: _, ...rest } = store.summarizing;
+      store.summarizing = rest;
     }
   }
 
@@ -103,6 +112,8 @@
       await call("meeting_transcribe", { id });
     } catch (e) {
       error = why(e);
+      const { [id]: _, ...rest } = store.transcribing;
+      store.transcribing = rest;
     }
   }
 
@@ -296,11 +307,13 @@
               <button class="btn small" disabled={!canSummarize} onclick={summarize}>{t.summarizeAgain}</button>
             </span>
           </div>
+          {#if !canSummarize}<p class="dim small">{t.needSummarizer} <button class="btn link small" onclick={openMeetingSettings}>{t.openMeetingSettings}</button></p>{/if}
         {:else if summary === null}
           <div class="empty">
-            <p>{m.transcribed_at ? t.summarize : t.needModel}</p>
+            <p>{m.transcribed_at ? t.summarize : t.needTranscript}</p>
             {#if m.transcribed_at}
               <button class="btn primary" disabled={!canSummarize} title={canSummarize ? undefined : t.needSummarizer} onclick={summarize}>{t.summarize}</button>
+              {#if !canSummarize}<p class="dim small">{t.needSummarizer}</p><button class="btn" onclick={openMeetingSettings}>{t.openMeetingSettings}</button>{/if}
             {/if}
           </div>
         {/if}
@@ -311,7 +324,9 @@
           <p class="faint">{t.transcribing(percent(store.transcribing[id]))}</p>
         {:else if !m.transcribed_at}
           <div class="empty">
-            <button class="btn primary" disabled={!model} title={model ? undefined : t.needModel} onclick={transcribe}>{t.transcribe}</button>
+            <button class="btn primary" disabled={!!requirement || m.state === "recording"} onclick={transcribe}>{t.transcribe}</button>
+            {#if m.state === "recording"}<p class="dim small">{t.finishRecording}</p>{:else if requirement}<p class="dim small">{transcriptionHint}</p>{/if}
+            {#if requirement && requirement !== "loading"}<button class="btn" onclick={openMeetingSettings}>{t.openMeetingSettings}</button>{/if}
           </div>
         {:else}
           <div class="exports">
@@ -319,9 +334,10 @@
             <button class="btn small quiet" onclick={() => exportAs("markdown")}>Markdown</button>
             <button class="btn small quiet" onclick={() => exportAs("srt")}>SRT</button>
             <button class="btn small quiet" onclick={() => exportAs("text")}>{t.plainText}</button>
-            <button class="btn small quiet again" disabled={!model} onclick={transcribe}>{t.again}</button>
+            <button class="btn small quiet again" disabled={!!requirement || m.state === "recording"} title={requirement ? transcriptionHint : undefined} onclick={transcribe}>{t.again}</button>
             {#if exported}<span class="faint small saved">{t.exported(exported)}</span>{/if}
           </div>
+          {#if requirement && requirement !== "loading"}<p class="dim small">{transcriptionHint} <button class="btn link small" onclick={openMeetingSettings}>{t.openMeetingSettings}</button></p>{/if}
           {#if transcript?.lines.length}
             {#if transcript.speakers.length > 1}
               <div class="people">
