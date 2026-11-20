@@ -28,6 +28,5 @@ export APPLE_SIGNING_IDENTITY
 echo "yoru: signing with $APPLE_SIGNING_IDENTITY"
 
 cd "$root/app"
-# Not notarized, so the hardened runtime buys nothing, and its library
-# validation could stop the sidecars loading their libraries.
-npm run tauri build -- --config '{"bundle":{"macOS":{"hardenedRuntime":false}}}' "$@"
+# Keep the bundle's Hardened Runtime and permission entitlements.
+npm run tauri build -- "$@"
