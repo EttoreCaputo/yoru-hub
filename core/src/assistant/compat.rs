@@ -63,8 +63,9 @@ pub struct Budget {
 /// Groq's free plan and a model on this computer: every token counts.
 const TIGHT: Budget = Budget { max_tokens: 1024, json_max_tokens: 2048, loaded: 6, found: 8, memory_max: 3000, result_max: 6000, old_result_max: 600, description_max: 300, turns_kept: 4 };
 /// OpenAI and Google: a long context, paid by the token or with a free
-/// tier counted in requests rather than Groq's few tokens a minute.
-const ROOMY: Budget = Budget { max_tokens: 4096, json_max_tokens: 4096, loaded: 16, found: 12, memory_max: 12_000, result_max: 30_000, old_result_max: 2000, description_max: 1000, turns_kept: 10 };
+/// tier counted in requests rather than Groq's few tokens a minute. A JSON
+/// answer can be a long meeting's summary, with the thinking before it.
+const ROOMY: Budget = Budget { max_tokens: 4096, json_max_tokens: 16_384, loaded: 16, found: 12, memory_max: 12_000, result_max: 30_000, old_result_max: 2000, description_max: 1000, turns_kept: 10 };
 
 pub fn budget(brain: Brain) -> Budget {
     if matches!(brain, Brain::OpenAi | Brain::Google) { ROOMY } else { TIGHT }

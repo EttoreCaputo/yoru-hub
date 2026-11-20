@@ -11,6 +11,9 @@ use crate::stream::{self, OnDelta};
 
 /// An assistant's turn with tools takes longer than a voice command's.
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// A JSON answer is background work (a meeting's summary, facts to keep):
+/// a long transcript keeps a thinking model busy well past a minute.
+const JSON_TIMEOUT: Duration = Duration::from_secs(300);
 /// What a chat request may carry: llama.cpp's own settings (`top_k`,
 /// `chat_template_kwargs`) are refused by most services.
 const CHAT_FIELDS: &[&str] = &["messages", "tools", "tool_choice", "temperature", "top_p", "max_tokens", "seed", "stop", "response_format"];
@@ -19,6 +22,12 @@ fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     // Error statuses are read like any answer, for the provider's message.
     AGENT.get_or_init(|| ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(TIMEOUT)).build()))
+}
+
+/// [`agent`], for a JSON answer: [`JSON_TIMEOUT`].
+fn json_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(JSON_TIMEOUT)).build()))
 }
 
 fn url(client: &Client, path: &str) -> String {
@@ -189,7 +198,8 @@ fn sign_tool_calls(messages: &mut [Value]) {
 
 pub(super) fn chat(client: &Client, request: &Value) -> Result<Value, CloudError> {
     let body = serde_json::to_vec(&chat_request(client, request)).map_err(|e| CloudError::Invalid { provider: client.model.provider.name, why: e.to_string() })?;
-    let sent = authorized(client, agent().post(url(client, "/chat/completions"))).header("Content-Type", "application/json").send(&body[..]);
+    let agent = if request.get("response_format").is_some() { json_agent() } else { agent() };
+    let sent = authorized(client, agent.post(url(client, "/chat/completions"))).header("Content-Type", "application/json").send(&body[..]);
     let reply = json(client, &read(client, sent)?)?;
     reply.pointer("/choices/0/message").cloned().ok_or_else(|| CloudError::Invalid {
         provider: client.model.provider.name,

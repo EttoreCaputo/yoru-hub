@@ -69,6 +69,9 @@
     return [...by];
   });
   /** The chosen model when its provider's key is gone: still shown, as missing. */
+  /** Gemini's models, which can transcribe: Google's, with its key. */
+  const gemini = $derived((summarizers?.models ?? []).filter((m) => m.id.startsWith("google:")));
+  const parakeet = $derived(settings?.transcribe_by === "local");
   const lost = $derived(!!settings && !!summarizers && !["local", "brain"].includes(settings.summary_by) && !summarizers.models.some((m) => m.id === settings!.summary_by));
   const percent = (f: number) => Math.round(f * 100);
   const LANGUAGES = ["", "it", "en", "es", "fr", "de", "pt"];
@@ -92,17 +95,35 @@
   <p class="dim note">{t.stepTranscriptNote}</p>
   <section class="panel">
     <div class="setting">
-      <div class="what"><b>{t.model}</b><span>{t.modelHint}</span></div>
+      <div class="what"><b>{t.transcribeBy}</b><span>{t.transcribeByHint}</span></div>
       <div class="how">
-        {#if store.modelDownload !== null}
-          <span class="dim small">{t.downloading(percent(store.modelDownload))}</span>
-        {:else if model}
-          <span class="state"><span class="dot done"></span>{t.modelReady}</span>
-        {:else if model === false}
-          <button class="btn small primary" onclick={downloadModel}>{t.download}</button>
-        {/if}
+        <select value={settings.transcribe_by} onchange={(e) => save({ transcribe_by: e.currentTarget.value })} aria-label={t.transcribeBy}>
+          <option value="local">{t.parakeet}</option>
+          {#if gemini.length}
+            <optgroup label="Google">
+              {#each gemini as m (m.id)}<option value={m.id} title={m.note || m.model}>{m.note.split(":")[0] || m.model}</option>{/each}
+            </optgroup>
+          {:else if summarizers}
+            <option disabled>{t.noGoogleKey}</option>
+          {/if}
+          {#if !parakeet && summarizers && !gemini.some((m) => m.id === settings!.transcribe_by)}<option value={settings.transcribe_by}>{settings.transcribe_by} ({t.noKey})</option>{/if}
+        </select>
       </div>
     </div>
+    {#if parakeet}
+      <div class="setting">
+        <div class="what"><b>{t.model}</b><span>{t.modelHint}</span></div>
+        <div class="how">
+          {#if store.modelDownload !== null}
+            <span class="dim small">{t.downloading(percent(store.modelDownload))}</span>
+          {:else if model}
+            <span class="state"><span class="dot done"></span>{t.modelReady}</span>
+          {:else if model === false}
+            <button class="btn small primary" onclick={downloadModel}>{t.download}</button>
+          {/if}
+        </div>
+      </div>
+    {/if}
     <div class="setting stack">
       <div class="what"><b>{t.when}</b><span>{t.whenHint}</span></div>
       <div class="how chips" role="radiogroup" aria-label={t.when}>

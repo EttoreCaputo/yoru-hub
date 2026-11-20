@@ -7,6 +7,7 @@
 //! settings) is in [`transcript`].
 
 pub mod detect;
+mod gemini;
 mod summary;
 mod transcript;
 

@@ -34,7 +34,10 @@ pub enum When {
 #[serde(default)]
 pub struct Settings {
     pub transcribe: When,
-    /// `it`, `en`…, or empty: Parakeet finds the language.
+    /// What makes the transcript: `local` (Parakeet, on this computer) or
+    /// a Gemini model, `google:gemini-3.8-flash`, which hears the audio.
+    pub transcribe_by: String,
+    /// `it`, `en`…, or empty: the language is found.
     pub language: String,
     /// Tell who speaks within each track (the diarization model, about
     /// 190 MB, is fetched the first time).
@@ -90,7 +93,7 @@ impl From<SummaryBy> for String {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { transcribe: When::After, language: String::new(), speakers: true, summary_by: SummaryBy::Local, summary_style: "auto".into(), auto_summary: true, detect: false }
+        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, summary_by: SummaryBy::Local, summary_style: "auto".into(), auto_summary: true, detect: false }
     }
 }
 
@@ -132,7 +135,7 @@ impl Line {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transcript {
-    /// What made it: `parakeet-ultra`.
+    /// What made it: `parakeet-ultra`, or `gemini:<model>`.
     pub engine: String,
     /// The language asked for, if one was.
     #[serde(default)]
@@ -267,13 +270,32 @@ pub fn download_model(mut on_progress: impl FnMut(f64)) -> io::Result<()> {
     if done["present"] == true { Ok(()) } else { Err(io::Error::other("the model didn't download")) }
 }
 
-/// Transcribe every track of meeting `id` and keep the transcript.
+impl Settings {
+    /// The Gemini model the transcripts are made with, if one is chosen.
+    pub fn gemini(&self) -> Option<&str> {
+        self.transcribe_by.strip_prefix("google:").filter(|m| !m.is_empty())
+    }
+}
+
+/// Transcribe every track of meeting `id` and keep the transcript, with
+/// Parakeet or, when `gemini` names a model, with Google's Gemini.
 /// `on_progress` hears the track, the phase and how far it got.
 /// With `speakers`, who speaks is told apart within each track.
-pub fn transcribe(id: &str, language: Option<&str>, speakers: bool, mut on_progress: impl FnMut(&str, &str, f64)) -> io::Result<Meeting> {
+pub fn transcribe(id: &str, gemini: Option<&str>, language: Option<&str>, speakers: bool, mut on_progress: impl FnMut(&str, &str, f64)) -> io::Result<Meeting> {
     let mut meeting = get(id)?;
     if meeting.state == State::Recording {
         return Err(io::Error::new(io::ErrorKind::ResourceBusy, "still recording"));
+    }
+    if let Some(model) = gemini {
+        let folder = folder(id)?;
+        let mut lines = Vec::new();
+        for track in &meeting.tracks {
+            let Some(file) = track.file.as_deref() else { continue };
+            let path = folder.join(checked(file)?);
+            let segments = super::gemini::transcribe(&path, model, language, speakers, |phase, f| on_progress(&track.name, phase, f))?;
+            lines.extend(lines_of(track, &segments));
+        }
+        return keep(&mut meeting, &folder, format!("gemini:{model}"), language, lines);
     }
     let model = model_dir()?;
     let diarizer = speakers_dir()?;
@@ -293,12 +315,17 @@ pub fn transcribe(id: &str, language: Option<&str>, speakers: bool, mut on_progr
         let done = run(&args, |phase, f| on_progress(&track.name, phase, f))?;
         lines.extend(lines_of(track, &done["segments"]));
     }
+    keep(&mut meeting, &folder, ENGINE.into(), language, lines)
+}
+
+/// Write the transcript of `lines` and mark the meeting transcribed.
+fn keep(meeting: &mut Meeting, folder: &Path, engine: String, language: Option<&str>, mut lines: Vec<Line>) -> io::Result<Meeting> {
     lines.sort_by_key(|l| l.start_ms);
-    let transcript = Transcript { engine: ENGINE.into(), language: language.map(str::to_string), lines, speakers: Vec::new() };
+    let transcript = Transcript { engine, language: language.map(str::to_string), lines, speakers: Vec::new() };
     fs::write(folder.join("transcript.json"), serde_json::to_vec_pretty(&transcript)?)?;
     meeting.transcribed_at = Some(chrono::Local::now().timestamp_millis());
-    save(&folder, &meeting)?;
-    Ok(meeting)
+    save(folder, meeting)?;
+    Ok(meeting.clone())
 }
 
 fn lines_of(track: &Track, segments: &Value) -> Vec<Line> {
@@ -504,5 +531,8 @@ mod tests {
         assert_eq!(s.transcribe, When::After);
         assert!(s.language.is_empty());
         assert!(s.speakers);
+        assert_eq!((s.transcribe_by.as_str(), s.gemini()), ("local", None));
+        let s = Settings { transcribe_by: "google:gemini-3.8-flash".into(), ..s };
+        assert_eq!(s.gemini(), Some("gemini-3.8-flash"));
     }
 }

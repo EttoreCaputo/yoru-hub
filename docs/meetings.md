@@ -65,6 +65,7 @@ In the app (since 2026-11-19) the Meetings page only records and imports; the me
 
 - **Live or after**: a setting, and a choice when a recording starts. Live shows the text and speakers while it runs; after transcribes the whole file once it stops, with the best preset. Live can still run the full pass at the end to replace the live text (on by default).
 - **Language**: Italian or English, detected, or fixed in Settings.
+- **Gemini instead of Parakeet** (since 2026-11-20, `core/src/meetings/gemini.rs`): Settings > Meetings > Transcribe with lists Google's Gemini models when there is a Google key. Each track goes up through Gemini's Files API (an M4A or CAF becomes a 16 kHz mono AAC copy first, with `afconvert`; MP3, WAV, AIFF and FLAC go as they are), `generateContent` answers with segments as JSON (`start` and `end` as MM:SS, `speaker`, `text`, from a response schema), and the file is deleted from Google right after. Gemini hears the whole recording, so its segments are whole sentences and it tells the speakers apart itself, to the second; the audio goes to Google, as the setting's hint says. On a 77 s Pocket recording Gemini 3.8 Flash took 71 s, against Parakeet's second, with sentences Parakeet cut in half and fewer misheard words. A recording longer than one answer (about 65,000 tokens of transcript, a couple of hours) fails with that message; it isn't split yet. The transcript's `engine` is `gemini:<model>`.
 - **The page**: segments with speaker, time and text; click to play from there; edit the text; search; export as Markdown, SRT or plain text.
 
 ## Speakers
@@ -81,6 +82,7 @@ In the app (since 2026-11-19) the Meetings page only records and imports; the me
 - An item may start with its subject in bold (`**Pricing:** …`); the page shows the bold without rendering Markdown. Summaries made before the sections keep their `points`, shown as before.
 - Left from Pocket: custom templates (sections with their own instructions), rewriting a summary shorter or with more detail, mind maps, charts and timelines inside the summary.
 - A long meeting that doesn't fit the model's context is summarized in parts, then the parts together.
+- A cloud model has five minutes to answer and up to 16,384 tokens for OpenAI and Google (`JSON_TIMEOUT` in `core/src/cloud/openai.rs`, `ROOMY` in `core/src/assistant/compat.rs`); until 2026-11-20 it had the voice's 60 seconds and 4,096 tokens, and Gemini thinking over a long transcript failed with "timeout: global".
 - **Action items become work**: Yoru offers to create them as ClickUp tasks or calendar events through the connectors, on the Allow card like any acting tool.
 - A notification in the inbox and on the board when the summary is ready.
 

@@ -330,7 +330,7 @@ function pocketDownload(names: string[]) {
   next();
 }
 
-let meetingSettings: MeetingSettings = { transcribe: "after", language: "", speakers: true, summary_by: "local", summary_style: "auto", auto_summary: true, detect: false };
+let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, summary_by: "local", summary_style: "auto", auto_summary: true, detect: false };
 let meters: ReturnType<typeof setInterval> | undefined;
 
 function startMeeting(a: Record<string, any>): Meeting {
@@ -795,6 +795,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
       { id: "anthropic:claude-sonnet-5-5", provider: "Claude", model: "claude-sonnet-5-5", note: "Claude Sonnet 5.5: nearly as good, cheaper" },
       { id: "openai:gpt-6-luna", provider: "OpenAI", model: "gpt-6-luna", note: "GPT-6 Luna: fast and cheap" },
       { id: "groq:openai/gpt-oss-120b", provider: "Groq", model: "openai/gpt-oss-120b", note: "" },
+      { id: "google:gemini-3.8-flash", provider: "Google", model: "gemini-3.8-flash", note: "Gemini 3.8 Flash: smarter, good with tools" },
     ],
   }),
   meeting_summary: (a) =>

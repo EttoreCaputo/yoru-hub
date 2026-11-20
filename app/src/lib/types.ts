@@ -361,7 +361,7 @@ export type TranscriptLine = { track: string; kind: "mic" | "others"; start_ms: 
 export type Speaker = { key: string; number: number; name: string | null };
 export type Transcript = { engine: string; language: string | null; lines: TranscriptLine[]; speakers: Speaker[] };
 /** `meeting_settings`: when to transcribe, the language (empty: Parakeet finds it), whether to tell the speakers apart, and whether to notice meetings on their own (`detect`). */
-export type MeetingSettings = { transcribe: "after" | "live" | "manual"; language: string; speakers: boolean; /** `local`, `brain`, or a provider's model (`groq:openai/gpt-oss-120b`). */ summary_by: string; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; detect: boolean };
+export type MeetingSettings = { transcribe: "after" | "live" | "manual"; /** `local` (Parakeet) or a Gemini model (`google:gemini-3.8-flash`). */ transcribe_by: string; language: string; speakers: boolean; /** `local`, `brain`, or a provider's model (`groq:openai/gpt-oss-120b`). */ summary_by: string; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; detect: boolean };
 /** What can be recorded right now (`meeting_sources`). */
 export type MeetingSources = { apps: { id: string; name: string; playing: boolean; icon?: string }[]; microphones: { id: string; name: string; default: boolean }[] };
 /** What to record (`meeting_start`): everything played, or one app's sound, and microphones. */

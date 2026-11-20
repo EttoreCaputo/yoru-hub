@@ -181,7 +181,7 @@ fn after_recording(app: &AppHandle, id: String) {
     }
     let app = app.clone();
     thread::spawn(move || {
-        if meetings::model_present() {
+        if meetings::settings().gemini().is_some() || meetings::model_present() {
             queue(&app, id);
         }
     });
@@ -198,8 +198,8 @@ fn queue(app: &AppHandle, id: String) {
         let _turn = state.worker.lock().unwrap();
         let settings = meetings::settings();
         board(&app, "transcribing", None);
-        let language = Some(settings.language).filter(|l| !l.is_empty());
-        let result = meetings::transcribe(&id, language.as_deref(), settings.speakers, |track, phase, fraction| {
+        let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
+        let result = meetings::transcribe(&id, settings.gemini(), language, settings.speakers, |track, phase, fraction| {
             let event = Event::Progress { id: id.clone(), track: track.into(), phase: phase.into(), fraction };
             let _ = app.emit("meeting", &event);
         });
