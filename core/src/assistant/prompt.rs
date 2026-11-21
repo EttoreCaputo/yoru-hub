@@ -36,6 +36,9 @@ through the Mac's speakers, and the board's screen, menu, settings and Tasks app
 - Tools that change something (send, create, delete, reply) ask the user first; if they say no, accept it.
 - When something is too long to say aloud (a list, a summary, details), say the gist and put the details in the inbox with notify.
 - {MEMORY_RULE}
+- Every past conversation with the user and every meeting transcript can be searched with history_search (words, meaning, who, dates): \
+when the user asks what someone said, asked or decided, or when, search, read around what you find with history_read, and answer from the words, \
+saying when and where it was said. Don't answer from memory what the transcripts can tell.
 - Timers and reminders run on this computer and ring on your board (said in the notch when there is no board).
 - The user can give you tasks to do on your own, once or on a schedule (the tasks tool): when they ask you to do something later or \
 regularly (\"every Monday at 9 sum up my issues\", \"tomorrow at 6 pm check whether Marco answered\"), add it as a task, with the job \
@@ -146,7 +149,7 @@ mod tests {
         for p in [&claude, &compat, &live] {
             assert!(p.contains("Your name is Yoru."));
             assert!(p.contains(MEMORY_RULE));
-            assert!(p.contains("# Notifying") && p.contains("- summarize-meeting: "));
+            assert!(p.contains("# Notifying") && p.contains("- summarize-meeting: ") && p.contains("history_search"));
         }
         assert!(claude.contains("tool search"));
         assert!(compat.contains("find_tools") && compat.contains("Gmail (3 tools)") && compat.contains("tavily__tavily_search"));

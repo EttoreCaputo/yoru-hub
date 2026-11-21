@@ -34,6 +34,7 @@
 //! or old conversation starts over instead of being trimmed.
 
 pub mod app_tools;
+pub mod history;
 pub mod coding;
 pub mod compat;
 pub mod confirm;
@@ -341,6 +342,8 @@ pub struct Assistant {
     dir: Option<PathBuf>,
     settings: Mutex<Settings>,
     pub memory: Memory,
+    /// Every conversation and meeting transcript, searchable.
+    pub history: history::History,
     pub inbox: Arc<Inbox>,
     pub tasks: Arc<Tasks>,
     pub timers: Arc<Timers>,
@@ -398,6 +401,7 @@ impl Assistant {
         let inbox = Arc::new(Inbox::open(file("inbox.json")));
         Self {
             memory: Memory::open(dir.as_deref()),
+            history: history::History::open(dir.as_deref()),
             coding: coding::Coding::new(inbox.clone()),
             inbox,
             tasks: Arc::new(Tasks::open(file("tasks.json"))),
@@ -870,6 +874,11 @@ impl Assistant {
             }
         }
         self.memory.embed_missing();
+        let indexed = self.sync_history();
+        let embedded = self.history.embed_missing(512);
+        if indexed + embedded > 0 {
+            done.push(format!("history: {indexed} transcripts indexed, {embedded} turns embedded"));
+        }
         let today = Local::now().format("%Y-%m-%d").to_string();
         if (3..5).contains(&Local::now().hour()) && self.memory.meta("night").as_deref() != Some(today.as_str()) {
             self.memory.set_meta("night", &today);
@@ -1176,6 +1185,7 @@ impl Assistant {
                 return result;
             }
             "load_skill" => return skills::load(input),
+            "history_search" | "history_read" => return history::call(self, name, input).unwrap_or_else(|| Err("no such tool".into())),
             "get_inbox" => {
                 let items: Vec<Value> = self
                     .inbox
@@ -1401,6 +1411,7 @@ Says the fact's id, or the one that already says it.",
         Tasks::tool(),
         skills::tool(),
     ];
+    tools.extend(history::tools());
     tools.extend(coding::Coding::tools());
     tools
 }

@@ -137,12 +137,17 @@ pub fn tools() -> Vec<ExternalTool> {
     ]
 }
 
+/// What the user and the others are called without a name, as the app
+/// does: by the reply language.
+pub(super) fn names(a: &Assistant) -> (&'static str, &'static str) {
+    let language = a.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
+    if language.starts_with("it") { ("Tu", "Persona") } else { ("You", "Person") }
+}
+
 /// Run app tool `name` for `a`; `None` when it isn't one. `host` is asked
 /// before a setting changes.
 pub(super) fn call(a: &Assistant, host: &dyn Host, name: &str, input: &Value) -> Option<Result<String, String>> {
-    let language = a.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
-    // What the user and the others are called without a name, as the app does.
-    let (you, person) = if language.starts_with("it") { ("Tu", "Persona") } else { ("You", "Person") };
+    let (you, person) = names(a);
     let changed = |change: AppChange| {
         let _ = a.app_change(change);
     };
@@ -209,7 +214,7 @@ fn list(all: &[Meeting], query: &str, limit: usize) -> String {
     if lines.is_empty() { "no meetings".into() } else { lines.join("\n") }
 }
 
-fn read_meeting(id: &str, from: usize, part: usize, you: &str, person: &str) -> Result<String, String> {
+pub(super) fn read_meeting(id: &str, from: usize, part: usize, you: &str, person: &str) -> Result<String, String> {
     let meeting = meetings::get(id).map_err(|e| e.to_string())?;
     let transcript = meetings::transcript(id).map_err(|e| e.to_string())?.ok_or("it has no transcript yet")?;
     Ok(read(&meeting, &transcript, from, part, you, person))
@@ -294,7 +299,7 @@ fn conversations(all: &[super::ChatSummary], query: &str, limit: usize) -> Strin
 }
 
 /// A part of conversation `chat` from line `from`, and where to read on.
-fn read_chat(chat: &SavedChat, from: usize, part: usize) -> String {
+pub(super) fn read_chat(chat: &SavedChat, from: usize, part: usize) -> String {
     let mut out = String::new();
     if from == 0 && !chat.title.text.is_empty() {
         out.push_str(&format!("{}\n\n", chat.title.text));
@@ -381,7 +386,7 @@ fn todos(open_only: bool) -> String {
     if lines.is_empty() { "no to-dos".into() } else { lines.join("\n") }
 }
 
-fn when(ms: i64) -> String {
+pub(super) fn when(ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%a %-d %b %Y %H:%M").to_string()).unwrap_or_default()
 }
 

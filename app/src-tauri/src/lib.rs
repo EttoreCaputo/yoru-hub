@@ -524,6 +524,7 @@ fn apply_voice(state: &AppState) {
     });
     *state.embedder.lock().unwrap() = embedder.clone();
     state.assistant.memory.set_embedder(embedder.clone().map(|m| m as Arc<dyn yoru_core::assistant::memory::Embedder>));
+    state.assistant.history.set_embedder(embedder.clone().map(|m| m as Arc<dyn yoru_core::assistant::memory::Embedder>));
     let intent = embedder.filter(|_| intent_wanted);
     let turn = installed_path(&settings.turn_model, Kind::Turn).filter(|_| listens).map(|path| {
         current_turn.filter(|t| t.path() == path).unwrap_or_else(|| {
