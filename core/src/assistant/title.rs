@@ -1,6 +1,6 @@
 //! The conversation's title, shown above the chat in the app.
 //!
-//! The brain names the conversation after Yoru's first answer, and names it
+//! Yoru (the agent, asked on its own) names the conversation after his first answer, and names it
 //! again as it goes on (when the log has doubled since the last time), so the
 //! title follows what the conversation turned into. A title the user typed
 //! stays: Yoru doesn't rename it until the conversation is forgotten.
@@ -11,7 +11,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 
 use super::ChatLine;
 
@@ -102,7 +101,7 @@ impl Titles {
     }
 }
 
-/// What the brain is asked, in `language` (a name: "Italian").
+/// The job the agent is given, in `language` (a name: "Italian").
 pub fn prompt(log: &[ChatLine], language: &str, before: &str) -> String {
     let lines: Vec<String> = log
         .iter()
@@ -119,18 +118,11 @@ pub fn prompt(log: &[ChatLine], language: &str, before: &str) -> String {
     )
 }
 
-pub fn schema() -> Value {
-    json!({"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"], "additionalProperties": false})
-}
-
-/// The title in the brain's answer.
-pub fn parse(answer: &str) -> Option<String> {
-    serde_json::from_str::<Value>(answer).ok()?["title"].as_str().map(str::to_string)
-}
-
-/// One line, no quotes or final period, not too long.
+/// One line, no quotes, markdown or final period, not too long.
 fn tidy(text: &str) -> String {
-    let one = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+    let first = first.trim_matches(|c: char| matches!(c, '*' | '#' | '_' | '`')).trim();
+    let one = first.split_whitespace().collect::<Vec<_>>().join(" ");
     let trimmed = one.trim_matches(|c: char| matches!(c, '"' | '\'' | '“' | '”' | '«' | '»')).trim_end_matches('.').trim();
     trimmed.chars().take(MAX_CHARS).collect()
 }
@@ -147,7 +139,7 @@ mod tests {
         assert!(t.due(2, Some("yoru")));
         // One naming at a time.
         assert!(!t.due(2, Some("yoru")));
-        t.named(Some("\"Morning news.\""), 2, 2);
+        t.named(Some("**\"Morning news.\"**\n"), 2, 2);
         assert_eq!(t.get().text, "Morning news");
         assert!(!t.due(3, Some("yoru")));
         assert!(t.due(4, Some("yoru")));

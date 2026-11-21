@@ -635,20 +635,27 @@ impl Assistant {
     }
 
     /// Name the conversation, or name it again, if it is due ([`title`]):
-    /// the new title, or `None` when it kept its own. It asks the brain, so
-    /// it is called off the turn's thread.
+    /// the new title, or `None` when it kept its own. A request to the agent
+    /// (docs/agent.md, Everything is a request), so it is called off the
+    /// turn's thread.
     pub fn retitle(&self) -> Option<ChatTitle> {
         let log = self.chat();
         if !self.titles.due(log.len(), log.last().map(|l| l.from.as_str())) {
             return None;
         }
         let code = self.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
-        let prompt = title::prompt(&log, language_name(&code), &self.titles.get().text);
-        let answer = self.complete_json(&prompt, &title::schema());
+        let settings = self.settings();
+        let prompt = format!(
+            "{}\n\n<task>\n{}\n</task>\n\nThis is a job you do on your own, not a conversation: use no tools, answer with the title alone.",
+            context_line(Some(&code), Channel::Text),
+            title::prompt(&log, language_name(&code), &self.titles.get().text)
+        );
+        // Two steps: the title is the first answer, unless the model reaches for a tool.
+        let answer = self.run(&mut Vec::new(), &prompt, Some(&code), Channel::Text, &settings, "low", 2, &TaskHost, None);
         if let Err(e) = &answer {
             eprintln!("naming the conversation: {e}");
         }
-        let found = answer.ok().and_then(|a| title::parse(&a));
+        let found = answer.ok().map(|reply| reply.text);
         self.titles.named(found.as_deref(), log.len(), self.log.lock().unwrap().len())
     }
 
