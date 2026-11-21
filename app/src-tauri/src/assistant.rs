@@ -363,6 +363,13 @@ pub fn chat(state: State<AppState>) -> Vec<ChatLine> {
     state.assistant.chat()
 }
 
+/// How full the conversation's context was at its last turn, and with what.
+#[tauri::command]
+pub async fn context_use(app: AppHandle) -> Result<Option<yoru_core::assistant::context::ContextUse>, String> {
+    // Claude's window may be asked of the API the first time.
+    blocking(app, |state| Ok(state.assistant.context_use())).await
+}
+
 /// The conversation in use changed (another one opened, a new one, one
 /// deleted or renamed): the app hears its title and the list again.
 fn conversations_changed(app: &AppHandle, state: &AppState) {

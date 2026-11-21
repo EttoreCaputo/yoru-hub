@@ -416,3 +416,13 @@ export type PocketStatus = {
   error: string | null;
 };
 export type PocketEvent = { kind: "status"; status: PocketStatus } | { kind: "imported"; meeting: Meeting };
+
+/** How full the conversation's context was at its last turn (`context_use`). */
+export type ContextUse = {
+  model: string;
+  tokens: number;
+  window: number | null;
+  /** The provider's count, not an estimate. */
+  exact: boolean;
+  parts: { kind: "instructions" | "memory" | "tools" | "conversation" | "results"; tokens: number }[];
+};

@@ -117,6 +117,10 @@ pub fn messages_stream(key: &str, body: &Value, on: OnDelta) -> Result<Value, Cl
                 for (k, v) in event["delta"].as_object().into_iter().flatten() {
                     message[k] = v.clone();
                 }
+                // The final counts, over message_start's (the context's size).
+                for (k, v) in event["usage"].as_object().into_iter().flatten().filter(|(_, v)| !v.is_null()) {
+                    message["usage"][k] = v.clone();
+                }
             }
             "error" => return Err(event.pointer("/error/message").and_then(Value::as_str).unwrap_or("the stream broke off").to_string()),
             _ => {}
@@ -199,6 +203,22 @@ pub fn list_models(key: &str) -> Result<Vec<(String, String)>, CloudError> {
     let body = read(agent().get(format!("{}/v1/models?limit=1000", base_url())).header("x-api-key", key).header("anthropic-version", VERSION).call())?;
     let reply: Value = serde_json::from_slice(&body).map_err(|e| CloudError::Invalid { provider: ANTHROPIC.name, why: e.to_string() })?;
     Ok(reply["data"].as_array().into_iter().flatten().filter_map(|m| Some((m["id"].as_str()?.to_string(), m["display_name"].as_str().unwrap_or_default().to_string()))).collect())
+}
+
+/// `model`'s context window (`max_input_tokens`), asked once per model
+/// while the program runs; `None` when the API doesn't say.
+pub fn context_window(key: &str, model: &str) -> Option<u64> {
+    static WINDOWS: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<u64>>>> = OnceLock::new();
+    let windows = WINDOWS.get_or_init(Default::default);
+    if let Some(known) = windows.lock().unwrap().get(model) {
+        return *known;
+    }
+    let asked = read(agent().get(format!("{}/v1/models/{model}", base_url())).header("x-api-key", key).header("anthropic-version", VERSION).call());
+    // A failed request is asked again next turn; an answer without the field isn't.
+    let body = asked.ok()?;
+    let window = serde_json::from_slice::<Value>(&body).ok().and_then(|m| m["max_input_tokens"].as_u64());
+    windows.lock().unwrap().insert(model.to_string(), window);
+    window
 }
 
 fn retryable(e: &CloudError) -> bool {

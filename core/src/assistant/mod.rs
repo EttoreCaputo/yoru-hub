@@ -39,6 +39,7 @@ pub mod notes;
 pub mod coding;
 pub mod compat;
 pub mod confirm;
+pub mod context;
 #[cfg(test)]
 mod eval;
 pub mod external;
@@ -301,6 +302,8 @@ pub struct Reply {
     /// The model that answered (another one when a fallback took over).
     pub model: String,
     pub elapsed_ms: u64,
+    /// What the last request carried ([`context`]).
+    pub context: Option<context::ContextUse>,
 }
 
 /// One line of the conversation as the app shows it.
@@ -381,6 +384,8 @@ pub struct Assistant {
     heard: Mutex<Option<Heard>>,
     /// The voice of the request being answered, for `this_is`.
     speaking: Mutex<Option<Heard>>,
+    /// How full the conversation's context was at its last turn.
+    context: Mutex<Option<context::ContextUse>>,
 }
 
 impl std::fmt::Debug for Assistant {
@@ -426,6 +431,7 @@ impl Assistant {
             audio_tags: AtomicBool::new(false),
             heard: Mutex::default(),
             speaking: Mutex::default(),
+            context: Mutex::default(),
             dir,
         }
     }
@@ -615,6 +621,7 @@ impl Assistant {
     fn switch_to(&self, chat: Option<SavedChat>) {
         let chat = chat.unwrap_or_else(|| SavedChat { id: chats::new_id(), ..Default::default() });
         *self.conversation.lock().unwrap() = Conversation::default();
+        *self.context.lock().unwrap() = None;
         self.archive.set_current(chat.id);
         self.titles.replace(chat.title);
         *self.log.lock().unwrap() = chat.lines;
@@ -806,11 +813,29 @@ impl Assistant {
             conversation.brain = brain;
             conversation.last = Some(Instant::now());
         }
+        if let Ok(reply) = &result {
+            *self.context.lock().unwrap() = reply.context.clone();
+        }
         match &result {
             Ok(reply) => self.add_line("yoru", &reply.text, channel, reply.actions.clone()),
             Err(e) => self.add_line("yoru", &format!("(error: {e})"), channel, Vec::new()),
         }
         result
+    }
+
+    /// How full the conversation's context was at its last turn: `None`
+    /// before the first answer of a conversation (or one opened again).
+    /// Claude's window is asked of the Models API here, once per model,
+    /// rather than during a turn; the other brains' isn't known.
+    pub fn context_use(&self) -> Option<context::ContextUse> {
+        let mut used = self.context.lock().unwrap().clone()?;
+        if used.window.is_none()
+            && !used.model.contains(':')
+            && let Some(key) = anthropic::api_key()
+        {
+            used.window = anthropic::context_window(&key, &used.model);
+        }
+        Some(used)
     }
 
     /// One pass of the sleep: the old memory written out as notes once, and
@@ -979,7 +1004,16 @@ impl Assistant {
         }
         let mut actions = Vec::new();
         let mut model = settings.model.clone();
+        // The parts that stay the same each round, for the context's split.
+        let mut base = context::Sizes::default();
+        let texts: Vec<usize> = system.as_array().into_iter().flatten().map(|p| p["text"].as_str().map_or(0, str::len)).collect();
+        // The second block is the notes; the rest are instructions.
+        base.memory = texts[1];
+        base.instructions = texts.iter().sum::<usize>() - base.memory;
+        base.tools = tools.iter().filter(|t| t.get("defer_loading").is_none()).map(|t| t.to_string().len()).sum();
         for _ in 0..rounds {
+            let mut sizes = base;
+            sizes.claude_messages(messages);
             let body = json!({
                 "model": settings.model,
                 "max_tokens": MAX_TOKENS,
@@ -1014,6 +1048,8 @@ impl Assistant {
             if let Some(m) = response["model"].as_str() {
                 model = m.to_string();
             }
+            let used = sizes.measured(model.clone(), context::claude_tokens(&response["usage"]), None);
+            let context = Some(used);
             let content = response["content"].clone();
             messages.push(json!({"role": "assistant", "content": content}));
             match response["stop_reason"].as_str().unwrap_or_default() {
@@ -1024,11 +1060,11 @@ impl Assistant {
                 // A server tool (web search) paused a long turn: send it back to go on.
                 "pause_turn" => {}
                 "refusal" => {
-                    return Ok(Reply { text: "I can't help with that one.".into(), actions, model, elapsed_ms: started.elapsed().as_millis() as u64 });
+                    return Ok(Reply { text: "I can't help with that one.".into(), actions, model, elapsed_ms: started.elapsed().as_millis() as u64, context });
                 }
                 _ => {
                     let text = text_of(&content);
-                    return Ok(Reply { text, actions, model, elapsed_ms: started.elapsed().as_millis() as u64 });
+                    return Ok(Reply { text, actions, model, elapsed_ms: started.elapsed().as_millis() as u64, context });
                 }
             }
         }

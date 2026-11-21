@@ -675,6 +675,22 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     emit("conversations", conversations());
   },
   chat: () => chat,
+  context_use: () =>
+    chat.length
+      ? {
+          model: "claude-opus-5-5",
+          tokens: 18_420,
+          window: 1_000_000,
+          exact: true,
+          parts: [
+            { kind: "instructions", tokens: 6_210 },
+            { kind: "memory", tokens: 3_480 },
+            { kind: "tools", tokens: 5_930 },
+            { kind: "conversation", tokens: 1_640 },
+            { kind: "results", tokens: 1_160 },
+          ],
+        }
+      : null,
   forget_conversation: () => ((chat = []), switchTo(null)),
   chat_title: () => chatTitle,
   set_chat_title: (p) => {

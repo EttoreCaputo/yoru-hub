@@ -14,8 +14,10 @@
   import { i18n } from "../i18n/index.svelte";
   import { reactionFor } from "../mood";
   import { store } from "../store.svelte";
-  import type { SavedChat, VoiceState } from "../types";
+  import type { ContextUse, SavedChat, VoiceState } from "../types";
   import ChatLog from "../ui/ChatLog.svelte";
+  import ChatModel from "../ui/ChatModel.svelte";
+  import ContextMeter from "../ui/ContextMeter.svelte";
   import Composer from "../ui/Composer.svelte";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
   import Icon from "../ui/Icon.svelte";
@@ -61,6 +63,15 @@
     if (e.key === "Enter") rename((e.currentTarget as HTMLInputElement).value);
     else if (e.key === "Escape") renaming = false;
   }
+
+  // How full the context is, read again after each line of the one Yoru is in.
+  let context = $state<ContextUse | null>(null);
+  $effect(() => {
+    void store.chat.length;
+    void store.asking;
+    if (!live) return void (context = null);
+    call<ContextUse | null>("context_use").then((c) => (context = c), () => {});
+  });
 
   const badge = $derived(live && store.confirmations.length ? "wait" : null);
 
@@ -152,6 +163,8 @@
         </button>
       {/if}
       <div class="tools">
+        <ChatModel />
+        {#if live}<ContextMeter use={context} />{/if}
         <ConfirmButton icon="trash-2" label={t.forget} question={t.forgetConfirm} sure={t.forgetSure} onconfirm={() => call("delete_conversation", { id })} />
       </div>
     </header>

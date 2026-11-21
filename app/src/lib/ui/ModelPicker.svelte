@@ -37,6 +37,7 @@
     need = "chat",
     bare = false,
     custom = false,
+    compact = false,
     accept = () => true,
     label,
     onchange,
@@ -52,6 +53,8 @@
     bare?: boolean;
     /** A typed name can be used as it is. */
     custom?: boolean;
+    /** Small and without the field's fill: for a toolbar. */
+    compact?: boolean;
     /** Which of the services' models fit, beyond `need`. */
     accept?: (m: ListedModel) => boolean;
     label: string;
@@ -167,7 +170,7 @@
 
 <svelte:window onpointerdown={outside} onresize={() => open && place_()} onscrollcapture={(e) => open && !list?.parentElement?.contains(e.target as Node) && place_()} />
 
-<button bind:this={trigger} type="button" class="trigger" class:open aria-haspopup="listbox" aria-expanded={open} aria-label={label} title={current?.note || value} onclick={show}>
+<button bind:this={trigger} type="button" class="trigger" class:open class:compact aria-haspopup="listbox" aria-expanded={open} aria-label={label} title={current?.note || value} onclick={show}>
   <span class="now">{current?.label ?? value}</span>
 </button>
 
@@ -228,6 +231,22 @@
   .trigger:focus-visible {
     outline: none;
     border-color: var(--pearl-deep);
+  }
+  .trigger.compact {
+    min-width: 0;
+    min-height: 30px;
+    padding: 4px 30px 4px 10px;
+    border-color: transparent;
+    background-color: transparent;
+    background-position: right 8px center;
+    color: var(--haze);
+    font-size: var(--fs-meta);
+  }
+  .trigger.compact:hover,
+  .trigger.compact.open {
+    background-color: var(--hover);
+    border-color: transparent;
+    color: var(--pearl);
   }
   .now {
     min-width: 0;

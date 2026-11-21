@@ -225,10 +225,15 @@ pub(super) fn chat(client: &Client, request: &Value) -> Result<Value, CloudError
     let mut response = post_chat(client, agent, chat_request(client, request))?;
     let bytes = response.body_mut().with_config().limit(32 * 1024 * 1024).read_to_vec().map_err(|e| CloudError::Network { provider, why: e.to_string() })?;
     let reply = json(client, &bytes)?;
-    reply.pointer("/choices/0/message").cloned().ok_or_else(|| CloudError::Invalid {
+    let mut message = reply.pointer("/choices/0/message").cloned().ok_or_else(|| CloudError::Invalid {
         provider: client.model.provider.name,
         why: format!("no message in {}", reply.to_string().chars().take(300).collect::<String>()),
-    })
+    })?;
+    // The counts ride along, for the context's size; the assistant sends back only what it picks.
+    if reply["usage"].is_object() {
+        message["usage"] = reply["usage"].clone();
+    }
+    Ok(message)
 }
 
 /// [`chat`], streamed: the words go to `on` as the model writes them.

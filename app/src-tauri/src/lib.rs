@@ -1985,7 +1985,7 @@ pub fn run() {
             yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu, yoru_clips, yoru_play_clip, yoru_stop_clip,
             timers_info, timer_tool, dismiss_timers,
             set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze,
-            assistant::assistant_info, assistant::coding_active, assistant::coding_stop, assistant::ollama_models, assistant::provider_models, assistant::set_assistant_settings, assistant::set_do_not_disturb, assistant::ask, assistant::chat, assistant::forget_conversation, assistant::chat_title, assistant::set_chat_title, assistant::conversations, assistant::conversation, assistant::new_conversation, assistant::open_conversation, assistant::delete_conversation, assistant::rename_conversation,
+            assistant::assistant_info, assistant::coding_active, assistant::coding_stop, assistant::ollama_models, assistant::provider_models, assistant::set_assistant_settings, assistant::set_do_not_disturb, assistant::ask, assistant::chat, assistant::context_use, assistant::forget_conversation, assistant::chat_title, assistant::set_chat_title, assistant::conversations, assistant::conversation, assistant::new_conversation, assistant::open_conversation, assistant::delete_conversation, assistant::rename_conversation,
             assistant::inbox, assistant::inbox_read, assistant::inbox_read_all, assistant::inbox_dismiss, assistant::inbox_clear, assistant::open_notification, assistant::open_web,
             assistant::memory_graph, assistant::memory_forget_voice,
             assistant::notes_views, assistant::note_text, assistant::note_write, assistant::note_new, assistant::note_archive,

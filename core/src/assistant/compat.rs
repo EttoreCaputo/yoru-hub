@@ -29,6 +29,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
+use super::context;
 use super::written_calls;
 use super::{Action, Assistant, BOARD_ESSENTIALS, Brain, ExternalTool, Host, Reply, Settings, board_extras, own_tools, schema_or_empty, select, tool_json};
 use crate::cloud::{self, CloudError, Client};
@@ -300,11 +301,11 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     }
     let language = a.reply_language(None).map(|l| format!("\n\nAlways reply in {}.", super::language_name(&l))).unwrap_or_default();
     let tags = if a.audio_tags() { format!("\n\n{}", super::audio_tags_rule()) } else { String::new() };
-    let system = json!({"role": "system", "content": format!(
-        "{}\n\n{}{language}{tags}",
-        super::prompt::system(&settings.name, super::prompt::Reach::Compat { services: &services_line(&findable), web: searches_web(&external_tools) }),
-        a.notes.prompt(brain == Brain::Ollama, budget.memory_max)
-    )});
+    let instructions = super::prompt::system(&settings.name, super::prompt::Reach::Compat { services: &services_line(&findable), web: searches_web(&external_tools) });
+    let notes = a.notes.prompt(brain == Brain::Ollama, budget.memory_max);
+    let system = json!({"role": "system", "content": format!("{instructions}\n\n{notes}{language}{tags}")});
+    // The context's split ([`context`]): what stays the same each round.
+    let base = context::Sizes { instructions: instructions.len() + language.len() + tags.len(), memory: notes.len(), ..Default::default() };
     let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));
     let mut actions: Vec<Action> = Vec::new();
     // Each round's model and tool time, for voice-times.log.
@@ -320,6 +321,12 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
             all.push(json!({"role": "system", "content": reminder}));
         }
         let size = all.iter().map(|m| m.to_string().len()).sum::<usize>() + Value::from(tools.clone()).to_string().len();
+        let mut sizes = base;
+        sizes.tools = Value::from(tools.clone()).to_string().len();
+        sizes.compat_messages(messages);
+        if messages.last().is_some_and(|m| m["role"] == "tool") {
+            sizes.instructions += reminder.len();
+        }
         let names: Vec<String> = tools.iter().filter_map(|t| t.pointer("/function/name").and_then(Value::as_str)).map(str::to_string).collect();
         let body = request(brain, settings, json!({"messages": all, "tools": tools, "tool_choice": "auto"}), budget.max_tokens);
         let message = match on.as_deref_mut() {
@@ -344,6 +351,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
             None => chat(&client, &body, None)?,
         };
         times.push(format!("model {} ms ({} KB sent)", asked.elapsed().as_millis(), size / 1024));
+        let context = Some(sizes.measured(model.clone(), context::compat_tokens(&message["usage"]), None));
         let mut calls = message["tool_calls"].as_array().cloned().unwrap_or_default();
         let mut text = clean(message["content"].as_str().unwrap_or_default());
         if calls.is_empty()
@@ -363,7 +371,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
         if calls.is_empty() {
             log_times(&times);
             messages.push(json!({"role": "assistant", "content": text}));
-            return Ok(Reply { text, actions, model, elapsed_ms: started.elapsed().as_millis() as u64 });
+            return Ok(Reply { text, actions, model, elapsed_ms: started.elapsed().as_millis() as u64, context });
         }
         // Only what the API takes back: no reasoning, no extra fields.
         messages.push(json!({"role": "assistant", "content": if text.is_empty() { Value::Null } else { Value::String(text) }, "tool_calls": calls}));
