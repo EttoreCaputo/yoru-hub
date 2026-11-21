@@ -108,13 +108,30 @@ pub fn start(app: &AppHandle) {
         let app = app.clone();
         a.on_app_change(Arc::new(move |change| {
             use yoru_core::assistant::AppChange;
-            use yoru_core::meetings::Event;
+            use yoru_core::meetings::{Event, Request};
             let event = match change {
                 AppChange::Transcript(meeting) => Event::Transcribed { meeting },
                 AppChange::Summary(meeting, summary) => Event::Summarized { meeting, summary },
                 AppChange::Todos => Event::Todos,
+                AppChange::Settings => {
+                    let _ = app.emit("assistant", info_of(&app.state::<AppState>().assistant));
+                    return Ok(String::new());
+                }
+                // What the window bar's Record does: everything played, the default microphone.
+                AppChange::Record { title } => {
+                    let request = Request { system: true, app: None, microphones: vec!["default".into()], title };
+                    return crate::meetings::record(&app, request).map(|m| format!("recording started (meeting {})", m.id));
+                }
+                AppChange::StopRecording => {
+                    if !crate::meetings::recording(&app) {
+                        return Err("nothing is being recorded".into());
+                    }
+                    crate::meetings::stop(&app);
+                    return Ok("stopped: it is transcribed as the settings say".into());
+                }
             };
             let _ = app.emit("meeting", &event);
+            Ok(String::new())
         }));
     }
     {

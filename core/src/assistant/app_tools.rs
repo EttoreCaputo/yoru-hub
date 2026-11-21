@@ -1,17 +1,19 @@
 //! The app's own tools (docs/agent.md, The agent): what lets the agent read
-//! and change Yoru itself, starting with the meetings and their to-dos.
+//! and change Yoru itself: the meetings and their to-dos, the conversations,
+//! the settings, and recording.
 //! They are found like a service's tools (service "Yoru"), so a request that
 //! doesn't need them doesn't pay for them. What they change is told to the
-//! app ([`AppChange`]), so its pages show it at once.
+//! app ([`AppChange`]), so its pages show it at once; recording is done by
+//! the app, through the same listener.
 
 use serde_json::{Value, json};
 
-use super::ExternalTool;
+use super::{Assistant, ExternalTool, Host, SavedChat, Settings};
 use crate::meetings::{self, Meeting, Summary, Transcript};
 
 /// The service the app's tools are found under.
 pub const SERVICE: &str = "Yoru";
-/// Characters of transcript one `meeting_read` answers with.
+/// Characters of transcript, or of a conversation, one read answers with.
 const READ_CHARS: usize = 15_000;
 
 /// Something an app tool changed, for the app's pages.
@@ -23,6 +25,13 @@ pub enum AppChange {
     Summary(Meeting, Summary),
     /// A to-do was ticked off or opened again.
     Todos,
+    /// The assistant's settings changed.
+    Settings,
+    /// Start recording everything played and the default microphone; the
+    /// app answers with what it started.
+    Record { title: Option<String> },
+    /// Stop the recording that runs.
+    StopRecording,
 }
 
 /// The tools, shaped as a service's.
@@ -32,7 +41,7 @@ pub fn tools() -> Vec<ExternalTool> {
         service: SERVICE.into(),
         description: description.into(),
         input_schema,
-        acts: false,
+        acts: name == "settings_change",
     };
     let id = json!({"type": "string", "description": "The meeting's id, from meeting_list"});
     let list = json!({"type": "array", "items": {"type": "string"}});
@@ -96,17 +105,60 @@ pub fn tools() -> Vec<ExternalTool> {
                 "done": {"type": "boolean"},
             }, "required": ["meeting", "text", "done"]}),
         ),
+        tool(
+            "meeting_record",
+            "Start recording a meeting or a call: everything the computer plays and the default microphone. Only when the user asks for it.",
+            json!({"type": "object", "properties": {"title": {"type": "string", "description": "Its name, if the user gave one"}}}),
+        ),
+        tool("meeting_stop", "Stop the recording that runs; it is then transcribed as the settings say.", json!({"type": "object", "properties": {}})),
+        tool(
+            "conversation_list",
+            "The user's conversations with Yoru (typed and spoken), newest first: id, title or first words, when, how many lines. `query` keeps those whose title or first words have it.",
+            json!({"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "description": "At most this many (default 20)"}}}),
+        ),
+        tool(
+            "conversation_read",
+            "Read a past conversation, a part at a time: each line numbered, with when, who (the user or Yoru) and what was said. Call again with `from` to read on.",
+            json!({"type": "object", "properties": {"id": {"type": "string"}, "from": {"type": "integer", "description": "The line to start at (default 0)"}}, "required": ["id"]}),
+        ),
+        tool(
+            "settings_read",
+            "Yoru's settings: the assistant's (name, brain and models, effort, web search, the morning recap and quiet hours under routines) and the meetings' (when to transcribe, language, speakers, summary style, meeting detection).",
+            json!({"type": "object", "properties": {}}),
+        ),
+        tool(
+            "settings_change",
+            "Change some of Yoru's settings, as settings_read shows them: `area` assistant or meetings, `changes` only the fields that change (routines' fields inside \"routines\"). The user is asked to allow it first.",
+            json!({"type": "object", "properties": {
+                "area": {"type": "string", "enum": ["assistant", "meetings"]},
+                "changes": {"type": "object"},
+            }, "required": ["area", "changes"]}),
+        ),
     ]
 }
 
-/// Run app tool `name`; `None` when it isn't one. `you` and `person` are
-/// what the user and the others are called without a name ("Tu", "Persona").
-/// What changed goes to `changed`.
-pub fn call(name: &str, input: &Value, you: &str, person: &str, changed: &dyn Fn(AppChange)) -> Option<Result<String, String>> {
+/// Run app tool `name` for `a`; `None` when it isn't one. `host` is asked
+/// before a setting changes.
+pub(super) fn call(a: &Assistant, host: &dyn Host, name: &str, input: &Value) -> Option<Result<String, String>> {
+    let language = a.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
+    // What the user and the others are called without a name, as the app does.
+    let (you, person) = if language.starts_with("it") { ("Tu", "Persona") } else { ("You", "Person") };
+    let changed = |change: AppChange| {
+        let _ = a.app_change(change);
+    };
+    let changed: &dyn Fn(AppChange) = &changed;
     let id = || input["id"].as_str().unwrap_or_default().to_string();
+    let from = input["from"].as_u64().unwrap_or(0) as usize;
+    let limit = input["limit"].as_u64().unwrap_or(20) as usize;
     let result = match name {
-        "meeting_list" => Ok(list(&meetings::list(), input["query"].as_str().unwrap_or_default(), input["limit"].as_u64().unwrap_or(20) as usize)),
-        "meeting_read" => read_meeting(&id(), input["from"].as_u64().unwrap_or(0) as usize, you, person),
+        "meeting_record" => a.app_change(AppChange::Record { title: input["title"].as_str().filter(|t| !t.trim().is_empty()).map(String::from) }),
+        "meeting_stop" => a.app_change(AppChange::StopRecording),
+        "conversation_list" => Ok(conversations(&a.conversations().list, input["query"].as_str().unwrap_or_default(), limit)),
+        "conversation_read" => a.conversation(&id()).ok_or_else(|| "no conversation with that id".to_string()).map(|c| read_chat(&c, from)),
+        "settings_read" => Ok(json!({"assistant": a.settings(), "meetings": meetings::settings()}).to_string()),
+        "settings_change" => change_settings(a, host, input),
+        "meeting_list" => Ok(list(&meetings::list(), input["query"].as_str().unwrap_or_default(), limit)),
+        "meeting_read" => read_meeting(&id(), from, you, person),
         "meeting_summary" => match meetings::summary(&id()) {
             Ok(Some(s)) => Ok(serde_json::to_string(&s).unwrap_or_default()),
             Ok(None) => Ok("it has no summary yet".into()),
@@ -218,6 +270,96 @@ fn save_summary(id: &str, input: &Value, changed: &dyn Fn(AppChange)) -> Result<
     Ok("saved: it shows on the meeting's page".into())
 }
 
+/// The conversations as lines: newest first, `query` in the title or first words.
+fn conversations(all: &[super::ChatSummary], query: &str, limit: usize) -> String {
+    let query = query.trim().to_lowercase();
+    let lines: Vec<String> = all
+        .iter()
+        .filter(|c| query.is_empty() || c.title.to_lowercase().contains(&query) || c.preview.to_lowercase().contains(&query))
+        .take(limit.max(1))
+        .map(|c| {
+            let name = if c.title.is_empty() { format!("«{}»", c.preview) } else { c.title.clone() };
+            format!("{}: {name} ({}, {} lines)", c.id, when(c.updated as i64), c.lines)
+        })
+        .collect();
+    if lines.is_empty() { "no conversations".into() } else { lines.join("\n") }
+}
+
+/// A part of conversation `chat` from line `from`, and where to read on.
+fn read_chat(chat: &SavedChat, from: usize) -> String {
+    let mut out = String::new();
+    if from == 0 && !chat.title.text.is_empty() {
+        out.push_str(&format!("{}\n\n", chat.title.text));
+    }
+    let mut next = None;
+    for (i, line) in chat.lines.iter().enumerate().skip(from) {
+        let who = if line.from == "you" { "user" } else { "Yoru" };
+        let text = format!("#{i} [{}] {who}: {}\n", when(line.at as i64), line.text.trim());
+        if out.len() + text.len() > READ_CHARS && i > from {
+            next = Some(i);
+            break;
+        }
+        out.push_str(&text);
+    }
+    match next {
+        Some(i) => out.push_str(&format!("\n(more: call conversation_read with from {i})")),
+        None => out.push_str("\n(end of the conversation)"),
+    }
+    out
+}
+
+/// `changes` laid over `current`, objects merged field by field.
+fn merged(current: &Value, changes: &Value) -> Value {
+    match (current, changes) {
+        (Value::Object(a), Value::Object(b)) => {
+            let mut out = a.clone();
+            for (k, v) in b {
+                let next = out.get(k).map_or_else(|| v.clone(), |old| merged(old, v));
+                out.insert(k.clone(), next);
+            }
+            Value::Object(out)
+        }
+        (_, new) => new.clone(),
+    }
+}
+
+/// Change the settings of `area` by `changes`, once the user allows it.
+fn change_settings(a: &Assistant, host: &dyn Host, input: &Value) -> Result<String, String> {
+    let changes = &input["changes"];
+    if !changes.as_object().is_some_and(|c| !c.is_empty()) {
+        return Err("changes must name the fields that change".into());
+    }
+    let area = input["area"].as_str().unwrap_or_default();
+    let current = match area {
+        "assistant" => json!(a.settings()),
+        "meetings" => json!(meetings::settings()),
+        _ => return Err("area is assistant or meetings".into()),
+    };
+    let next = merged(&current, changes);
+    // Read back first, so a wrong field or value fails before anyone is asked.
+    let check = |e: serde_json::Error| format!("those settings can't be set: {e}");
+    let detail = serde_json::to_string_pretty(changes).unwrap_or_default();
+    let ask = || match host.confirm(&format!("{SERVICE}: change settings"), &super::summarize(changes), &detail) {
+        Some(true) => Ok(()),
+        Some(false) => Err("the user said no: don't do it, and don't ask again unless they do".to_string()),
+        None => Err("the user didn't answer in time: it wasn't done".to_string()),
+    };
+    match area {
+        "assistant" => {
+            let settings: Settings = serde_json::from_value(next).map_err(check)?;
+            ask()?;
+            a.set_settings(settings).map_err(|e| e.to_string())?;
+            let _ = a.app_change(AppChange::Settings);
+        }
+        _ => {
+            let settings: meetings::Settings = serde_json::from_value(next).map_err(check)?;
+            ask()?;
+            meetings::set_settings(&settings).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok("changed".into())
+}
+
 fn todos(open_only: bool) -> String {
     let lines: Vec<String> = meetings::todos()
         .into_iter()
@@ -285,9 +427,41 @@ mod tests {
 
     #[test]
     fn every_tool_is_called() {
+        let a = crate::assistant::tests::assistant();
+        let host = crate::assistant::tests::NoBoard;
         for t in tools() {
-            assert!(call(&t.name, &json!({}), "You", "Person", &|_| {}).is_some(), "{} isn't dispatched", t.name);
+            assert!(call(&a, &host, &t.name, &json!({})).is_some(), "{} isn't dispatched", t.name);
         }
-        assert!(call("notify", &json!({}), "You", "Person", &|_| {}).is_none());
+        assert!(call(&a, &host, "notify", &json!({})).is_none());
+    }
+
+    #[test]
+    fn settings_change_only_when_allowed_and_valid() {
+        let a = crate::assistant::tests::assistant();
+        // NoBoard says no to everything.
+        let no = call(&a, &crate::assistant::tests::NoBoard, "settings_change", &json!({"area": "assistant", "changes": {"web_search": false}})).unwrap();
+        assert!(no.unwrap_err().contains("said no") && a.settings().web_search);
+        let bad = call(&a, &crate::assistant::tests::NoBoard, "settings_change", &json!({"area": "assistant", "changes": {"web_search": "maybe"}})).unwrap();
+        assert!(bad.unwrap_err().contains("can't be set"));
+        struct Yes;
+        impl Host for Yes {
+            fn confirm(&self, _: &str, _: &str, _: &str) -> Option<bool> {
+                Some(true)
+            }
+        }
+        call(&a, &Yes, "settings_change", &json!({"area": "assistant", "changes": {"routines": {"recap_at": "07:45"}}})).unwrap().unwrap();
+        let s = a.settings();
+        assert_eq!((s.routines.recap_at.as_str(), s.routines.quiet), ("07:45", true), "the other fields stay");
+    }
+
+    #[test]
+    fn reads_a_conversation_in_parts() {
+        let line = |i: usize| super::super::ChatLine { from: if i % 2 == 0 { "you".into() } else { "yoru".into() }, text: format!("line {i} {}", "y".repeat(300)), channel: super::super::Channel::Text, actions: Vec::new(), at: 0 };
+        let chat = SavedChat { id: "c1".into(), title: Default::default(), lines: (0..100).map(line).collect() };
+        let first = read_chat(&chat, 0);
+        assert!(first.contains("] user: line 0") && first.contains("] Yoru: line 1") && first.contains("(more: call conversation_read with from "));
+        assert!(read_chat(&chat, 99).ends_with("(end of the conversation)"));
+        let text = conversations(&[chat.summary()], "line 0", 20);
+        assert!(text.starts_with("c1: «line 0"));
     }
 }

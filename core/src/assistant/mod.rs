@@ -313,6 +313,9 @@ pub struct ChatLine {
 }
 
 pub type ChatListener = Arc<dyn Fn(&[ChatLine]) + Send + Sync>;
+/// Hears what the app's tools change ([`AppChange`]) and answers, for what
+/// the app does itself (recording).
+pub type AppListener = Arc<dyn Fn(AppChange) -> Result<String, String> + Send + Sync>;
 
 /// Who said a request aloud ([`Assistant::hear`]).
 #[derive(Debug, Clone, Default)]
@@ -356,7 +359,7 @@ pub struct Assistant {
     archive: chats::Archive,
     listeners: Mutex<Vec<ChatListener>>,
     /// Told what the app's tools changed ([`app_tools`]), for the app's pages.
-    app_changes: Mutex<Option<Arc<dyn Fn(AppChange) + Send + Sync>>>,
+    app_changes: Mutex<Option<AppListener>>,
     /// "Do not disturb" until then (Unix ms), on top of the quiet hours; not
     /// kept across launches, on purpose.
     quiet_until: Mutex<Option<u64>>,
@@ -495,9 +498,18 @@ impl Assistant {
         }
     }
 
-    /// Tell `listener` what the app's tools change.
-    pub fn on_app_change(&self, listener: Arc<dyn Fn(AppChange) + Send + Sync>) {
+    /// Tell `listener` what the app's tools change, and have it record.
+    pub fn on_app_change(&self, listener: AppListener) {
         *self.app_changes.lock().unwrap() = Some(listener);
+    }
+
+    /// Tell the app of `change`: what it answers, or that there is no app.
+    fn app_change(&self, change: AppChange) -> Result<String, String> {
+        let listener = self.app_changes.lock().unwrap().clone();
+        match listener {
+            Some(listener) => listener(change),
+            None => Err("the app isn't running".into()),
+        }
     }
 
     pub fn on_chat(&self, listener: ChatListener) {
@@ -1156,14 +1168,7 @@ impl Assistant {
             _ => {}
         }
         let language = self.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
-        let (you, person) = if language.starts_with("it") { ("Tu", "Persona") } else { ("You", "Person") };
-        let listener = self.app_changes.lock().unwrap().clone();
-        let changed = |change: AppChange| {
-            if let Some(listener) = &listener {
-                listener(change);
-            }
-        };
-        if let Some(result) = app_tools::call(name, input, you, person, &changed) {
+        if let Some(result) = app_tools::call(self, host, name, input) {
             if result.is_ok() {
                 self.show_done(app_tools::SERVICE, "note");
             }

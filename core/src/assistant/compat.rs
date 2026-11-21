@@ -566,7 +566,7 @@ mod tests {
         // The services are named; none of their tools is loaded yet.
         assert!(names.contains(&"notify") && names.contains(&"find_tools") && names.contains(&"load_tools"));
         assert!(!names.contains(&"gmail__send") && !names.contains(&"web_search"));
-        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach the user's services: Gmail (2 tools), Yoru (7 tools)."));
+        assert!(first["messages"][0]["content"].as_str().unwrap().contains(&format!("you can reach the user's services: Gmail (2 tools), Yoru ({} tools).", super::super::app_tools::tools().len())));
         // The second carries the calls back without the reasoning, then the results.
         let second = requests.recv().unwrap();
         let back = &second["messages"][2];
@@ -712,7 +712,7 @@ mod tests {
         let first = requests.recv().unwrap();
         assert!(names(&first).contains(&"react".to_string()) && names(&first).contains(&"get_state".to_string()));
         assert!(!names(&first).contains(&"set_volume".to_string()) && names(&first).contains(&"find_tools".to_string()));
-        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach the user's services: Yoru's board (1 tool), Yoru (7 tools)."));
+        assert!(first["messages"][0]["content"].as_str().unwrap().contains(&format!("you can reach the user's services: Yoru's board (1 tool), Yoru ({} tools).", super::super::app_tools::tools().len())));
         assert!(names(&requests.recv().unwrap()).contains(&"set_volume".to_string()));
     }
 
