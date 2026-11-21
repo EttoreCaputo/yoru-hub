@@ -140,7 +140,10 @@
       </div>
       <p class="eyebrow">{greeting}</p>
       <h1 class="said">{line}</h1>
-      {#if !ready}<button class="btn primary" onclick={() => store.go("settings")}>{t.noKeyAction}</button>{/if}
+      {#if !ready}<button class="btn primary" onclick={() => store.go("settings")}>{t.noKeyAction}</button>{:else}
+        <!-- The model, picked before the first message too. -->
+        <div class="model"><ChatModel /></div>
+      {/if}
     </div>
   {:else}
     <header class="head">
@@ -226,6 +229,10 @@
     align-items: center;
     padding: 48px 36px 8px;
     text-align: center;
+  }
+  .model {
+    margin-top: 10px;
+    text-align: left;
   }
   .eyebrow {
     margin-top: 4px;
