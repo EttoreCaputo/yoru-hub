@@ -1,8 +1,8 @@
 <!--
   Yoru's voice: first whether he listens and whether he answers aloud, his
-  voice in each language and how a conversation goes (follow-ups, the
-  board's volume and chime). Which service listens and which speaks, and the
-  models that transcribe and judge a turn, show only with Settings' advanced
+  voice in each language and how a conversation goes (follow-ups). The
+  board's own (wake word, volume, chime) are on its page. Which service
+  listens and which speaks, and the models that transcribe and judge a turn, show only with Settings' advanced
   switch; the services' keys are in Settings' AI services page. Local models
   need a download, which shows its progress while it runs.
 -->
@@ -11,26 +11,17 @@
   import { i18n } from "../i18n/index.svelte";
   import { look } from "../look.svelte";
   import { store } from "../store.svelte";
-  import type { AccountVoice, BoardVoice, ModelInfo, SidecarState, VoiceInfo, VoiceSettings, YoruSettings } from "../types";
+  import type { AccountVoice, ModelInfo, SidecarState, VoiceInfo, VoiceSettings } from "../types";
   import ModelPicker, { type Choice } from "./ModelPicker.svelte";
   import Toggle from "./Toggle.svelte";
 
   const t = $derived(i18n.t.board);
   let info = $state<VoiceInfo | null>(null);
-  let board = $state<BoardVoice | null>(null);
   let error = $state("");
 
   const read = async () => (info = await call<VoiceInfo>("voice_info").catch(() => info));
   $effect(() => {
     void read();
-  });
-  // The wake word is one of the board's own settings.
-  let wakeWord = $state<string | null>(null);
-  $effect(() => {
-    if (store.link !== "connected") return;
-    void store.boardId;
-    call<BoardVoice>("board_voice", { board: null }).then((b) => (board = b), () => {});
-    call<YoruSettings>("yoru_settings", { board: null }).then((s) => (wakeWord = typeof s?.wake_word === "string" ? s.wake_word : null), () => {});
   });
   // While something downloads or installs, follow it.
   $effect(() => {
@@ -163,7 +154,7 @@
     <!-- The everyday choices: whether he listens, whether he answers aloud, and with which voice. -->
     <section class="panel">
       <div class="setting">
-        <div class="what"><b>{t.listensToggle}</b><span>{s.enabled ? (wakeWord ? t.wakeWord(wakeWord) : t.listenHint) : t.listensOffHint}</span></div>
+        <div class="what"><b>{t.listensToggle}</b><span>{s.enabled ? t.listenHint : t.listensOffHint}</span></div>
         <div class="how"><Toggle checked={s.enabled} label={t.listensToggle} onchange={(on) => hearWith(on ? (serviceOf(s.model) ?? LOCAL) : null)} /></div>
       </div>
       {#if s.enabled && sttModel && missing(sttModel)}
@@ -204,32 +195,16 @@
     </section>
   {/if}
 
-  {#if s.speak || board?.volume != null || board?.wake_sound != null}
+  {#if s.speak}
     <h2 class="section-title">{t.conversation}</h2>
     <section class="panel">
-      {#if s.speak}
-        <div class="setting">
-          <div class="what"><b>{t.followUp}</b></div>
-          <div class="how"><Toggle checked={s.follow_up} label={t.followUp} onchange={(on) => set({ follow_up: on })} /></div>
-        </div>
-      {/if}
-      {#if board && board.volume !== null}
-        <div class="setting">
-          <div class="what"><b>{t.volume}</b></div>
-          <div class="how">
-            <input type="range" min="0" max="100" value={board.volume} onchange={(e) => call("set_board_volume", { board: null, percent: Number(e.currentTarget.value) })} aria-label={t.volume} />
-            <button class="btn quiet small" disabled={info.tts !== "ready"} onclick={() => act("test_voice", { board: null, language: i18n.lang })}>{t.test}</button>
-          </div>
-        </div>
-      {/if}
-      {#if board && board.wake_sound !== null}
-        <div class="setting">
-          <div class="what"><b>{t.wakeSound}</b></div>
-          <div class="how"><Toggle checked={board.wake_sound} label={t.wakeSound} onchange={(on) => ((board!.wake_sound = on), call("set_board_wake_sound", { board: null, on }))} /></div>
-        </div>
-      {/if}
+      <div class="setting">
+        <div class="what"><b>{t.followUp}</b></div>
+        <div class="how"><Toggle checked={s.follow_up} label={t.followUp} onchange={(on) => set({ follow_up: on })} /></div>
+      </div>
     </section>
   {/if}
+  <p class="dim note">{t.onTheBoard}</p>
 
   <!-- Which service listens and which speaks, and the models behind a turn: Settings' advanced switch. -->
   {#if look.advanced}
@@ -313,8 +288,5 @@
   }
   select {
     max-width: 340px;
-  }
-  input[type="range"] {
-    width: 160px;
   }
 </style>

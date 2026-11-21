@@ -967,6 +967,9 @@ fn board() -> Board {
 struct BoardVoice {
     volume: Option<u8>,
     wake_sound: Option<bool>,
+    /// The wake word it listens for (an id of `wake_words`).
+    wake_word: Option<String>,
+    wake_words: Vec<String>,
 }
 
 #[tauri::command]
@@ -978,6 +981,12 @@ async fn board_voice(state: State<'_, AppState>, board: Option<String>) -> Resul
         Ok(BoardVoice {
             volume: s.pointer("/audio/volume").and_then(|v| v.as_u64()).map(|v| v as u8),
             wake_sound: s.pointer("/voice/wake_sound").and_then(|v| v.as_bool()),
+            wake_word: s.pointer("/voice/wake_word_id").and_then(|v| v.as_str()).map(str::to_string),
+            wake_words: s
+                .pointer("/voice/wake_words")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
         })
     })
     .await
@@ -1004,6 +1013,12 @@ async fn set_board_volume(state: State<'_, AppState>, board: Option<String>, per
 #[tauri::command]
 async fn set_board_wake_sound(state: State<'_, AppState>, board: Option<String>, on: bool) -> Result<(), String> {
     call_board_on(state, board, "set_mic", serde_json::json!({"wake_sound": on})).await
+}
+
+/// The word the board wakes on: one of `BoardVoice::wake_words`.
+#[tauri::command]
+async fn set_board_wake_word(state: State<'_, AppState>, board: Option<String>, word: String) -> Result<(), String> {
+    call_board_on(state, board, "set_wake_word", serde_json::json!({"word": word})).await
 }
 
 /// One of the board's own sounds, now.
@@ -1981,7 +1996,7 @@ pub fn run() {
             meetings::meeting_settings, meetings::set_meeting_settings, meetings::meeting_model, meetings::meeting_model_download, meetings::meeting_import,
             pocket::pocket_status, pocket::pocket_sync, pocket::pocket_download, pocket::pocket_delete, pocket::pocket_pair, pocket::pocket_forget,
             pocket::pocket_settings, pocket::set_pocket_settings,
-            board_voice, set_board_volume, set_board_wake_sound, play_board_sound, test_voice,
+            board_voice, set_board_volume, set_board_wake_sound, set_board_wake_word, play_board_sound, test_voice,
             yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu, yoru_clips, yoru_play_clip, yoru_stop_clip,
             timers_info, timer_tool, dismiss_timers,
             set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze,

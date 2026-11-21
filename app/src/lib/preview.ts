@@ -485,12 +485,17 @@ const timers: TimersInfo = {
   can_speak: true,
 };
 
+let wakeWord = "heyyoru";
+
 const yoruSettings: YoruSettings = {
   wake_word: "Hi Yoru",
   brightness: { value: 80, min: 10, max: 100 },
   night_bright: { value: 20, min: 0, max: 100 },
   auto_dim: { value: 1, min: 0, max: 1 },
   volume: { value: 60, min: 0, max: 100 },
+  wake_on: { value: 1, min: 0, max: 1 },
+  wake_sound: { value: 1, min: 0, max: 1 },
+  yoru_sounds: { value: 1, min: 0, max: 1 },
   touch_react: { value: 1, min: 0, max: 1 },
   motion_react: { value: 1, min: 0, max: 1 },
   sleepy_after: { value: 10, min: 1, max: 60 },
@@ -962,7 +967,10 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     if (offline) throw new Error("Yoru's board isn't connected");
     await sleep(1200);
   },
-  board_voice: () => ({ volume: 60, wake_sound: true }),
+  board_voice: () => ({ volume: 60, wake_sound: true, wake_word: wakeWord, wake_words: ["heyyoru", "alexa", "hiesp"] }),
+  set_board_wake_word: (a) => {
+    wakeWord = a.word;
+  },
   yoru_settings: () => yoruSettings,
   yoru_set_setting: (a) => {
     const s = yoruSettings[a.name];

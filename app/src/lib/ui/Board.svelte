@@ -1,7 +1,8 @@
 <!--
   The board on the desk, as a page of Settings: its firmware (and updating
-  it), its WiFi, and the settings it keeps itself; how it's reached, and its
-  log, are advanced. Only the hardware is here: Yoru's voice and notch have
+  it), its WiFi, and the settings it keeps itself: first what it hears and how
+  it sounds (the wake word, volume, chimes), then how it behaves; how it's
+  reached, and its log, are advanced. Only the hardware is here: Yoru's voice and notch have
   their own pages. With several boards, first the list of them
   (name, how it's reached, firmware, the main one): the rest of the page is
   about the one picked there.
@@ -13,7 +14,7 @@
   import { i18n } from "../i18n/index.svelte";
   import { look } from "../look.svelte";
   import { store } from "../store.svelte";
-  import type { DeviceInfo, PortInfo, Transport, WifiInfo, WifiNetwork, YoruSetting, YoruSettings } from "../types";
+  import type { BoardVoice, DeviceInfo, PortInfo, Transport, WifiInfo, WifiNetwork, YoruSetting, YoruSettings } from "../types";
   import { boldParts } from "../updates";
   import Toggle from "./Toggle.svelte";
 
@@ -96,6 +97,40 @@
     );
   });
   const rows = $derived(table ? Object.entries(table).filter((e): e is [string, YoruSetting] => typeof e[1] === "object" && e[1] !== null && "value" in e[1]) : []);
+  /** The settings about hearing and sound, shown with the wake word. */
+  const HEARING = ["wake_on", "wake_sound", "volume", "yoru_sounds", "mic_muted"];
+  const hearing = $derived(HEARING.flatMap((n) => rows.filter(([name]) => name === n)));
+  const behaviour = $derived(rows.filter(([name]) => !HEARING.includes(name)));
+
+  // The wake word, which the settings table doesn't give.
+  let voice = $state<BoardVoice | null>(null);
+  $effect(() => {
+    if (!live) return;
+    void store.boardId;
+    call<BoardVoice>("board_voice", { board: null }).then((v) => (voice = v), () => {});
+  });
+  async function setWakeWord(word: string) {
+    const before = voice?.wake_word ?? null;
+    if (voice) voice.wake_word = word;
+    try {
+      await call("set_board_wake_word", { board: null, word });
+    } catch (e) {
+      if (voice) voice.wake_word = before;
+      tableError = why(e);
+    }
+  }
+  let testing = $state(false);
+  async function testVoice() {
+    testing = true;
+    tableError = "";
+    try {
+      await call("test_voice", { board: null, language: i18n.lang });
+    } catch (e) {
+      tableError = why(e);
+    } finally {
+      testing = false;
+    }
+  }
   async function setSetting(name: string, value: number) {
     const s = table?.[name];
     if (typeof s !== "object") return;
@@ -231,22 +266,29 @@
   {/if}
 
   {#if live}
-    <h2 class="section-title">{t.behaviour}</h2>
+    <h2 class="section-title">{t.hearing}</h2>
     <section class="panel">
       <p class="sub">{t.settingsHint}</p>
       {#if !table && !tableError}<p class="dim">{t.reading}</p>{/if}
-      {#each rows as [name, s] (name)}
+      {#if voice?.wake_word && voice.wake_words.length}
         <div class="setting">
-          <div class="what"><b>{t.names[name] ?? name.replaceAll("_", " ")}</b></div>
+          <div class="what"><b>{t.wakeWordLabel}</b></div>
           <div class="how">
-            {#if s.min === 0 && s.max === 1}
-              <Toggle checked={s.value === 1} label={t.names[name] ?? name} onchange={(on) => setSetting(name, on ? 1 : 0)} />
-            {:else}
-              <input type="range" min={s.min} max={s.max} value={s.value} onchange={(e) => setSetting(name, Number(e.currentTarget.value))} aria-label={t.names[name] ?? name} />
-              <span class="mono val">{s.value}</span>
-            {/if}
+            <select value={voice.wake_word} onchange={(e) => setWakeWord(e.currentTarget.value)} aria-label={t.wakeWordLabel}>
+              {#each voice.wake_words as w (w)}<option value={w}>{t.wakeWords[w] ?? w}</option>{/each}
+            </select>
           </div>
         </div>
+      {/if}
+      {#each hearing as [name, s] (name)}
+        {@render row(name, s)}
+      {/each}
+    </section>
+
+    <h2 class="section-title">{t.behaviour}</h2>
+    <section class="panel">
+      {#each behaviour as [name, s] (name)}
+        {@render row(name, s)}
       {/each}
       <div class="setting">
         <div class="what"><b>{t.followPointer}</b></div>
@@ -282,6 +324,21 @@
     <pre class="well mono log">{store.logs.length ? store.logs.slice(-120).join("\n") : t.noLogs}</pre>
   {/if}
 </div>
+
+{#snippet row(name: string, s: YoruSetting)}
+  <div class="setting">
+    <div class="what"><b>{t.names[name] ?? name.replaceAll("_", " ")}</b></div>
+    <div class="how">
+      {#if s.min === 0 && s.max === 1}
+        <Toggle checked={s.value === 1} label={t.names[name] ?? name} onchange={(on) => setSetting(name, on ? 1 : 0)} />
+      {:else}
+        <input type="range" min={s.min} max={s.max} value={s.value} onchange={(e) => setSetting(name, Number(e.currentTarget.value))} aria-label={t.names[name] ?? name} />
+        <span class="mono val">{s.value}</span>
+      {/if}
+      {#if name === "volume"}<button class="btn quiet small" disabled={testing} onclick={testVoice}>{t.test}</button>{/if}
+    </div>
+  </div>
+{/snippet}
 
 <style>
   .hint {

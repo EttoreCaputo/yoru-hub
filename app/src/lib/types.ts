@@ -260,7 +260,7 @@ export type FlashEvent = { kind: "log"; line: string } | { kind: "progress"; per
 
 export type YoruSetting = { value: number; min: number; max: number };
 export type YoruSettings = Record<string, YoruSetting | string>;
-export type BoardVoice = { volume: number | null; wake_sound: boolean | null };
+export type BoardVoice = { volume: number | null; wake_sound: boolean | null; wake_word: string | null; wake_words: string[] };
 
 export type SttLanguage = "auto" | "it" | "en";
 export type VoiceSettings = {
