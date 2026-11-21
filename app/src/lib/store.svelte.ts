@@ -154,7 +154,7 @@ class Store {
   /** How far each meeting's transcript is, 0 to 1, while it is made. */
   transcribing = $state<Record<string, number>>({});
   /** Open a specific Settings card when arriving from another page. */
-  settingsSection = $state<"meetings" | null>(null);
+  settingsSection = $state<"meetings" | "brain" | null>(null);
   /** Why a meeting's transcript failed. */
   transcribeErrors = $state<Record<string, string>>({});
   /** The transcription model's download, 0 to 1, while it runs. */

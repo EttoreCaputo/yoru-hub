@@ -86,6 +86,9 @@ pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-luna";
 pub const DEFAULT_GOOGLE_MODEL: &str = "gemini-4-hydrogen";
 /// Requests to the model in one turn before it has to stop.
 const MAX_ROUNDS: usize = 16;
+/// The same for a background job that reads a lot (a meeting's whole
+/// transcript, part after part).
+const LONG_ROUNDS: usize = 40;
 const MAX_TOKENS: u32 = 16_000;
 /// Quiet after which the conversation starts over.
 const CONVERSATION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -785,7 +788,7 @@ impl Assistant {
         let prompt = if notes.is_empty() { prompt } else { format!("{notes}\n\n{prompt}") };
         let earlier = if messages.is_empty() { self.earlier() } else { String::new() };
         let prompt = if earlier.is_empty() { prompt } else { format!("{earlier}\n\n{prompt}") };
-        let mut result = self.run(&mut messages, &prompt, language, channel, &settings, &settings.effort, host, on);
+        let mut result = self.run(&mut messages, &prompt, language, channel, &settings, &settings.effort, MAX_ROUNDS, host, on);
         // The tags are for the voice: the app and the board show the words.
         if let Ok(reply) = &mut result {
             reply.text = crate::tts::without_audio_tags(&reply.text);
@@ -931,25 +934,45 @@ impl Assistant {
              Tell the user what is worth telling with notify; if nothing is, don't notify. End with one short line saying what you did.",
             context_line(self.reply_language(None).as_deref(), Channel::Text)
         );
-        self.run(&mut Vec::new(), &prompt, self.reply_language(None).as_deref(), Channel::Text, &settings, &settings.task_effort, host, None)
+        self.run(&mut Vec::new(), &prompt, self.reply_language(None).as_deref(), Channel::Text, &settings, &settings.task_effort, MAX_ROUNDS, host, None)
+    }
+
+    /// Summarize meeting `id` in `style` (`meetings::STYLES`): a request to
+    /// the agent, which reads the transcript and saves the summary with the
+    /// app's tools, following the `summarize-meeting` skill. The summary it
+    /// saved, or why there is none (the provider's error, or what it said).
+    pub fn summarize_meeting(&self, id: &str, style: &str) -> Result<crate::meetings::Summary, String> {
+        let settings = self.settings();
+        let before = crate::meetings::summary(id).ok().flatten().map(|s| s.made_at);
+        let prompt = format!(
+            "{}\n\n<task>\nSummarize meeting {id} in style {style}, following the summarize-meeting skill.\n</task>\n\n\
+             This is a job you do on your own, not a conversation: nobody is reading your answer. Don't notify. End with one short line saying what you did.",
+            context_line(self.reply_language(None).as_deref(), Channel::Text)
+        );
+        let reply = self.run(&mut Vec::new(), &prompt, self.reply_language(None).as_deref(), Channel::Text, &settings, &settings.task_effort, LONG_ROUNDS, &TaskHost, None)?;
+        match crate::meetings::summary(id) {
+            Ok(Some(summary)) if Some(summary.made_at) != before => Ok(summary),
+            _ if reply.text.trim().is_empty() => Err("Yoru didn't save a summary".into()),
+            _ => Err(format!("Yoru didn't save a summary: {}", reply.text.trim())),
+        }
     }
 
     /// `prompt` after `messages` (to be answered in `language`, when known), with the settings' brain: the model and the
     /// tools until the model answers in words. With `on`, streamed to it.
     #[allow(clippy::too_many_arguments)]
-    fn run(&self, messages: &mut Vec<Value>, prompt: &str, language: Option<&str>, channel: Channel, settings: &Settings, effort: &str, host: &dyn Host, on: Option<OnDelta>) -> Result<Reply, String> {
+    fn run(&self, messages: &mut Vec<Value>, prompt: &str, language: Option<&str>, channel: Channel, settings: &Settings, effort: &str, rounds: usize, host: &dyn Host, on: Option<OnDelta>) -> Result<Reply, String> {
         match settings.brain() {
             Some(Brain::Anthropic) => {
                 messages.push(json!({"role": "user", "content": [{"type": "text", "text": prompt}]}));
-                self.run_claude(messages, settings, effort, host, on)
+                self.run_claude(messages, settings, effort, rounds, host, on)
             }
-            Some(brain) => compat::run(self, brain, messages, prompt, &reminder(language, channel, self.audio_tags()), settings, host, on),
+            Some(brain) => compat::run(self, brain, messages, prompt, &reminder(language, channel, self.audio_tags()), settings, rounds, host, on),
             None => Err(NO_BRAIN.into()),
         }
     }
 
     /// A turn on Claude.
-    fn run_claude(&self, messages: &mut Vec<Value>, settings: &Settings, effort: &str, host: &dyn Host, mut on: Option<OnDelta>) -> Result<Reply, String> {
+    fn run_claude(&self, messages: &mut Vec<Value>, settings: &Settings, effort: &str, rounds: usize, host: &dyn Host, mut on: Option<OnDelta>) -> Result<Reply, String> {
         let key = anthropic::api_key().ok_or("no Anthropic API key: add one in Settings (or set ANTHROPIC_API_KEY)")?;
         let started = Instant::now();
         let external = self.external();
@@ -970,7 +993,7 @@ impl Assistant {
         }
         let mut actions = Vec::new();
         let mut model = settings.model.clone();
-        for _ in 0..MAX_ROUNDS {
+        for _ in 0..rounds {
             let body = json!({
                 "model": settings.model,
                 "max_tokens": MAX_TOKENS,
@@ -1074,18 +1097,9 @@ impl Assistant {
     }
 
     /// One answer in JSON matching `schema`, with no tools: the watchers'
-    /// triage, a meeting's summary. Its text, to be parsed by the caller.
+    /// triage. Its text, to be parsed by the caller.
     pub fn complete_json(&self, prompt: &str, schema: &Value) -> Result<String, String> {
         complete_json_with(&self.settings(), prompt, schema)
-    }
-
-    /// [`Self::complete_json`] with `model` of `brain`, whatever the brain
-    /// in Settings is: a meeting's summary by a model of its own.
-    pub fn complete_json_by(&self, brain: Brain, model: &str, prompt: &str, schema: &Value) -> Result<String, String> {
-        let mut settings = self.settings();
-        settings.provider = Some(brain);
-        settings.set_model_of(brain, model);
-        complete_json_with(&settings, prompt, schema)
     }
 
     fn call_tool(&self, name: &str, input: &Value, board: &[Tool], external: &[ExternalTool], host: &dyn Host) -> Result<String, String> {

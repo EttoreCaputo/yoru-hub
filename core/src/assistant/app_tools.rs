@@ -150,22 +150,30 @@ pub(super) fn call(a: &Assistant, host: &dyn Host, name: &str, input: &Value) ->
     let id = || input["id"].as_str().unwrap_or_default().to_string();
     let from = input["from"].as_u64().unwrap_or(0) as usize;
     let limit = input["limit"].as_u64().unwrap_or(20) as usize;
+    let settings = a.settings();
+    // A part fits what the brain takes in one tool result, so Groq's
+    // smaller results aren't cut (and the rest lost).
+    let part = match settings.brain() {
+        Some(brain) if brain != super::Brain::Anthropic => super::compat::budget(brain).result_max.min(READ_CHARS) - 200,
+        _ => READ_CHARS,
+    };
+    let by = settings.brain().map(|b| format!("{} {}", b.name(), settings.model_of(b))).unwrap_or_default();
     let result = match name {
         "meeting_record" => a.app_change(AppChange::Record { title: input["title"].as_str().filter(|t| !t.trim().is_empty()).map(String::from) }),
         "meeting_stop" => a.app_change(AppChange::StopRecording),
         "conversation_list" => Ok(conversations(&a.conversations().list, input["query"].as_str().unwrap_or_default(), limit)),
-        "conversation_read" => a.conversation(&id()).ok_or_else(|| "no conversation with that id".to_string()).map(|c| read_chat(&c, from)),
+        "conversation_read" => a.conversation(&id()).ok_or_else(|| "no conversation with that id".to_string()).map(|c| read_chat(&c, from, part)),
         "settings_read" => Ok(json!({"assistant": a.settings(), "meetings": meetings::settings()}).to_string()),
         "settings_change" => change_settings(a, host, input),
         "meeting_list" => Ok(list(&meetings::list(), input["query"].as_str().unwrap_or_default(), limit)),
-        "meeting_read" => read_meeting(&id(), from, you, person),
+        "meeting_read" => read_meeting(&id(), from, part, you, person),
         "meeting_summary" => match meetings::summary(&id()) {
             Ok(Some(s)) => Ok(serde_json::to_string(&s).unwrap_or_default()),
             Ok(None) => Ok("it has no summary yet".into()),
             Err(e) => Err(e.to_string()),
         },
         "meeting_rename_speaker" => rename_speaker(&id(), input, you, person, changed),
-        "meeting_save_summary" => save_summary(&id(), input, changed),
+        "meeting_save_summary" => save_summary(&id(), input, &by, changed),
         "todo_list" => Ok(todos(input["open_only"].as_bool().unwrap_or(true))),
         "todo_set_done" => {
             let (meeting, text, done) = (input["meeting"].as_str().unwrap_or_default(), input["text"].as_str().unwrap_or_default(), input["done"].as_bool().unwrap_or(true));
@@ -201,15 +209,15 @@ fn list(all: &[Meeting], query: &str, limit: usize) -> String {
     if lines.is_empty() { "no meetings".into() } else { lines.join("\n") }
 }
 
-fn read_meeting(id: &str, from: usize, you: &str, person: &str) -> Result<String, String> {
+fn read_meeting(id: &str, from: usize, part: usize, you: &str, person: &str) -> Result<String, String> {
     let meeting = meetings::get(id).map_err(|e| e.to_string())?;
     let transcript = meetings::transcript(id).map_err(|e| e.to_string())?.ok_or("it has no transcript yet")?;
-    Ok(read(&meeting, &transcript, from, you, person))
+    Ok(read(&meeting, &transcript, from, part, you, person))
 }
 
 /// A part of `transcript` from line `from`: a head with the meeting and its
 /// speakers, the numbered lines, and where to read on.
-fn read(meeting: &Meeting, transcript: &Transcript, from: usize, you: &str, person: &str) -> String {
+fn read(meeting: &Meeting, transcript: &Transcript, from: usize, part: usize, you: &str, person: &str) -> String {
     let labels = meetings::speaker_labels(&transcript.speakers, you, person);
     let mut out = String::new();
     if from == 0 {
@@ -225,7 +233,7 @@ fn read(meeting: &Meeting, transcript: &Transcript, from: usize, you: &str, pers
     let mut next = None;
     for (i, line) in transcript.lines.iter().enumerate().skip(from) {
         let text = format!("#{i} [{}] {}: {}\n", clock(line.start_ms), labels.get(&line.who()).map_or("?", String::as_str), line.text.trim());
-        if out.len() + text.len() > READ_CHARS && i > from {
+        if out.len() + text.len() > part && i > from {
             next = Some(i);
             break;
         }
@@ -256,12 +264,12 @@ fn rename_speaker(id: &str, input: &Value, you: &str, person: &str, changed: &dy
     Ok(format!("{asked} is now {}", if name.trim().is_empty() { "unnamed" } else { name.trim() }))
 }
 
-fn save_summary(id: &str, input: &Value, changed: &dyn Fn(AppChange)) -> Result<String, String> {
+fn save_summary(id: &str, input: &Value, by: &str, changed: &dyn Fn(AppChange)) -> Result<String, String> {
     let mut fields = input.clone();
     if let Some(map) = fields.as_object_mut() {
         map.remove("id");
         map.entry("style").or_insert(json!("auto"));
-        map.insert("by".into(), json!("Yoru"));
+        map.insert("by".into(), json!(by));
     }
     let mut summary: Summary = serde_json::from_value(fields).map_err(|e| format!("the summary can't be read: {e}"))?;
     meetings::store_summary(id, &mut summary).map_err(|e| e.to_string())?;
@@ -286,7 +294,7 @@ fn conversations(all: &[super::ChatSummary], query: &str, limit: usize) -> Strin
 }
 
 /// A part of conversation `chat` from line `from`, and where to read on.
-fn read_chat(chat: &SavedChat, from: usize) -> String {
+fn read_chat(chat: &SavedChat, from: usize, part: usize) -> String {
     let mut out = String::new();
     if from == 0 && !chat.title.text.is_empty() {
         out.push_str(&format!("{}\n\n", chat.title.text));
@@ -295,7 +303,7 @@ fn read_chat(chat: &SavedChat, from: usize) -> String {
     for (i, line) in chat.lines.iter().enumerate().skip(from) {
         let who = if line.from == "you" { "user" } else { "Yoru" };
         let text = format!("#{i} [{}] {who}: {}\n", when(line.at as i64), line.text.trim());
-        if out.len() + text.len() > READ_CHARS && i > from {
+        if out.len() + text.len() > part && i > from {
             next = Some(i);
             break;
         }
@@ -407,12 +415,12 @@ mod tests {
     #[test]
     fn reads_in_parts_with_names() {
         let (m, t) = (meeting("20261120-100000", Some("Weekly")), transcript(200));
-        let first = read(&m, &t, 0, "You", "Person");
+        let first = read(&m, &t, 0, READ_CHARS, "You", "Person");
         assert!(first.starts_with("Weekly — ") && first.contains("Speakers: You (mic/0), Marco (others/0)"));
         assert!(first.contains("#0 [0:00] You: line 0") && first.contains("#1 [0:01] Marco: line 1"));
         let next: usize = first.rsplit("from ").next().unwrap().trim_end_matches(')').parse().unwrap();
         assert!(next > 1 && first.len() <= READ_CHARS + 100);
-        let last = read(&m, &t, 190, "You", "Person");
+        let last = read(&m, &t, 190, READ_CHARS, "You", "Person");
         assert!(last.starts_with("#190 ") && last.ends_with("(end of the transcript)"));
     }
 
@@ -458,9 +466,9 @@ mod tests {
     fn reads_a_conversation_in_parts() {
         let line = |i: usize| super::super::ChatLine { from: if i % 2 == 0 { "you".into() } else { "yoru".into() }, text: format!("line {i} {}", "y".repeat(300)), channel: super::super::Channel::Text, actions: Vec::new(), at: 0 };
         let chat = SavedChat { id: "c1".into(), title: Default::default(), lines: (0..100).map(line).collect() };
-        let first = read_chat(&chat, 0);
+        let first = read_chat(&chat, 0, READ_CHARS);
         assert!(first.contains("] user: line 0") && first.contains("] Yoru: line 1") && first.contains("(more: call conversation_read with from "));
-        assert!(read_chat(&chat, 99).ends_with("(end of the conversation)"));
+        assert!(read_chat(&chat, 99, READ_CHARS).ends_with("(end of the conversation)"));
         let text = conversations(&[chat.summary()], "line 0", 20);
         assert!(text.starts_with("c1: «line 0"));
     }

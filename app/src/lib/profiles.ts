@@ -33,6 +33,6 @@ export async function applyProfile(id: ProfileId, voice: VoiceInfo): Promise<Voi
     else s.groq_model = defaults.brainModel;
   });
   const result = await call<VoiceInfo>("set_voice", { settings: next });
-  await call("set_meeting_settings", { settings: { ...meetings, transcribe_by, summary_by: "brain" } });
+  await call("set_meeting_settings", { settings: { ...meetings, transcribe_by } });
   return result;
 }

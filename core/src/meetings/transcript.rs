@@ -42,8 +42,6 @@ pub struct Settings {
     /// Tell who speaks within each track (the diarization model, about
     /// 190 MB, is fetched the first time).
     pub speakers: bool,
-    /// What writes the summaries.
-    pub summary_by: SummaryBy,
     /// How summaries are laid out unless one is asked for (`summary::STYLES`).
     pub summary_style: String,
     /// Summarize a meeting once its transcript is made.
@@ -53,47 +51,9 @@ pub struct Settings {
     pub detect: bool,
 }
 
-/// The model that summarizes, kept as one string: `local`, `brain`, or a
-/// provider's model (`groq:openai/gpt-oss-120b`, `anthropic:claude-sonnet-5-5`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub enum SummaryBy {
-    /// The language model on this computer (llama.cpp).
-    #[default]
-    Local,
-    /// The assistant's brain, with the model chosen for it in Settings.
-    Brain,
-    /// Any model of a provider with a key (or Ollama's), whatever the brain is.
-    Model { provider: String, model: String },
-}
-
-impl TryFrom<String> for SummaryBy {
-    type Error = String;
-    fn try_from(s: String) -> Result<Self, String> {
-        match s.as_str() {
-            "local" => Ok(SummaryBy::Local),
-            "brain" => Ok(SummaryBy::Brain),
-            _ => match s.split_once(':') {
-                Some((provider, model)) if !provider.is_empty() && !model.is_empty() => Ok(SummaryBy::Model { provider: provider.into(), model: model.into() }),
-                _ => Err(format!("not a summarizer: {s}")),
-            },
-        }
-    }
-}
-
-impl From<SummaryBy> for String {
-    fn from(by: SummaryBy) -> String {
-        match by {
-            SummaryBy::Local => "local".into(),
-            SummaryBy::Brain => "brain".into(),
-            SummaryBy::Model { provider, model } => format!("{provider}:{model}"),
-        }
-    }
-}
-
 impl Default for Settings {
     fn default() -> Self {
-        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, summary_by: SummaryBy::Local, summary_style: "auto".into(), auto_summary: true, detect: false }
+        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, summary_style: "auto".into(), auto_summary: true, detect: false }
     }
 }
 

@@ -341,7 +341,7 @@ function pocketDownload(names: string[]) {
   next();
 }
 
-let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, summary_by: "local", summary_style: "auto", auto_summary: true, detect: false };
+let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, summary_style: "auto", auto_summary: true, detect: false };
 let meters: ReturnType<typeof setInterval> | undefined;
 
 function startMeeting(a: Record<string, any>): Meeting {
@@ -800,7 +800,6 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   meeting_export: () => "/Users/you/Downloads/Weekly with Marco.md",
   meeting_import: () => null,
   meeting_summarizers: () => ({
-    local: true,
     brain: "OpenAI · gpt-6-luna",
     models: [
       { id: "anthropic:claude-sonnet-5-5", provider: "Claude", model: "claude-sonnet-5-5", note: "Claude Sonnet 5.5: nearly as good, cheaper" },

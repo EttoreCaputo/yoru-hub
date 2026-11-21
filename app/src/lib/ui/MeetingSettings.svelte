@@ -17,7 +17,6 @@
   /** Whether Parakeet is downloaded; null until known. */
   let model = $state<boolean | null>(null);
   let summarizers = $state<Summarizers | null>(null);
-  let fetchingLlm = $state(false);
   let error = $state("");
 
   $effect(() => {
@@ -49,43 +48,9 @@
     }
   }
 
-  /** Qwen3.5 4B, the local model, through the voice's downloads. */
-  async function fetchLlm() {
-    fetchingLlm = true;
-    error = "";
-    try {
-      await call("download_model", { id: "qwen3.5-4b" });
-      summarizers = await call<Summarizers>("meeting_summarizers");
-    } catch (e) {
-      error = why(e);
-    } finally {
-      fetchingLlm = false;
-    }
-  }
-
-  /** The services with a key: every model of theirs can summarize. */
-  const SERVICES = [
-    ["anthropic", "Anthropic"],
-    ["openai", "OpenAI"],
-    ["google", "Google"],
-    ["groq", "Groq"],
-  ] as const;
-  const keyed = $derived.by(() => {
-    const i = store.info;
-    const has: Record<string, unknown> = { anthropic: i?.key, openai: i?.openai_key, google: i?.google_key, groq: i?.groq_key };
-    const out: { id: string; name: string }[] = SERVICES.filter(([id]) => has[id]).map(([id, name]) => ({ id, name }));
-    if (summarizers?.models.some((m) => m.id.startsWith("ollama:"))) out.push({ id: "ollama", name: "Ollama" });
-    return out;
-  });
   const described = (m: Summarizers["models"][number]): Choice => ({ value: m.id, label: m.note.split(":")[0] || m.model, note: m.note.split(":").slice(1).join(":").trim(), group: i18n.t.picker.suggested });
   /** A transcript: Parakeet here, or a Gemini model that hears a whole recording (not a Live one). */
   const transcribers = $derived<Choice[]>([{ value: "local", label: t.parakeet, note: t.simpleLocal }, ...(summarizers?.models ?? []).filter((m) => m.id.startsWith("google:")).map(described)]);
-  /** A summary: this computer, the brain, or the catalog's described models. */
-  const summarizerChoices = $derived<Choice[]>([
-    { value: "local", label: t.thisComputer, note: t.simpleLocalSummary },
-    ...(summarizers?.brain ? [{ value: "brain", label: `${t.brain} (${summarizers.brain})`, note: t.simpleBrainSummary }] : []),
-    ...(summarizers?.models ?? []).map(described),
-  ]);
   const parakeet = $derived(settings?.transcribe_by === "local");
   const percent = (f: number) => Math.round(f * 100);
   const LANGUAGES = ["", "it", "en", "es", "fr", "de", "pt"];
@@ -104,14 +69,8 @@
         <ModelPicker value={settings.transcribe_by} choices={transcribers} providers={store.info?.google_key ? [{ id: "google", name: "Google" }] : []} need="stt" accept={(m) => !m.model.includes("-live")} label={t.simpleTranscript} onchange={(v) => save({ transcribe_by: v })} />
       </div>
     </div>
-    <div class="setting">
-      <div class="what"><b>{t.simpleSummary}</b><span>{t.summaryByHint}</span></div>
-      <div class="how">
-        <ModelPicker value={settings.summary_by} choices={summarizerChoices} providers={keyed} need="chat" label={t.simpleSummary} onchange={(v) => save({ summary_by: v })} />
-      </div>
-    </div>
     {#if settings.transcribe_by.startsWith("google:") && !store.info?.google_key}<div class="setting"><p class="error-text">{t.noGoogleKey}</p></div>{/if}
-    {#if summarizers && ((settings.summary_by === "local" && !summarizers.local) || (settings.summary_by === "brain" && !summarizers.brain))}<div class="setting"><p class="error-text">{t.needSummarizer}</p></div>{/if}
+    {#if summarizers && !summarizers.brain}<div class="setting"><p class="error-text">{t.needSummarizer}</p></div>{/if}
   </section>
   <h2 class="section-title">{t.stepNotice}</h2>
   <section class="panel">
@@ -171,12 +130,6 @@
   <h2 class="section-title">{t.stepSummary}</h2>
   <p class="dim note">{t.stepSummaryNote}</p>
   <section class="panel">
-    {#if settings.summary_by === "local" && summarizers && !summarizers.local}
-      <div class="setting">
-        <div class="what"><b>{t.llm}</b><span>{t.llmHint}</span></div>
-        <div class="how"><button class="btn small primary" disabled={fetchingLlm} onclick={fetchLlm}>{fetchingLlm ? t.fetching : t.download}</button></div>
-      </div>
-    {/if}
     <div class="setting">
       <div class="what"><b>{t.style}</b><span>{t.styleHint}</span></div>
       <div class="how">

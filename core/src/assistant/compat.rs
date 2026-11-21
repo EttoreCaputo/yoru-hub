@@ -30,7 +30,7 @@ use std::time::Instant;
 use serde_json::{Value, json};
 
 use super::written_calls;
-use super::{Action, Assistant, BOARD_ESSENTIALS, Brain, ExternalTool, Host, MAX_ROUNDS, Reply, Settings, board_extras, own_tools, schema_or_empty, select, tool_json};
+use super::{Action, Assistant, BOARD_ESSENTIALS, Brain, ExternalTool, Host, Reply, Settings, board_extras, own_tools, schema_or_empty, select, tool_json};
 use crate::cloud::{self, CloudError, Client};
 use crate::models::Kind;
 use crate::stream::{Delta, OnDelta};
@@ -275,7 +275,8 @@ fn chat(client: &Client, request: &Value, mut on: Option<&mut (dyn FnMut(Delta) 
 /// small models answer in their language rather than the prompt's. With
 /// `on`, each answer is streamed to it.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt: &str, reminder: &str, settings: &Settings, host: &dyn Host, mut on: Option<OnDelta>) -> Result<Reply, String> {
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt: &str, reminder: &str, settings: &Settings, rounds: usize, host: &dyn Host, mut on: Option<OnDelta>) -> Result<Reply, String> {
     let client = client(settings, brain)?;
     let budget = budget(brain);
     let started = Instant::now();
@@ -309,7 +310,7 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     // Each round's model and tool time, for voice-times.log.
     let mut times: Vec<String> = Vec::new();
     let log_times = |times: &[String]| crate::voice::time_log(&format!("host: brain {model}: {}", times.join(", ")));
-    for _ in 0..MAX_ROUNDS {
+    for _ in 0..rounds {
         let asked = Instant::now();
         let tools = tool_list(&board_tools, &loaded, !findable.is_empty(), &budget);
         let mut all = vec![system.clone()];

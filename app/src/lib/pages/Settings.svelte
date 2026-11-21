@@ -180,7 +180,7 @@
       ? { text: "—", dot: "" }
       : meetingProblem
         ? { text: meetingProblem, dot: "wait" }
-        : { text: `${t.meetingsWhen[meetings.settings.transcribe]} · ${t.meetingsBy(meetings.settings.summary_by.split(":").pop() ?? "")}`, dot: "" },
+        : { text: t.meetingsWhen[meetings.settings.transcribe], dot: "" },
     pocket: pocketSummary,
   });
   const loginNeeded = $derived(store.connectors.filter((c) => c.enabled && (c.state === "needs_login" || c.state === "error")).length);

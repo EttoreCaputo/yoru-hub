@@ -5,16 +5,14 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
 use serde::Serialize;
-use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager, State};
 use yoru_core::assistant::{self, Brain};
-use yoru_core::llm::{self, Llm, LlmConfig};
-use yoru_core::meetings::{self, Event, Format, Meeting, Recording, Request, Settings, Sources, Summary, SummaryBy, Transcript, When};
+use yoru_core::meetings::{self, Event, Format, Meeting, Recording, Request, Settings, Sources, Summary, Transcript, When};
 
 use crate::AppState;
 
@@ -238,17 +236,12 @@ fn queue_summary(app: &AppHandle, id: String, style: Option<String>) {
         let state = app.state::<Meetings>();
         let _turn = state.worker.lock().unwrap();
         board(&app, "summarizing", None);
-        let result = summarizer(&app).and_then(|model| {
-            let (you, person) = if crate::app_language(&app.state::<AppState>()).starts_with("it") { ("Tu", "Persona") } else { ("You", "Person") };
-            let progress = |fraction| {
-                let _ = app.emit("meeting", &Event::Summarizing { id: id.clone(), fraction });
-            };
-            let complete = |prompt: &str, schema: &Value| model.complete(&app, prompt, schema);
-            let style = style.unwrap_or_else(|| meetings::settings().summary_style);
-            let summary = meetings::summarize(&id, &style, you, person, &model.label, model.chunk, &complete, progress);
-            model.done();
-            summary.map_err(|e| e.to_string())
-        });
+        // The agent reads the transcript and saves the summary with the
+        // app's tools (the summarize-meeting skill); its steps aren't
+        // counted, so the bar shows only that it started.
+        let _ = app.emit("meeting", &Event::Summarizing { id: id.clone(), fraction: 0.1 });
+        let style = style.unwrap_or_else(|| meetings::settings().summary_style);
+        let result = summarizer(&app).and_then(|_| app.state::<AppState>().assistant.summarize_meeting(&id, &style));
         state.queued.lock().unwrap().remove(&key);
         let event = match result.and_then(|summary| meetings::get(&id).map(|meeting| (meeting, summary)).map_err(|e| e.to_string())) {
             Ok((meeting, summary)) => {
@@ -263,82 +256,10 @@ fn queue_summary(app: &AppHandle, id: String, style: Option<String>) {
     });
 }
 
-/// What writes a summary: the local model or the assistant's brain.
-struct Summarizer {
-    /// For people: "Qwen3.5 4B (this computer)", "OpenAI gpt-6-luna".
-    label: String,
-    /// The transcript's characters it reads at once: the local model's
-    /// context is 8K tokens, Groq's free tier counts 8K a minute.
-    chunk: usize,
-    /// A local model started only for this, to stop after.
-    own: Option<Arc<Llm>>,
-    /// The voice's local model, when it runs one: only one llama-server
-    /// at a time (they share a pid file).
-    shared: Option<Arc<yoru_core::Agent>>,
-    /// A cloud (or Ollama) model, instead of the local one: `None` for the
-    /// brain's own, or a model picked for the summaries.
-    remote: Option<Option<(Brain, String)>>,
-}
-
-impl Summarizer {
-    fn complete(&self, app: &AppHandle, prompt: &str, schema: &Value) -> Result<String, String> {
-        if let Some(remote) = &self.remote {
-            let assistant = &app.state::<AppState>().assistant;
-            return match remote {
-                Some((brain, model)) => assistant.complete_json_by(*brain, model, prompt, schema),
-                None => assistant.complete_json(prompt, schema),
-            };
-        }
-        let llm = self.own.as_deref().or(self.shared.as_ref().map(|a| a.llm())).ok_or("no local model")?;
-        let request = json!({
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_object", "schema": schema},
-            "max_tokens": 2048,
-            "temperature": 0.3,
-        });
-        let message = llm.chat(&request).map_err(|e| e.to_string())?;
-        Ok(message["content"].as_str().unwrap_or_default().to_string())
-    }
-
-    fn done(&self) {
-        if let Some(llm) = &self.own {
-            llm.shutdown();
-        }
-    }
-}
-
-/// The summarizer the settings ask for, or why there is none.
-fn summarizer(app: &AppHandle) -> Result<Summarizer, String> {
-    let state = app.state::<AppState>();
-    // Groq's free tier and Ollama read little at once; the others a lot.
-    let chunk = |brain: Brain| if matches!(brain, Brain::Groq | Brain::Ollama) { 12_000 } else { 120_000 };
-    match meetings::settings().summary_by {
-        SummaryBy::Brain => {
-            let settings = state.assistant.settings();
-            let brain = settings.brain().filter(|b| b.has_key()).ok_or("no brain is set up (Settings, Brain)")?;
-            Ok(Summarizer { label: format!("{} {}", brain.name(), settings.model_of(brain)), chunk: chunk(brain), own: None, shared: None, remote: Some(None) })
-        }
-        SummaryBy::Model { provider, model } => {
-            let brain = Brain::by_id(&provider).ok_or_else(|| format!("no provider {provider}"))?;
-            if !brain.has_key() {
-                return Err(format!("no {} key: add it in Settings, or pick another model for the summaries", brain.name()));
-            }
-            Ok(Summarizer { label: format!("{} {model}", brain.name()), chunk: chunk(brain), own: None, shared: None, remote: Some(Some((brain, model))) })
-        }
-        SummaryBy::Local => {
-            let shared = state.voice.lock().unwrap().agent.clone().filter(|a| a.llm().config().is_local());
-            let (own, model) = match &shared {
-                Some(agent) => (None, agent.llm().config().model_path().map(|p| p.to_path_buf())),
-                None => {
-                    let local = llm::local_fallback().ok_or("no local language model: download Qwen3.5 in the meetings' settings")?;
-                    let model = Some(local.model.clone());
-                    (Some(Arc::new(Llm::new(LlmConfig::Local(local)))), model)
-                }
-            };
-            let name = model.and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_default();
-            Ok(Summarizer { label: name, chunk: 12_000, own, shared, remote: None })
-        }
-    }
+/// Whether the agent can summarize: a brain with its key, or why not.
+fn summarizer(app: &AppHandle) -> Result<(), String> {
+    let settings = app.state::<AppState>().assistant.settings();
+    settings.brain().filter(|b| b.has_key()).map(|_| ()).ok_or_else(|| "no brain is set up (Settings, Brain)".to_string())
 }
 
 #[tauri::command]
@@ -363,11 +284,11 @@ pub fn meeting_summary(id: String) -> Result<Option<Summary>, String> {
     meetings::summary(&id).map_err(|e| e.to_string())
 }
 
-/// What can summarize: whether the local model is there, the brain's name,
-/// and every model of the providers with a key (and Ollama's, if running).
+/// What can summarize and transcribe: the brain's name (the agent writes
+/// the summaries), and every model of the providers with a key (and
+/// Ollama's, if running), for the transcriber.
 #[derive(Serialize)]
 pub struct Summarizers {
-    local: bool,
     brain: Option<String>,
     models: Vec<SummaryModel>,
 }
@@ -392,7 +313,6 @@ pub async fn meeting_summarizers(app: AppHandle) -> Result<Summarizers, String> 
             .flat_map(|b| assistant::chat_models(b).into_iter().map(move |(model, note)| SummaryModel { id: format!("{}:{model}", b.id()), provider: b.name(), model, note }))
             .collect();
         Summarizers {
-            local: llm::local_fallback().is_some() || state.voice.lock().unwrap().agent.as_ref().is_some_and(|a| a.llm().config().is_local()),
             brain: settings.brain().filter(|b| b.has_key()).map(|b| format!("{} · {}", b.name(), settings.model_of(b))),
             models,
         }
