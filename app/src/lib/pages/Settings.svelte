@@ -8,6 +8,7 @@
   MCP show only with "Show advanced options", one switch for every page.
 -->
 <script lang="ts">
+  import { onWifi } from "../port";
   import { look, THEMES } from "../look.svelte";
   import { fly } from "svelte/transition";
   import { call, why } from "../api";
@@ -144,7 +145,7 @@
   const brainModelName = $derived(brain === "anthropic" ? (CLAUDE_MODELS.find(([m]) => m === brainModel)?.[1].split(" — ")[0] ?? brainModel) : brainModel);
   const keyed = $derived(keys.filter((k) => k.source).length);
   const firmware = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
-  const via = $derived(store.port?.startsWith("wifi:") ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
+  const via = $derived(onWifi(store.port) ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
   const vs = $derived(voice?.settings);
   const brainProblem = $derived(brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain);
   const pocketSummary = $derived.by(() => {

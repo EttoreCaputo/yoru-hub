@@ -7,6 +7,7 @@
   about the one picked there.
 -->
 <script lang="ts">
+  import { onWifi } from "../port";
   import { call, why } from "../api";
   import { BUNDLED_VERSION } from "../bundled";
   import { i18n } from "../i18n/index.svelte";
@@ -20,8 +21,8 @@
   const tb = $derived(i18n.t.boards);
   const several = $derived(store.boards.length > 1);
   const boardDot = (link: string) => (link === "connected" ? "done" : link === "searching" ? "think" : "wrong");
-  const via = (b: DeviceInfo) => (b.port?.startsWith("wifi:") ? i18n.t.link.wifi : b.port ? i18n.t.link.usb : "");
-  const where = (b: DeviceInfo) => (b.port?.startsWith("wifi:") ? (b.id ?? "") : (b.port ?? "")).replace("/dev/cu.", "");
+  const via = (b: DeviceInfo) => (onWifi(b.port) ? i18n.t.link.wifi : b.port ? i18n.t.link.usb : "");
+  const where = (b: DeviceInfo) => (onWifi(b.port) ? (b.id ?? "") : (b.port ?? "")).replace("/dev/cu.", "");
   const live = $derived(store.link === "connected");
 
   // Connection.
@@ -114,7 +115,7 @@
   });
   const running = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   // Updated over its link instead of esptool (core's ota.rs).
-  const overWifi = $derived(!!store.port?.startsWith("wifi:"));
+  const overWifi = $derived(onWifi(store.port));
 </script>
 
 <div>

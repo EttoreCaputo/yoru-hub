@@ -6,6 +6,7 @@
   isn't here: he sits at the bottom right of the pages (YoruBubble.svelte).
 -->
 <script lang="ts">
+  import { onWifi } from "./port";
   import { i18n } from "./i18n/index.svelte";
   import { PAGE_ICONS } from "./icons/pages";
   import { look } from "./look.svelte";
@@ -23,7 +24,7 @@
   // of what it's connected by.
   const yoru = $derived.by(() => {
     const on = store.boardState === "live" || store.boardState === "boot";
-    const by = !on ? null : store.port?.startsWith("wifi:") ? "wifi" : store.port ? "usb" : null;
+    const by = !on ? null : onWifi(store.port) ? "wifi" : store.port ? "usb" : null;
     return { dot: store.boardState === "live" ? "done" : on ? "think" : "", text: on ? t.link.live : t.link.offline, by } as const;
   });
   const quietUntil = $derived(store.info?.quiet_until ?? null);
@@ -56,7 +57,7 @@
           <span class="dot {boardDot(b.link)}"></span>
           <span class="bname">{store.boardName(b)}</span>
           {#if b.primary}<span class="star" title={t.boards.primary}>★</span>{/if}
-          <span class="via">{b.port?.startsWith("wifi:") ? t.link.wifi : b.port ? t.link.usb : "…"}</span>
+          <span class="via">{onWifi(b.port) ? t.link.wifi : b.port ? t.link.usb : "…"}</span>
         </button>
       {/each}
     </div>
