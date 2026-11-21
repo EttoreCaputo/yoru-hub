@@ -131,7 +131,7 @@ impl Notes {
 
     /// `path` inside `brain/`, or why it can't be a note.
     fn file(&self, path: &str) -> Result<PathBuf, String> {
-        let path = path.trim().trim_start_matches("brain/");
+        let path = &note_path(path);
         let clean = Path::new(path);
         let ok = path.ends_with(".md")
             && clean.components().all(|c| matches!(c, std::path::Component::Normal(_)))
@@ -155,6 +155,7 @@ impl Notes {
     /// Write note `path` whole: what is true now and its timeline. Its
     /// `updated` becomes today. `why` is the commit's message.
     pub fn write(&self, path: &str, content: &str, why: &str) -> Result<String, String> {
+        let path = &note_path(path);
         let file = self.file(path)?;
         if path.trim() != "me.md" && parse(content).description.is_empty() {
             return Err("start the note with its frontmatter: ---, type, description (one line: what it is about), aliases, ---".into());
@@ -432,6 +433,14 @@ fn stamp(text: &str) -> String {
     let mut lines: Vec<String> = front.lines().filter(|l| !l.trim_start().starts_with("updated:")).map(String::from).collect();
     lines.push(format!("updated: {}", today()));
     format!("---\n{}\n---\n{}", lines.join("\n"), body(text))
+}
+
+/// A note's path as the brain may give it: the index in the prompt names
+/// notes as wikilinks (`[[people/lia]]`), so it may come without `.md`.
+/// Another extension stays, to be refused.
+fn note_path(path: &str) -> String {
+    let path = path.trim().trim_start_matches("brain/").trim_start_matches("[[").trim_end_matches("]]");
+    if Path::new(path).extension().is_some() { path.to_string() } else { format!("{path}.md") }
 }
 
 // ---- The Memory page (docs/agent.md, From today's memory) ----
@@ -753,6 +762,7 @@ mod tests {
         notes.write("people/marco.md", MARCO, "dreamt").unwrap();
         notes.end_dream(&main, true).unwrap();
         assert!(notes.read("people/marco.md", false).is_ok());
+        assert!(notes.read("people/marco", false).is_ok(), "as the index names it");
         assert!(notes.history(1)[0].1.contains("dreamt"));
         let repo = Repository::open(notes.dir().unwrap()).unwrap();
         assert_eq!(repo.head().unwrap().name().unwrap(), main);
