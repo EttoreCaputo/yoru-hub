@@ -687,6 +687,7 @@ const en = {
     stopAll: "Stop playing all",
     loops: "Loops",
     offline: "Yoru isn't connected",
+    offlinePreview: "Yoru isn't connected: these are the previews of the animations in the app's firmware.",
     offlineHint: "Plug Yoru in or reach it over WiFi: its animations show up here.",
     empty: "No animations",
     emptyHint: "The board sent an empty list.",

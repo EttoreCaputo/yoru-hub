@@ -685,6 +685,7 @@ const it: Messages = {
     stopAll: "Ferma la sequenza",
     loops: "In loop",
     offline: "Yoru non è collegato",
+    offlinePreview: "Yoru non è collegato: queste sono le anteprime delle animazioni del firmware dell'app.",
     offlineHint: "Collega Yoru via USB o WiFi: le sue animazioni compaiono qui.",
     empty: "Nessuna animazione",
     emptyHint: "La scheda ha mandato una lista vuota.",
