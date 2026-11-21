@@ -98,7 +98,7 @@ brain/
 
 - The graph in `memory.db` is written out once as notes: each person and entity a note, its facts what is true now, with their episodes as sources, contradicted facts in the timeline. Built on 2026-11-21 (`notes::migrate`, at the first memory tick once the notes exist, marked by `brain/.migrated`): the user's facts go to `me.md` by section, every other entity to `people/`, `projects/` or `topics/` with its relations as links, closed facts to the timeline with the day they stopped, private ones to a `topics/<name>-private.md` of their own. `memory.db` stays where it is: it still holds the voice prints and the people they belong to (`this_is`).
 - The voice prints stay where they are; a person's note links to its voice.
-- The Memory page shows the notes: a list by kind, each readable and editable, its history, the sources behind each line, and a button to open the folder in Obsidian or the Finder. The graph drawing stays, built from the links.
+- The Memory page shows the notes: a list by kind, each readable and editable, its history, the sources behind each line, and a button to open the folder in Obsidian or the Finder. The graph drawing stays, built from the links. Built on 2026-11-21 (`pages/Memory.svelte`, `Notes::views`): each note is a node in its kind's colour (`me.md` the user's), what is true now (every section but the timeline, without the sources) its dots, coloured by `me.md`'s sections, and its `[[links]]` the links. A click opens its card: what is true now, Edit (the whole note in Markdown, saved as a commit "Edited on the Memory page"), What changed (the commits that touched it, `Notes::changes`), Tell Yoru about it, Archive, and Forget the voice when a voice print in `memory.db` has its name. The head has New note (a person, project or topic, as a stub) and Open in Obsidian when it is installed, else Show in Finder. The archive is not drawn.
 
 ### Measuring it
 
@@ -110,7 +110,7 @@ Public benchmarks are too noisy to choose by (the reader model and the judge mov
 2. **The transcripts searchable.** The index of every conversation and meeting turn (words, meaning, dates, speakers), `history_search` and `history_read`. (Built on 2026-11-21.) Done when the agent answers about a past conversation or meeting from the transcript.
 3. **The notes.** `brain/`, its tools, git, `me.md` and `index.md` in the prompt, the migration of `memory.db`, writing during conversations, `process-meeting`. (Built on 2026-11-21: the graph's tools `remember`, `forget`, `revise_memory`, `recall` and `relate` are gone, and so are the recall per request and the consolidation after each conversation and at night; the agent keeps the notes itself, and a meeting's first summary goes on with `process-meeting`.) Done when the memory is the notes, nothing is lost from the graph, and a week leaves people and project notes with sources.
 4. **Dreaming and the measure.** `dream` every night on a branch; Yoru's own questions and answers to measure the memory. The old pipelines (`sleep.rs`'s extraction, `summary.rs`'s prompts, `title.rs`) are removed. (Built on 2026-11-21: `sleep.rs` and the conversations' episodes are gone; `summary.rs` and `title.rs` keep only the summary's shape and the conversation's title state, their prompts went with phase 1.)
-5. **The Memory page** on the notes, with their history.
+5. **The Memory page** on the notes, with their history. (Built on 2026-11-21; the graph's editing commands are gone, `memory.db` keeps the voices.)
 
 ## Open questions
 

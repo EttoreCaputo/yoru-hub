@@ -434,6 +434,147 @@ fn stamp(text: &str) -> String {
     format!("---\n{}\n---\n{}", lines.join("\n"), body(text))
 }
 
+// ---- The Memory page (docs/agent.md, From today's memory) ----
+
+/// A note as the Memory page draws it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct NoteView {
+    pub path: String,
+    pub kind: String,
+    pub title: String,
+    pub description: String,
+    pub aliases: Vec<String>,
+    pub private: bool,
+    pub updated: String,
+    /// What is true now (not the timeline), a line each with its section:
+    /// `me.md`'s by key (about, matters, tell, quiet, notes), else "about".
+    pub lines: Vec<(String, String)>,
+    /// The notes it links to, as paths.
+    pub links: Vec<String>,
+}
+
+/// One change to a note, as the page lists it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Change {
+    pub at: i64,
+    pub what: String,
+}
+
+/// `me.md`'s headings, by the keys the page colours them with.
+const ME_KEYS: [(&str, &str); 5] = [("Who I am", "about"), ("What matters to me", "matters"), ("Tell me about", "tell"), ("Don't tell me about", "quiet"), ("Notes", "notes")];
+
+fn view(path: &str, text: &str) -> NoteView {
+    let info = parse(text);
+    let body = body(text);
+    let title = body.lines().find_map(|l| l.strip_prefix("# ")).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let stem = Path::new(path).file_stem().map(|s| s.to_string_lossy().replace('-', " ")).unwrap_or_default();
+    let mut lines = Vec::new();
+    let mut section = "about";
+    let mut timeline = false;
+    for line in body.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            timeline = heading.trim() == "Timeline";
+            section = ME_KEYS.iter().find(|(h, _)| *h == heading.trim()).map_or("about", |(_, k)| *k);
+            continue;
+        }
+        if let Some(item) = line.strip_prefix("- ").filter(|_| !timeline) {
+            let shown = item.split(" [Source:").next().unwrap_or(item).trim();
+            if !shown.is_empty() {
+                lines.push((section.to_string(), shown.to_string()));
+            }
+        }
+    }
+    let mut links: Vec<String> = Vec::new();
+    for piece in body.split("[[").skip(1) {
+        let Some(inner) = piece.split("]]").next() else { continue };
+        let target = inner.split('|').next().unwrap_or_default().trim();
+        let target = if target.ends_with(".md") { target.to_string() } else { format!("{target}.md") };
+        if target != path && !links.contains(&target) {
+            links.push(target);
+        }
+    }
+    NoteView {
+        path: path.into(),
+        kind: if path == "me.md" { "me".into() } else { info.kind },
+        title: title.unwrap_or(stem),
+        description: info.description,
+        aliases: info.aliases,
+        private: info.private,
+        updated: info.updated,
+        lines,
+        links,
+    }
+}
+
+impl Notes {
+    /// Every note but the archived ones, `me.md` first, as the page draws them.
+    pub fn views(&self) -> Vec<NoteView> {
+        let Ok(dir) = self.dir() else { return Vec::new() };
+        std::iter::once("me.md".to_string())
+            .chain(self.list().into_iter().map(|n| n.path))
+            .filter_map(|path| fs::read_to_string(dir.join(&path)).ok().map(|text| view(&path, &text)))
+            .collect()
+    }
+
+    /// Note `path` whole, private or not: for the user's own page.
+    pub fn text(&self, path: &str) -> Result<String, String> {
+        fs::read_to_string(self.file(path)?).map_err(|_| format!("no note {path}"))
+    }
+
+    /// Move note `path` to the archive: no longer true, never deleted.
+    pub fn archive(&self, path: &str, why: &str) -> Result<String, String> {
+        let name = path.trim().rsplit('/').next().unwrap_or_default().to_string();
+        if path.trim() == "me.md" || path.trim().starts_with("archive/") {
+            return Err(format!("{path} can't be archived"));
+        }
+        let text = self.text(path)?;
+        self.write(&format!("archive/{name}"), &text, why)
+    }
+
+    /// The changes to note `path`, newest first.
+    pub fn changes(&self, path: &str, max: usize) -> Vec<Change> {
+        let Ok(dir) = self.dir() else { return Vec::new() };
+        let Ok(repo) = Repository::open(dir) else { return Vec::new() };
+        let Ok(mut walk) = repo.revwalk() else { return Vec::new() };
+        if walk.push_head().is_err() {
+            return Vec::new();
+        }
+        let blob = |c: &git2::Commit| c.tree().ok().and_then(|t| t.get_path(Path::new(path)).ok()).map(|e| e.id());
+        walk.flatten()
+            .take(2000)
+            .filter_map(|id| repo.find_commit(id).ok())
+            .filter(|c| blob(c) != c.parent(0).ok().and_then(|p| blob(&p)))
+            .take(max)
+            .map(|c| Change { at: c.time().seconds() * 1000, what: c.summary().ok().flatten().unwrap_or_default().to_string() })
+            .collect()
+    }
+
+    /// A new note about `name`, a `kind` (person, project, or anything
+    /// else: a topic): its path. Refused when there is one already.
+    pub fn create(&self, kind: &str, name: &str) -> Result<String, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("a name is needed".into());
+        }
+        let folder = match kind {
+            "person" => "people",
+            "project" => "projects",
+            _ => "topics",
+        };
+        let path = format!("{folder}/{}.md", slug(name));
+        if self.file(&path)?.exists() {
+            return Err(format!("{path} is there already"));
+        }
+        self.write(&path, &format!("---\ntype: {kind}\ndescription: {name}\naliases: []\n---\n\n# {name}\n\n## Now\n\n## Timeline\n"), "Added on the Memory page")?;
+        Ok(path)
+    }
+
+    /// The notes' folder, to open in the Finder or Obsidian.
+    pub fn folder(&self) -> Option<PathBuf> {
+        self.dir.clone()
+    }
+}
+
 // ---- The old memory, written out once (docs/agent.md, From today's memory) ----
 
 /// Lowercase, dashes, letters and digits: a note's file name.
@@ -616,6 +757,24 @@ mod tests {
         let repo = Repository::open(notes.dir().unwrap()).unwrap();
         assert_eq!(repo.head().unwrap().name().unwrap(), main);
         assert!(repo.find_branch(&format!("dream/{}", today()), git2::BranchType::Local).is_ok());
+    }
+
+    #[test]
+    fn the_page_sees_lines_links_and_changes() {
+        let notes = Notes::open(Some(&temp()));
+        notes.write("people/marco.md", &format!("{MARCO}\n## Now\n- Works on [[projects/pricing|Pricing]] [Source: chat:a#1 | 2026-11-20]\n\n## Timeline\n- 2026-01-01 Old\n"), "met").unwrap();
+        notes.keep_quiet("football").unwrap();
+        let views = notes.views();
+        assert_eq!(views[0].kind, "me");
+        assert!(views[0].lines.contains(&("quiet".into(), "football".into())));
+        let marco = views.iter().find(|v| v.path == "people/marco.md").unwrap();
+        assert_eq!(marco.title, "Marco");
+        assert_eq!(marco.lines, vec![("about".to_string(), "Works on [[projects/pricing|Pricing]]".to_string())]);
+        assert_eq!(marco.links, vec!["projects/pricing.md".to_string()]);
+        assert_eq!(notes.changes("people/marco.md", 10).len(), 1);
+        notes.archive("people/marco.md", "left").unwrap();
+        assert!(notes.views().iter().all(|v| v.path != "people/marco.md"));
+        assert_eq!(notes.changes("archive/marco.md", 10).len(), 1);
     }
 
     #[test]

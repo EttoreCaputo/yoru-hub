@@ -389,43 +389,41 @@ function tone(): ArrayBuffer {
 
 // The memory as a graph (docs/memory.md): made-up people and facts.
 const DAY = 86_400_000;
+// The voices Yoru knows (memory.db), and the notes (brain/).
 const memory = {
   entities: [
-    { id: 1, name: "Ettore", kind: "person", aliases: [], summary: "Works on Yoru, in Milan", gender: "m", placeholder: false, is_user: true, label: null },
-    { id: 2, name: "Sofia", kind: "person", aliases: ["wife"], summary: "", gender: "f", placeholder: false, is_user: false, label: "your wife" },
-    { id: 3, name: "mother-in-law", kind: "person", aliases: [], summary: "", gender: "f", placeholder: true, is_user: false, label: "your mother-in-law" },
-    { id: 4, name: "Giulia", kind: "person", aliases: [], summary: "Reviews my work", gender: "f", placeholder: false, is_user: false, label: "your colleague" },
-    { id: 5, name: "Yoru", kind: "project", aliases: [], summary: "The board, the app and the host", gender: null, placeholder: false, is_user: false, label: null },
-    { id: 6, name: "Marco", kind: "person", aliases: [], summary: "", gender: "m", placeholder: false, is_user: false, label: "your brother" },
-    { id: 7, name: "Milan", kind: "place", aliases: [], summary: "Where you live", gender: null, placeholder: false, is_user: false, label: null },
-    { id: 8, name: "Zendata", kind: "organisation", aliases: [], summary: "", gender: null, placeholder: false, is_user: false, label: null },
-    { id: 9, name: "Luca", kind: "person", aliases: [], summary: "", gender: "m", placeholder: false, is_user: false, label: "your friend" },
-  ] as { id: number; name: string; kind: string; aliases: string[]; summary: string; gender: string | null; placeholder: boolean; is_user: boolean; label: string | null }[],
-  facts: [
-    { id: 1, about: 1, section: "about", text: "Mornings are for deep work: no meetings before 10", from: Date.now() - 40 * DAY, to: null, importance: 0.7, private: false, episode: 1 },
-    { id: 2, about: 1, section: "about", text: "Works from home", from: Date.now() - 90 * DAY, to: Date.now() - 6 * DAY, importance: 0.5, private: false, episode: 1 },
-    { id: 3, about: 1, section: "about", text: "Works at the office since Monday", from: Date.now() - 6 * DAY, to: null, importance: 0.5, private: false, episode: 2 },
-    { id: 4, about: 1, section: "tell", text: "Issues assigned to me, and comments on mine", from: Date.now() - 40 * DAY, to: null, importance: 0.7, private: false, episode: 1 },
-    { id: 5, about: 1, section: "quiet", text: "Newsletters and promotions", from: Date.now() - 40 * DAY, to: null, importance: 0.7, private: false, episode: 1 },
-    { id: 6, about: 2, section: "matters", text: "Loves tulips", from: Date.now() - 6 * DAY, to: null, importance: 0.6, private: false, episode: 2 },
-    { id: 7, about: 2, section: "notes", text: "Birthday on 14 March", from: Date.now() - 6 * DAY, to: null, importance: 0.9, private: false, episode: 2 },
-    { id: 8, about: 5, section: "matters", text: "The memory is being rebuilt as a graph", from: Date.now() - DAY, to: null, importance: 0.5, private: false, episode: 3 },
-    { id: 9, about: 6, section: "notes", text: "Plays the drums", from: Date.now() - 9 * DAY, to: null, importance: 0.5, private: false, episode: 2 },
-    { id: 10, about: 7, section: "about", text: "Lives near Navigli", from: Date.now() - 20 * DAY, to: null, importance: 0.5, private: true, episode: 1 },
-    { id: 11, about: 8, section: "matters", text: "Ships the release on Fridays", from: Date.now() - 5 * DAY, to: null, importance: 0.6, private: false, episode: 4 },
-    { id: 12, about: 9, section: "notes", text: "Runs the Milan marathon every year", from: Date.now() - 3 * DAY, to: null, importance: 0.5, private: false, episode: 5 },
-    { id: 13, about: 1, section: "matters", text: "Prefers short spoken answers", from: Date.now() - 3 * DAY, to: null, importance: 0.9, private: false, episode: 5 },
-  ] as { id: number; about: number | null; section: string; text: string; from: number; to: number | null; importance: number; private: boolean; episode: number | null }[],
-  relations: [
-    { id: 1, a: 2, kind: "partner", b: 1, from: Date.now() - 6 * DAY, to: null },
-    { id: 2, a: 3, kind: "parent", b: 2, from: Date.now() - 2 * DAY, to: null },
-    { id: 3, a: 4, kind: "colleague", b: 1, from: Date.now() - 30 * DAY, to: null },
-    { id: 4, a: 6, kind: "sibling", b: 1, from: Date.now() - 30 * DAY, to: null },
-    { id: 5, a: 9, kind: "friend", b: 1, from: Date.now() - 30 * DAY, to: null },
+    { id: 1, name: "User", aliases: [] as string[], is_user: true },
+    { id: 2, name: "Sofia", aliases: ["your wife"], is_user: false },
   ],
-  voices: [1],
+  voices: [1, 2],
 };
-let memoryIds = 100;
+type PreviewNote = { path: string; kind: string; title: string; description: string; aliases: string[]; private: boolean; updated: string; lines: [string, string][]; links: string[]; text: string };
+const note = (path: string, kind: string, title: string, description: string, lines: [string, string][], links: string[] = [], aliases: string[] = []): PreviewNote => ({
+  path,
+  kind,
+  title,
+  description,
+  aliases,
+  private: false,
+  updated: "2026-11-20",
+  lines,
+  links,
+  text: `---\ntype: ${kind}\ndescription: ${description}\naliases: [${aliases.join(", ")}]\n---\n\n# ${title}\n\n## Now\n${lines.map(([, l]) => `- ${l} [Source: chat:a#1 | 2026-11-20]`).join("\n")}\n\n## Timeline\n`,
+});
+let notes: PreviewNote[] = [
+  note("me.md", "me", "Me", "Who the user is", [
+    ["about", "Works on Yoru, in Milan"],
+    ["matters", "Mornings are for deep work: no meetings before 10"],
+    ["matters", "Prefers short spoken answers"],
+    ["tell", "Issues assigned to me, and comments on mine"],
+    ["quiet", "Newsletters and promotions"],
+  ], ["people/sofia.md", "people/giulia.md", "people/marco-rossi.md", "projects/yoru.md"]),
+  note("people/sofia.md", "person", "Sofia", "Sofia, your wife; loves tulips", [["about", "Your wife"], ["about", "Loves tulips"], ["about", "Birthday on 14 March"]], [], ["your wife"]),
+  note("people/giulia.md", "person", "Giulia", "Giulia, a colleague who reviews your work", [["about", "Reviews your work on [[projects/yoru|Yoru]]"]], ["projects/yoru.md"]),
+  note("people/marco-rossi.md", "person", "Marco Rossi", "Marco Rossi, head of design moving to Stripe in January", [["about", "Head of design at Acme, moving to Stripe in January"], ["about", "Plays the drums"]], [], ["Marco"]),
+  note("projects/yoru.md", "project", "Yoru", "Yoru: the board, the app and the host", [["about", "The memory is now a folder of notes"], ["about", "Ships on Fridays"]]),
+  note("topics/milan.md", "topic", "Milan", "Milan, where you live", [["about", "Lives near Navigli"]]),
+];
 
 const noKey = params.get("key") === "none";
 const onGroq = params.get("brain") === "groq";
@@ -698,37 +696,25 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   open_web: (a) => void window.open(a.url, "_blank"),
   open_key_page: () => undefined,
   memory_graph: () => structuredClone(memory),
-  memory_put_fact: (a) => {
-    const f = a.fact;
-    if (!f.id) {
-      const id = ++memoryIds;
-      memory.facts.push({ ...f, id, from: Date.now() });
-      return id;
-    }
-    memory.facts = memory.facts.map((x) => (x.id === f.id ? { ...x, ...f } : x));
-    return f.id;
+  notes_views: () => structuredClone(notes.filter((n) => !n.path.startsWith("archive/"))),
+  note_text: (a) => notes.find((n) => n.path === a.path)?.text ?? "",
+  note_write: (a) => {
+    const n = notes.find((n) => n.path === a.path);
+    if (n) n.text = a.content;
+    return `saved ${a.path}`;
   },
-  memory_close_fact: (a) => void (memory.facts = memory.facts.map((x) => (x.id === a.id ? { ...x, to: Date.now() } : x))),
-  memory_forget_fact: (a) => ((memory.facts = memory.facts.filter((x) => x.id !== a.id)), "forgot 1 fact(s)"),
-  memory_add_entity: (a) => {
-    const id = ++memoryIds;
-    memory.entities.push({ id, name: a.name, kind: a.kind, aliases: [], summary: "", gender: null, placeholder: false, is_user: false, label: null });
-    return id;
+  note_new: (a) => {
+    const path = `${a.kind === "person" ? "people" : a.kind === "project" ? "projects" : "topics"}/${a.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`;
+    notes.push({ path, kind: a.kind, title: a.name, description: a.name, aliases: [], private: false, updated: "2026-11-21", lines: [], links: [], text: `---\ntype: ${a.kind}\ndescription: ${a.name}\n---\n\n# ${a.name}\n` });
+    return path;
   },
-  memory_put_entity: (a) => void (memory.entities = memory.entities.map((e) => (e.id === a.entity.id ? { ...e, ...a.entity } : e))),
-  memory_remove_entity: (a) => {
-    memory.entities = memory.entities.filter((e) => e.id !== a.id);
-    memory.facts = memory.facts.filter((f) => f.about !== a.id);
-    memory.relations = memory.relations.filter((r) => r.a !== a.id && r.b !== a.id);
-  },
-  memory_merge: (a) => {
-    const drop = memory.entities.find((e) => e.id === a.drop);
-    memory.entities = memory.entities.filter((e) => e.id !== a.drop).map((e) => (e.id === a.keep && drop ? { ...e, aliases: [...e.aliases, drop.name] } : e));
-    memory.facts = memory.facts.map((f) => (f.about === a.drop ? { ...f, about: a.keep } : f));
-    memory.relations = memory.relations.map((r) => ({ ...r, a: r.a === a.drop ? a.keep : r.a, b: r.b === a.drop ? a.keep : r.b }));
-  },
-  memory_relate: (a) => (memory.relations.push({ id: ++memoryIds, a: a.a, kind: a.kind, b: a.b, from: Date.now(), to: null }), "related"),
-  memory_unrelate: (a) => void (memory.relations = memory.relations.filter((r) => r.id !== a.id)),
+  note_archive: (a) => void (notes = notes.map((n) => (n.path === a.path ? { ...n, path: `archive/${n.path.split("/").pop()}` } : n))),
+  note_changes: () => [
+    { at: Date.now() - 3600_000, what: "Update people/marco-rossi.md: moved to Stripe" },
+    { at: Date.now() - 86400_000 * 3, what: "Add people/marco-rossi.md: met at the weekly" },
+  ],
+  notes_open: () => undefined,
+  has_obsidian: () => true,
   memory_forget_voice: (a) => void (memory.voices = memory.voices.filter((v) => v !== a.id)),
   yoru_clips: () => boardClips,
   yoru_play_clip: () => undefined,

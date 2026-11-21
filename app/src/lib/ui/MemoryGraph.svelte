@@ -418,7 +418,7 @@
   });
 
   const colourOf = (n: Node) => (n.entity ? (n.entity.is_user ? "var(--pearl)" : KIND_COLOURS[n.entity.kind] ?? KIND_COLOURS.thing) : SECTION_COLOURS[n.fact!.section] ?? "var(--dusk)");
-  const initial = (e: Entity) => (e.placeholder ? "?" : ([...e.name.trim()][0] ?? "?").toUpperCase());
+  const initial = (e: Entity) => (e.placeholder ? "?" : ([...(e.is_user ? youName(e.name) : e.name).trim()][0] ?? "?").toUpperCase());
   const nameOf = (e: Entity) => (e.is_user ? youName(e.name) : e.name);
   const kindsShown = $derived([...new Set(graph.entities.filter((e) => !e.is_user).map((e) => e.kind))]);
   const sectionsShown = $derived([...new Set(graph.facts.filter((f) => f.to === null).map((f) => f.section))]);

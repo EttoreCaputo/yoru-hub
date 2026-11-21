@@ -14,7 +14,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
-use yoru_core::assistant::memory;
+use yoru_core::assistant::{memory, notes};
 use yoru_core::assistant::tasks::{self, Task, TaskEntry};
 use yoru_core::assistant::watchers::{self, ScheduleEvent, WatchEntry, Watcher};
 use yoru_core::assistant::{self, Assistant, Brain, CONFIRM_WAIT, Channel, ChatLine, ChatTitle, Confirmations, Conversations, SavedChat, Host, Notification, Reply, Settings, TaskHost};
@@ -546,55 +546,55 @@ pub fn memory_graph(state: State<AppState>) -> memory::Graph {
     state.assistant.memory.graph()
 }
 
-/// A fact written or corrected on the page (`id` 0: a new one).
-#[tauri::command]
-pub fn memory_put_fact(state: State<AppState>, fact: memory::Fact) -> Result<i64, String> {
-    state.assistant.memory.put_fact(&fact)
-}
+// The notes (docs/agent.md, The notes), as the Memory page shows them.
 
-/// A fact no longer true: kept as history.
 #[tauri::command]
-pub fn memory_close_fact(state: State<AppState>, id: i64) {
-    state.assistant.memory.close(id);
-}
-
-/// A fact removed for good.
-#[tauri::command]
-pub fn memory_forget_fact(state: State<AppState>, id: i64) -> Result<String, String> {
-    state.assistant.memory.forget(&[id])
-}
-
-/// Someone or something new, by name; its id.
-#[tauri::command]
-pub fn memory_add_entity(state: State<AppState>, name: String, kind: String) -> Result<i64, String> {
-    state.assistant.memory.resolve(&name, Some(&kind)).ok_or_else(|| "a name is needed".into())
+pub fn notes_views(state: State<AppState>) -> Vec<notes::NoteView> {
+    state.assistant.notes.views()
 }
 
 #[tauri::command]
-pub fn memory_put_entity(state: State<AppState>, entity: memory::Entity) -> Result<(), String> {
-    state.assistant.memory.put_entity(&entity)
+pub fn note_text(state: State<AppState>, path: String) -> Result<String, String> {
+    state.assistant.notes.text(&path)
+}
+
+/// The note as edited on the page, whole.
+#[tauri::command]
+pub fn note_write(state: State<AppState>, path: String, content: String) -> Result<String, String> {
+    state.assistant.notes.write(&path, &content, "Edited on the Memory page")
+}
+
+/// A new note about someone or something, by name: its path.
+#[tauri::command]
+pub fn note_new(state: State<AppState>, kind: String, name: String) -> Result<String, String> {
+    state.assistant.notes.create(&kind, &name)
 }
 
 #[tauri::command]
-pub fn memory_remove_entity(state: State<AppState>, id: i64) -> Result<(), String> {
-    state.assistant.memory.remove_entity(id)
-}
-
-/// `drop` is `keep` under another name.
-#[tauri::command]
-pub fn memory_merge(state: State<AppState>, keep: i64, drop: i64) -> Result<(), String> {
-    state.assistant.memory.merge(keep, drop)
-}
-
-/// `a` is `kind` of `b`.
-#[tauri::command]
-pub fn memory_relate(state: State<AppState>, a: i64, kind: String, b: i64) -> Result<String, String> {
-    state.assistant.memory.relate(a, &kind, b, None)
+pub fn note_archive(state: State<AppState>, path: String) -> Result<String, String> {
+    state.assistant.notes.archive(&path, "Archived on the Memory page")
 }
 
 #[tauri::command]
-pub fn memory_unrelate(state: State<AppState>, id: i64) -> Result<(), String> {
-    state.assistant.memory.unrelate(id)
+pub fn note_changes(state: State<AppState>, path: String) -> Vec<notes::Change> {
+    state.assistant.notes.changes(&path, 30)
+}
+
+/// The notes' folder in Obsidian (when it is installed) or the Finder.
+#[tauri::command]
+pub fn notes_open(state: State<AppState>, obsidian: bool) -> Result<(), String> {
+    let dir = state.assistant.notes.folder().ok_or("the notes have no folder")?;
+    let mut cmd = std::process::Command::new("open");
+    if obsidian {
+        cmd.args(["-a", "Obsidian"]);
+    }
+    cmd.arg(&dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Whether Obsidian is installed, for the page's button.
+#[tauri::command]
+pub fn has_obsidian() -> bool {
+    std::path::Path::new("/Applications/Obsidian.app").exists()
 }
 
 #[tauri::command]
