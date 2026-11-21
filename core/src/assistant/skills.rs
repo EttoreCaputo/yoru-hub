@@ -24,6 +24,7 @@ const BUILT_IN: &[&str] = &[
     include_str!("skills/summarize-meeting.md"),
     include_str!("skills/process-meeting.md"),
     include_str!("skills/people-profile.md"),
+    include_str!("skills/dream.md"),
 ];
 
 /// Every skill, by name: the built-in ones and the user's, theirs first
@@ -108,7 +109,7 @@ mod tests {
             assert!(!s.description.is_empty() && !s.body.is_empty() && !s.body.starts_with("---"));
         }
         assert!(get("summarize-meeting").unwrap().body.contains("`interview`"));
-        assert!(get("process-meeting").is_some() && get("people-profile").is_some());
+        assert!(get("process-meeting").is_some() && get("people-profile").is_some() && get("dream").is_some());
     }
 
     #[test]

@@ -18,7 +18,6 @@
 
 pub mod kin;
 mod search;
-pub mod sleep;
 pub mod verdicts;
 pub mod voice;
 
@@ -49,8 +48,6 @@ const MAX_LINE: usize = 300;
 const BOARD_LINE: usize = 160;
 /// Facts found for a turn, at most.
 const RECALLED: usize = 30;
-/// An episode left this long is over (as the conversation is).
-pub const EPISODE_QUIET_MS: i64 = 15 * 60 * 1000;
 /// Two facts this close in meaning are the same.
 const SAME_COSINE: f32 = 0.93;
 
@@ -114,15 +111,6 @@ pub struct Graph {
     pub relations: Vec<Relation>,
     /// The entities whose voice Yoru knows.
     pub voices: Vec<i64>,
-}
-
-/// What a memory was learnt from.
-#[derive(Debug, Clone, Serialize)]
-pub struct Episode {
-    pub id: i64,
-    pub source: String,
-    pub text: String,
-    pub started: i64,
 }
 
 pub struct Memory {
@@ -620,12 +608,7 @@ impl Memory {
             return Ok(format!("already known as [f{id}]"));
         }
         let about = about.and_then(|name| self.resolve(name, None)).unwrap_or_else(|| self.user());
-        // Its own episode is already in the graph: nothing for the sleep.
-        let episode = episode.or_else(|| {
-            let id = self.add_episode("remember", text);
-            self.mark_consolidated(id);
-            Some(id)
-        });
+        let episode = episode.or_else(|| Some(self.add_episode("remember", text)));
         let id = self.insert_fact(about, section, text, if important { 0.9 } else { 0.5 }, private, episode)?;
         Ok(format!("remembered as [f{id}]"))
     }
@@ -714,7 +697,6 @@ impl Memory {
     pub fn put_fact(&self, f: &Fact) -> Result<i64, String> {
         if f.id == 0 {
             let episode = self.add_episode("page", &f.text);
-            self.mark_consolidated(episode);
             return self.insert_fact(f.about.unwrap_or_else(|| self.user()), &f.section, &f.text, f.importance, f.private, Some(episode));
         }
         let text = line(&f.text);
@@ -1051,64 +1033,6 @@ impl Memory {
         db.last_insert_rowid()
     }
 
-    /// One exchange of the conversation, added to its open episode (a new
-    /// one after a quiet while). `who`: who spoke.
-    pub fn log_turn(&self, who: &str, said: &str, reply: &str) {
-        let db = self.db.lock().unwrap();
-        let now = now_ms();
-        let open: Option<(i64, i64)> = db
-            .query_row("SELECT id, updated FROM episodes WHERE source = 'conversation' AND ended IS NULL ORDER BY id DESC LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
-            .ok();
-        let lines = format!("{who}: {}\nYoru: {}\n", said.trim(), reply.trim());
-        match open {
-            Some((id, updated)) if now - updated < EPISODE_QUIET_MS => {
-                let _ = db.execute("UPDATE episodes SET text = text || ?1, updated = ?2 WHERE id = ?3", params![lines, now, id]);
-            }
-            other => {
-                if let Some((id, updated)) = other {
-                    let _ = db.execute("UPDATE episodes SET ended = ?1 WHERE id = ?2", params![updated, id]);
-                }
-                let _ = db.execute("INSERT INTO episodes(source, text, started, updated) VALUES ('conversation', ?1, ?2, ?2)", params![lines, now]);
-            }
-        }
-    }
-
-    /// The conversation is over (forgotten, or started over).
-    pub fn end_episode(&self) {
-        let db = self.db.lock().unwrap();
-        let _ = db.execute("UPDATE episodes SET ended = updated WHERE source = 'conversation' AND ended IS NULL", []);
-    }
-
-    /// The episodes the sleep hasn't read yet: finished, or quiet for
-    /// [`EPISODE_QUIET_MS`] (which ends them).
-    pub fn pending_episodes(&self) -> Vec<Episode> {
-        let db = self.db.lock().unwrap();
-        let _ = db.execute("UPDATE episodes SET ended = updated WHERE ended IS NULL AND updated < ?1", [now_ms() - EPISODE_QUIET_MS]);
-        let Ok(mut stmt) = db.prepare("SELECT id, source, text, started FROM episodes WHERE consolidated = 0 AND ended IS NOT NULL ORDER BY id LIMIT 8") else {
-            return Vec::new();
-        };
-        stmt.query_map([], |r| Ok(Episode { id: r.get(0)?, source: r.get(1)?, text: r.get(2)?, started: r.get(3)? })).map(|rows| rows.flatten().collect()).unwrap_or_default()
-    }
-
-    pub fn mark_consolidated(&self, id: i64) {
-        let db = self.db.lock().unwrap();
-        let _ = db.execute("UPDATE episodes SET consolidated = 1 WHERE id = ?1", [id]);
-    }
-
-    pub(crate) fn meta(&self, key: &str) -> Option<String> {
-        let db = self.db.lock().unwrap();
-        db.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).ok()
-    }
-
-    pub(crate) fn drop_meta(&self, key: &str) {
-        let db = self.db.lock().unwrap();
-        let _ = db.execute("DELETE FROM meta WHERE key = ?1", [key]);
-    }
-
-    pub(crate) fn set_meta(&self, key: &str, value: &str) {
-        let db = self.db.lock().unwrap();
-        let _ = db.execute("INSERT INTO meta(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2", params![key, value]);
-    }
 
     /// Run `f` on the database (the sleep, the voices, the verdicts).
     pub(crate) fn with_db<T>(&self, f: impl FnOnce(&Connection) -> T) -> T {
@@ -1286,19 +1210,5 @@ mod tests {
         assert!(memory.recalled("un espresso?", None, 2000, true).contains("Likes espresso"));
         assert!(!memory.recalled("garage code", None, 2000, true).contains("garage"));
         assert!(memory.recalled("garage code", None, 2000, false).contains("garage"));
-    }
-
-    #[test]
-    fn episodes_end_after_a_quiet_while() {
-        let memory = Memory::open(None);
-        memory.log_turn("Ettore", "ciao", "ciao!");
-        memory.log_turn("Ettore", "che ore sono", "le sei");
-        assert!(memory.pending_episodes().is_empty());
-        memory.end_episode();
-        let pending = memory.pending_episodes();
-        assert_eq!(pending.len(), 1);
-        assert!(pending[0].text.contains("Ettore: che ore sono\nYoru: le sei"));
-        memory.mark_consolidated(pending[0].id);
-        assert!(memory.pending_episodes().is_empty());
     }
 }

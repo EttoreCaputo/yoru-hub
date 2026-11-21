@@ -244,11 +244,7 @@ fn queue_summary(app: &AppHandle, id: String, style: Option<String>) {
         let result = summarizer(&app).and_then(|_| app.state::<AppState>().assistant.summarize_meeting(&id, &style));
         state.queued.lock().unwrap().remove(&key);
         let event = match result.and_then(|summary| meetings::get(&id).map(|meeting| (meeting, summary)).map_err(|e| e.to_string())) {
-            Ok((meeting, summary)) => {
-                // Its decisions and to-dos go to the memory, at the next sleep.
-                app.state::<AppState>().assistant.learn_meeting(meeting.title.as_deref().unwrap_or(&summary.title), &summary.for_memory());
-                Event::Summarized { meeting, summary }
-            }
+            Ok((meeting, summary)) => Event::Summarized { meeting, summary },
             Err(message) => Event::SummaryFailed { id, message },
         };
         board(&app, if matches!(event, Event::Summarized { .. }) { "done" } else { "failed" }, None);

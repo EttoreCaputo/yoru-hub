@@ -1,7 +1,7 @@
 //! What the user makes of what Yoru tells them (docs/assistant.md, Feedback):
 //! on the board an opened notification leaves with «Useful» or «Enough».
-//! Each verdict is kept; «Enough» also goes in the memory's "Don't tell me
-//! about", and a source that keeps getting it arrives more quietly.
+//! Each verdict is kept; «Enough» also goes in `me.md`'s "Don't tell me
+//! about" ([`crate::assistant::notes::Notes::keep_quiet`]), and a source that keeps getting it arrives more quietly.
 
 use rusqlite::params;
 
@@ -22,7 +22,7 @@ pub struct Verdict {
 }
 
 impl Memory {
-    /// The user's verdict on `n`. «Enough» is also a line to keep quiet about.
+    /// The user's verdict on `n` («Enough» also goes in `me.md`: the caller's).
     pub fn judge(&self, n: &Notification, useful: bool) {
         self.with_db(|db| {
             let _ = db.execute(
@@ -30,9 +30,6 @@ impl Memory {
                 params![now_ms(), n.source, n.by, n.title, useful],
             );
         });
-        if !useful {
-            let _ = self.remember(&format!("{}: {}", n.source, n.title), None, "quiet", false, false, None);
-        }
     }
 
     /// The newest verdicts on what `by` (a watcher or routine) told, or,
@@ -82,7 +79,6 @@ mod tests {
     fn enough_is_kept_quiet_and_brakes_the_source() {
         let m = Memory::open(None);
         m.judge(&note("Gmail", Some("w1"), "A newsletter"), false);
-        assert!(m.text().contains("Gmail: A newsletter"));
         assert_eq!(m.braked(Some("w1"), "Gmail", Urgency::Normal), Urgency::Normal);
         m.judge(&note("Gmail", Some("w1"), "Another newsletter"), false);
         assert_eq!(m.braked(Some("w1"), "Gmail", Urgency::Normal), Urgency::Low);

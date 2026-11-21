@@ -71,21 +71,6 @@ pub struct Summary {
     pub made_at: i64,
 }
 
-impl Summary {
-    /// What the memory's sleep reads of it: the gist, the decisions and who does what.
-    pub fn for_memory(&self) -> String {
-        let mut out = vec![self.overview.trim().to_string()];
-        out.extend(self.decisions.iter().map(|d| format!("Decided: {d}")));
-        out.extend(self.actions.iter().map(|a| {
-            let who = if a.owner.is_empty() { String::new() } else { format!(" ({})", a.owner) };
-            let when = if !a.date.is_empty() { &a.date } else { &a.due };
-            let due = if when.is_empty() { String::new() } else { format!(", by {when}") };
-            format!("To do{who}: {}{due}", a.text)
-        }));
-        out.join("\n")
-    }
-}
-
 /// The ways a summary can be laid out, like the note templates of meeting
 /// recorders (Pocket's free ones): an id and how the sections go. The rest
 /// of the summary (decisions, things to do, open questions) is the same in each.

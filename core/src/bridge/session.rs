@@ -403,6 +403,11 @@ fn on_notification_action(assistant: &crate::Assistant, params: &serde_json::Val
         "useful" | "enough" => {
             if let Some(n) = assistant.inbox.list().into_iter().find(|n| n.id == id) {
                 assistant.memory.judge(&n, action == "useful");
+                if action == "enough"
+                    && let Err(e) = assistant.notes.keep_quiet(&format!("{}: {}", n.source, n.title))
+                {
+                    crate::hostlog::line("memory", &format!("notes: keeping «{}» quiet: {e}", n.title));
+                }
             }
             assistant.inbox.dismiss(id);
         }

@@ -39,6 +39,8 @@ pub mod notes;
 pub mod coding;
 pub mod compat;
 pub mod confirm;
+#[cfg(test)]
+mod eval;
 pub mod external;
 pub mod inbox;
 mod live;
@@ -59,7 +61,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::Local;
+use chrono::{Local, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -99,6 +101,10 @@ const CONVERSATION_MAX: usize = 120;
 /// Lines of a conversation a brain starting afresh in it is reminded of.
 const EARLIER_LINES: usize = 16;
 const EARLIER_CHARS: usize = 400;
+/// The dream waits this long after the last turn.
+const DREAM_QUIET: Duration = Duration::from_secs(20 * 60);
+/// Steps of the dream: it reads a whole day.
+const DREAM_ROUNDS: usize = 60;
 /// `me.md` and the notes' index in the prompt, in characters.
 const NOTES_CHARS: usize = 12_000;
 /// Lines kept in the chat log the app shows.
@@ -609,7 +615,6 @@ impl Assistant {
     fn switch_to(&self, chat: Option<SavedChat>) {
         let chat = chat.unwrap_or_else(|| SavedChat { id: chats::new_id(), ..Default::default() });
         *self.conversation.lock().unwrap() = Conversation::default();
-        self.memory.end_episode();
         self.archive.set_current(chat.id);
         self.titles.replace(chat.title);
         *self.log.lock().unwrap() = chat.lines;
@@ -768,9 +773,6 @@ impl Assistant {
             let stale = conversation.last.is_some_and(|t| t.elapsed() > CONVERSATION_TIMEOUT) || conversation.messages.len() > CONVERSATION_MAX;
             // Another brain can't read this one's messages.
             if stale || conversation.brain != brain {
-                if !conversation.messages.is_empty() {
-                    self.memory.end_episode();
-                }
                 *conversation = Conversation::default();
             }
             std::mem::take(&mut conversation.messages)
@@ -797,18 +799,6 @@ impl Assistant {
             reply.text = crate::tts::without_audio_tags(&reply.text);
         }
         *self.speaking.lock().unwrap() = None;
-        if let Ok(reply) = &result {
-            // Staying silent ("…") is not a turn.
-            if reply.text.trim_matches(|c: char| c == '…' || c == '.' || c.is_whitespace()).is_empty() {
-                // nothing to learn
-            } else {
-                let who = match speaker {
-                    Some(p) if p == self.memory.user() => "User".to_string(),
-                    _ => self.who(speaker),
-                };
-                self.memory.log_turn(&who, text, &reply.text);
-            }
-        }
         {
             let mut conversation = self.conversation.lock().unwrap();
             // A failed turn leaves a question without an answer: start over next time.
@@ -839,7 +829,40 @@ impl Assistant {
         if indexed + embedded > 0 {
             done.push(format!("history: {indexed} transcripts indexed, {embedded} turns embedded"));
         }
+        if self.dream_due() {
+            match self.dream() {
+                Ok(what) => {
+                    done.push(format!("dream: {what}"));
+                    self.inbox.post("Yoru", "Notes tidied overnight", &what, Urgency::Low, None, Some("dream".into()));
+                }
+                Err(e) => done.push(format!("dream: {e}")),
+            }
+        }
         done
+    }
+
+    /// Once a day, from 3 in the morning, when nobody has talked to Yoru
+    /// for a while and there is a brain to dream with.
+    fn dream_due(&self) -> bool {
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let quiet = self.conversation.lock().unwrap().last.is_none_or(|t| t.elapsed() > DREAM_QUIET);
+        Local::now().hour() >= 3 && quiet && self.notes.dreamed_on() != today && self.settings().brain().is_some()
+    }
+
+    /// The nightly pass over the notes (the dream skill), on a branch of
+    /// their history merged when it ends well. What it did, in a line.
+    pub fn dream(&self) -> Result<String, String> {
+        let settings = self.settings();
+        let since = (Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d");
+        let main = self.notes.begin_dream()?;
+        let prompt = format!(
+            "{}\n\n<task>\nDream, following the dream skill. The day to reread starts on {since}.\n</task>\n\n\
+             This is a job you do on your own, not a conversation: nobody is reading your answer. Don't notify. End with one or two short lines saying what you changed.",
+            context_line(self.reply_language(None).as_deref(), Channel::Text)
+        );
+        let result = self.run(&mut Vec::new(), &prompt, self.reply_language(None).as_deref(), Channel::Text, &settings, &settings.task_effort, DREAM_ROUNDS, &TaskHost, None);
+        self.notes.end_dream(&main, result.is_ok())?;
+        Ok(result?.text.trim().to_string())
     }
 
     /// The sleep, every couple of minutes, on its own thread.
@@ -859,13 +882,6 @@ impl Assistant {
                 }
             })
             .ok();
-    }
-
-    /// A meeting's summary, for the sleep to keep its decisions.
-    pub fn learn_meeting(&self, title: &str, summary: &str) {
-        if !summary.trim().is_empty() {
-            self.memory.add_episode("meeting", &format!("{title}\n\n{summary}"));
-        }
     }
 
     /// Learn the voices of meeting `meeting`'s speakers (only `key`'s, when

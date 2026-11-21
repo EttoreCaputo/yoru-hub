@@ -62,7 +62,6 @@ impl Assistant {
             return;
         }
         self.add_line("yoru", said, Channel::Voice, actions);
-        self.memory.log_turn("User", heard, said);
     }
 }
 

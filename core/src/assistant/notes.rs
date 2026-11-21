@@ -106,6 +106,11 @@ impl Notes {
 
     fn init(&self) -> Result<(), String> {
         let Some(dir) = &self.dir else { return Ok(()) };
+        // Yoru's own marks are not notes.
+        if !dir.join(".gitignore").exists() {
+            fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            fs::write(dir.join(".gitignore"), ".migrated\n.dreamed\n").map_err(|e| e.to_string())?;
+        }
         for (folder, _) in FOLDERS.iter().chain(&[("archive", "")]) {
             fs::create_dir_all(dir.join(folder)).map_err(|e| e.to_string())?;
         }
@@ -173,23 +178,36 @@ impl Notes {
 
     /// Add a dated line to note `path`'s timeline.
     pub fn append(&self, path: &str, entry: &str, why: &str) -> Result<String, String> {
+        let line = format!("- {} {}", today(), entry.trim().trim_start_matches("- "));
+        self.add_under(path, "Timeline", &line, &message(why, &format!("Note on {path}")))?;
+        Ok(format!("added to {path}"))
+    }
+
+    /// «Enough» on a notification: a line in `me.md`'s "Don't tell me about",
+    /// which every request carries.
+    pub fn keep_quiet(&self, what: &str) -> Result<(), String> {
+        self.add_under("me.md", "Don't tell me about", &format!("- {} [Source: «Enough» on a notification | {}]", what.trim(), today()), "Keep quiet about a notification the user found useless")
+    }
+
+    /// `line` at the end of section `heading` of note `path` (the section
+    /// added at the end when missing), committed as `commit`.
+    fn add_under(&self, path: &str, heading: &str, line: &str, commit: &str) -> Result<(), String> {
         let file = self.file(path)?;
         let _lock = self.lock.lock().unwrap();
         let text = fs::read_to_string(&file).map_err(|_| format!("no note {path}: write it first with brain_write"))?;
-        let line = format!("- {} {}", today(), entry.trim().trim_start_matches("- "));
-        let text = match text.find("\n## Timeline") {
+        let head = format!("\n## {heading}\n");
+        let text = match text.find(&head) {
             Some(at) => {
-                // At the end of the timeline: before the next section, if any.
-                let body = at + "\n## Timeline".len();
+                // Before the next section, if any.
+                let body = at + head.len() - 1;
                 let end = text[body..].find("\n## ").map_or(text.len(), |i| body + i);
-                format!("{}\n{line}\n{}", text[..end].trim_end(), text[end..].trim_start_matches('\n'))
+                format!("{}\n{line}\n\n{}", text[..end].trim_end(), text[end..].trim_start_matches('\n'))
             }
-            None => format!("{}\n\n## Timeline\n{line}\n", text.trim_end()),
+            None => format!("{}\n\n## {heading}\n{line}\n", text.trim_end()),
         };
         fs::write(&file, stamp(text.trim_end()) + "\n").map_err(|e| e.to_string())?;
         self.save_index()?;
-        self.commit(&message(why, &format!("Note on {path}")))?;
-        Ok(format!("added to {path}"))
+        self.commit(commit)
     }
 
     /// Every note but the archived ones, by folder.
@@ -284,6 +302,53 @@ impl Notes {
             Ok(())
         };
         run().map_err(|e| format!("the notes' history: {e}"))
+    }
+
+    /// The day of the last dream (YYYY-MM-DD), empty if never.
+    pub fn dreamed_on(&self) -> String {
+        self.dir.as_ref().and_then(|d| fs::read_to_string(d.join(".dreamed")).ok()).unwrap_or_default().trim().to_string()
+    }
+
+    /// Start tonight's dream: its writes go to a branch of their own,
+    /// `dream/<day>`, from what is there now. The branch the notes were on.
+    pub fn begin_dream(&self) -> Result<String, String> {
+        let dir = self.dir()?;
+        let _lock = self.lock.lock().unwrap();
+        fs::write(dir.join(".dreamed"), today()).map_err(|e| e.to_string())?;
+        let run = || -> Result<String, git2::Error> {
+            let repo = Repository::open(dir)?;
+            let head = repo.head()?;
+            let main = head.name().unwrap_or("refs/heads/master").to_string();
+            let branch = repo.branch(&format!("dream/{}", today()), &head.peel_to_commit()?, true)?;
+            repo.set_head(branch.get().name().unwrap_or_default())?;
+            Ok(main)
+        };
+        run().map_err(|e| format!("the notes' history: {e}"))
+    }
+
+    /// End the dream: kept, `main` moves on to what it wrote (the branch
+    /// stays, to see or undo the night); not kept, the notes go back to how
+    /// they were.
+    pub fn end_dream(&self, main: &str, keep: bool) -> Result<(), String> {
+        let dir = self.dir()?;
+        let _lock = self.lock.lock().unwrap();
+        let run = || -> Result<(), git2::Error> {
+            let repo = Repository::open(dir)?;
+            let dreamt = repo.head()?.peel_to_commit()?.id();
+            if keep {
+                repo.reference(main, dreamt, true, "the dream, kept")?;
+                repo.set_head(main)?;
+            } else {
+                repo.set_head(main)?;
+                repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force().remove_untracked(true)))?;
+            }
+            Ok(())
+        };
+        run().map_err(|e| format!("the notes' history: {e}"))?;
+        if !keep {
+            self.save_index()?;
+        }
+        Ok(())
     }
 
     /// The commits, newest first: when, and what.
@@ -533,6 +598,35 @@ mod tests {
     }
 
     const MARCO: &str = "---\ntype: person\ndescription: Marco, head of design at Acme\naliases: [Marco Rossi]\n---\n# Marco\n\nHead of design at Acme («I moved to Acme in September»).\n";
+
+    #[test]
+    fn a_dream_is_kept_or_undone() {
+        let notes = Notes::open(Some(&temp()));
+        let main = notes.begin_dream().unwrap();
+        notes.write("people/marco.md", MARCO, "dreamt").unwrap();
+        notes.end_dream(&main, false).unwrap();
+        assert!(notes.read("people/marco.md", false).is_err(), "undone");
+        assert!(!notes.prompt(false, 12_000).contains("marco"));
+        assert_eq!(notes.dreamed_on(), today());
+        let main = notes.begin_dream().unwrap();
+        notes.write("people/marco.md", MARCO, "dreamt").unwrap();
+        notes.end_dream(&main, true).unwrap();
+        assert!(notes.read("people/marco.md", false).is_ok());
+        assert!(notes.history(1)[0].1.contains("dreamt"));
+        let repo = Repository::open(notes.dir().unwrap()).unwrap();
+        assert_eq!(repo.head().unwrap().name().unwrap(), main);
+        assert!(repo.find_branch(&format!("dream/{}", today()), git2::BranchType::Local).is_ok());
+    }
+
+    #[test]
+    fn enough_goes_in_me_under_its_heading() {
+        let notes = Notes::open(Some(&temp()));
+        notes.keep_quiet("Gmail: A newsletter").unwrap();
+        let me = notes.read("me.md", false).unwrap();
+        let quiet = &me[me.find("## Don't tell me about").unwrap()..];
+        assert!(quiet.lines().nth(1).unwrap().starts_with("- Gmail: A newsletter"), "{me}");
+        assert!(notes.prompt(false, 12_000).contains("Gmail: A newsletter"));
+    }
 
     #[test]
     fn writes_appends_indexes_and_commits() {
