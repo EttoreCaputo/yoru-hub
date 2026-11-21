@@ -320,6 +320,7 @@ class Store {
       if (e.kind === "failed") this.transcribeErrors = { ...this.transcribeErrors, [id]: e.message };
       else this.#recorded(e.meeting);
     } else if (e.kind === "model") this.modelDownload = e.fraction;
+    else if (e.kind === "todos") void this.refreshTodos();
     else if (e.kind === "summarizing") {
       this.summarizing = { ...this.summarizing, [e.id]: e.fraction };
       const { [e.id]: _, ...rest } = this.summaryErrors;

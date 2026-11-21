@@ -179,7 +179,7 @@ fn speakers_of(meeting: &Meeting, transcript: &Transcript) -> Vec<Speaker> {
 }
 
 /// What to call each speaker: their name, else `you` or `person` and a number.
-pub(super) fn labels(speakers: &[Speaker], you: &str, person: &str) -> BTreeMap<String, String> {
+pub fn labels(speakers: &[Speaker], you: &str, person: &str) -> BTreeMap<String, String> {
     speakers
         .iter()
         .map(|s| (s.key.clone(), s.name.clone().unwrap_or_else(|| if s.number == 0 { you.to_string() } else { format!("{person} {}", s.number) })))

@@ -104,6 +104,20 @@ pub fn start(app: &AppHandle) {
         }));
     }
     {
+        // What Yoru changes with the app's tools shows on its pages, as if done there.
+        let app = app.clone();
+        a.on_app_change(Arc::new(move |change| {
+            use yoru_core::assistant::AppChange;
+            use yoru_core::meetings::Event;
+            let event = match change {
+                AppChange::Transcript(meeting) => Event::Transcribed { meeting },
+                AppChange::Summary(meeting, summary) => Event::Summarized { meeting, summary },
+                AppChange::Todos => Event::Todos,
+            };
+            let _ = app.emit("meeting", &event);
+        }));
+    }
+    {
         let app = app.clone();
         let named = a.clone();
         a.on_chat(Arc::new(move |lines| {

@@ -33,6 +33,7 @@
 //! to: thinking blocks are tied to the history they were made in, so a long
 //! or old conversation starts over instead of being trimmed.
 
+pub mod app_tools;
 pub mod coding;
 pub mod compat;
 pub mod confirm;
@@ -65,6 +66,7 @@ use crate::link::Tool;
 use crate::stream::{Delta, OnDelta};
 use crate::timers::Timers;
 
+pub use app_tools::AppChange;
 pub use confirm::{Confirmation, Confirmations};
 pub use external::{Errand, ErrandListener, ExternalTool, ExternalTools};
 pub use inbox::{Inbox, InboxChange, Notification, Urgency};
@@ -353,6 +355,8 @@ pub struct Assistant {
     /// The other conversations ([`chats`]).
     archive: chats::Archive,
     listeners: Mutex<Vec<ChatListener>>,
+    /// Told what the app's tools changed ([`app_tools`]), for the app's pages.
+    app_changes: Mutex<Option<Arc<dyn Fn(AppChange) + Send + Sync>>>,
     /// "Do not disturb" until then (Unix ms), on top of the quiet hours; not
     /// kept across launches, on purpose.
     quiet_until: Mutex<Option<u64>>,
@@ -403,6 +407,7 @@ impl Assistant {
             titles: title::Titles::open(file("conversation_title.json")),
             archive: chats::Archive::open(file("conversations")),
             listeners: Mutex::default(),
+            app_changes: Mutex::default(),
             quiet_until: Mutex::default(),
             language: Mutex::default(),
             audio_tags: AtomicBool::new(false),
@@ -488,6 +493,11 @@ impl Assistant {
             Brain::Anthropic => None,
             brain => compat::client(&settings, brain).ok()?.limit(),
         }
+    }
+
+    /// Tell `listener` what the app's tools change.
+    pub fn on_app_change(&self, listener: Arc<dyn Fn(AppChange) + Send + Sync>) {
+        *self.app_changes.lock().unwrap() = Some(listener);
     }
 
     pub fn on_chat(&self, listener: ChatListener) {
@@ -1012,7 +1022,7 @@ impl Assistant {
         if settings.web_search {
             tools.push(json!({"type": "web_search_20260209", "name": "web_search", "max_uses": 5}));
         }
-        let deferred: Vec<ExternalTool> = external.iter().cloned().chain(board_extras(board)).collect();
+        let deferred: Vec<ExternalTool> = external.iter().cloned().chain(board_extras(board)).chain(app_tools::tools()).collect();
         if !deferred.is_empty() {
             // The services' tools and the board's settings load only when a request needs them.
             tools.push(json!({"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}));
@@ -1146,6 +1156,19 @@ impl Assistant {
             _ => {}
         }
         let language = self.reply_language(None).unwrap_or_else(|| crate::intents::system_language().into());
+        let (you, person) = if language.starts_with("it") { ("Tu", "Persona") } else { ("You", "Person") };
+        let listener = self.app_changes.lock().unwrap().clone();
+        let changed = |change: AppChange| {
+            if let Some(listener) = &listener {
+                listener(change);
+            }
+        };
+        if let Some(result) = app_tools::call(name, input, you, person, &changed) {
+            if result.is_ok() {
+                self.show_done(app_tools::SERVICE, "note");
+            }
+            return result;
+        }
         if let Some(result) = self.timers.call_tool(name, input, &language) {
             if result.is_ok() {
                 self.show_done("Timers", "note");
@@ -1685,7 +1708,10 @@ mod tests {
         assert_eq!(send["defer_loading"], true);
         assert!(send["description"].as_str().unwrap().contains("asked to allow"));
         let plain = a.tool_list(&Settings { web_search: false, ..Settings::default() }, &[], &[]);
-        assert!(!plain.iter().any(|t| t["name"] == "tool_search_tool_bm25" || t["name"] == "web_search"));
+        // The app's own tools are always there to find, deferred like a service's.
+        assert!(!plain.iter().any(|t| t["name"] == "web_search"));
+        assert!(plain.iter().any(|t| t["name"] == "tool_search_tool_bm25"));
+        assert_eq!(plain.iter().find(|t| t["name"] == "meeting_read").unwrap()["defer_loading"], true);
     }
 
     #[test]

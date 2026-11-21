@@ -26,9 +26,9 @@ Each knows only its slice. A summary doesn't know who the people in the meeting 
   - always loaded: the memory (`brain_search`, `brain_read`, `brain_write`, `brain_append`, `history_search`, `history_read`), `notify`, timers, `find_tools`, `load_tools`, `load_skill`, the web search, and the board's essentials (`react`, `get_state`);
   - loaded when the model looks for them (`find_tools`, `load_tools`, which already do this for the connectors): the app's own tools (below), the connectors' tools, and the board's other tools;
   - **skills**: Markdown files of instructions (a name and a one-line description in the frontmatter, then the body), with only the names and descriptions in the prompt (a `# Skills` section). The model loads one with `load_skill` when the request needs it. Built since 2026-11-21 (`assistant/skills.rs`): Yoru's own are built in (`core/src/assistant/skills/*.md`), and a file in the data folder's `skills/` adds one or replaces the built-in of the same name. The first is `summarize-meeting` (the styles and rules of `summary.rs`, and how to read the transcript and save the summary with the meeting tools still to come); `process-meeting`, `people-profile` and `dream` come with the notes.
-- **The app's own tools.** The agent can read and change every part of Yoru:
-  - meetings: list, read (a transcript in parts, by speaker and time), rename a speaker, write the summary, record or stop;
-  - to-dos: list, tick, add;
+- **The app's own tools.** The agent can read and change every part of Yoru. They are found like a service's tools (service "Yoru": tool search on Claude, `find_tools` on the others), and what they change reaches the app's pages at once (`Assistant::on_app_change`). Built so far (`assistant/app_tools.rs`, 2026-11-21): `meeting_list`, `meeting_read` (15,000 characters a call, lines numbered, speakers by name), `meeting_summary`, `meeting_rename_speaker`, `meeting_save_summary`, `todo_list`, `todo_set_done`. Still to come:
+  - meetings: record or stop;
+  - to-dos: add one;
   - tasks, routines, the inbox, the conversations (list, read);
   - the settings: read all of them; a change goes through the confirmations (`confirm.rs`), like an action on a service;
   - the boards: their state and settings, as today.

@@ -382,7 +382,8 @@ export type MeetingEvent =
   | { kind: "model"; fraction: number }
   | { kind: "summarizing"; id: string; fraction: number }
   | { kind: "summarized"; meeting: Meeting; summary: Summary }
-  | { kind: "summary_failed"; id: string; message: string };
+  | { kind: "summary_failed"; id: string; message: string }
+  | { kind: "todos" };
 export type Onboarding = { done: boolean; tour_version: number };
 /** Where a Mac permission stands (`unknown`: never asked). */
 export type PermissionState = "granted" | "denied" | "restricted" | "unknown" | "unsupported";

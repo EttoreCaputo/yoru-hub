@@ -284,8 +284,8 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     messages.push(json!({"role": "user", "content": prompt}));
     let external_tools = a.external().map(|e| e.tools()).unwrap_or_default();
     let board_tools = host.board_tools();
-    // What find_tools searches: the services' tools and the board's beyond its essentials.
-    let findable: Vec<ExternalTool> = external_tools.iter().cloned().chain(board_extras(&board_tools)).collect();
+    // What find_tools searches: the services' tools, the board's beyond its essentials, and the app's.
+    let findable: Vec<ExternalTool> = external_tools.iter().cloned().chain(board_extras(&board_tools)).chain(super::app_tools::tools()).collect();
     // A follow-up ("and reply to it") still has the tools the conversation used.
     let mut loaded: Vec<&ExternalTool> = used.iter().filter_map(|n| findable.iter().find(|t| &t.name == n)).collect();
     loaded.drain(..loaded.len().saturating_sub(budget.loaded));
@@ -566,7 +566,7 @@ mod tests {
         // The services are named; none of their tools is loaded yet.
         assert!(names.contains(&"notify") && names.contains(&"find_tools") && names.contains(&"load_tools"));
         assert!(!names.contains(&"gmail__send") && !names.contains(&"web_search"));
-        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach the user's services: Gmail (2 tools)."));
+        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach the user's services: Gmail (2 tools), Yoru (7 tools)."));
         // The second carries the calls back without the reasoning, then the results.
         let second = requests.recv().unwrap();
         let back = &second["messages"][2];
@@ -712,7 +712,7 @@ mod tests {
         let first = requests.recv().unwrap();
         assert!(names(&first).contains(&"react".to_string()) && names(&first).contains(&"get_state".to_string()));
         assert!(!names(&first).contains(&"set_volume".to_string()) && names(&first).contains(&"find_tools".to_string()));
-        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach the user's services: Yoru's board (1 tool)."));
+        assert!(first["messages"][0]["content"].as_str().unwrap().contains("you can reach the user's services: Yoru's board (1 tool), Yoru (7 tools)."));
         assert!(names(&requests.recv().unwrap()).contains(&"set_volume".to_string()));
     }
 

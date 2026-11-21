@@ -12,10 +12,10 @@ mod summary;
 mod todos;
 mod transcript;
 
-pub use summary::{ActionItem, Complete, STYLES, Section, Summary, summarize, summary};
+pub use summary::{ActionItem, Complete, STYLES, Section, Summary, store as store_summary, summarize, summary};
 pub use todos::{Todo, set_done as set_todo_done, todos};
 
-pub use transcript::{Format, Line, Settings, Speaker, SummaryBy, Transcript, When, download_model, export, import, import_recording, model_present, rename_speaker, set_settings, settings, transcribe, transcript, voices};
+pub use transcript::{Format, Line, labels as speaker_labels, Settings, Speaker, SummaryBy, Transcript, When, download_model, export, import, import_recording, model_present, rename_speaker, set_settings, settings, transcribe, transcript, voices};
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -161,6 +161,8 @@ pub enum Event {
     Summarized { meeting: Meeting, summary: Summary },
     /// Summarizing meeting `id` failed.
     SummaryFailed { id: String, message: String },
+    /// A to-do was ticked off or opened again (by Yoru: the app ticks its own).
+    Todos,
 }
 
 fn helper() -> io::Result<PathBuf> {

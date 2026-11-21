@@ -206,6 +206,15 @@ pub fn summarize(id: &str, style: &str, you: &str, person: &str, by: &str, chunk
     };
     summary.style = style.to_string();
     summary.by = by.to_string();
+    store(id, &mut summary)?;
+    on_progress(1.0);
+    Ok(summary)
+}
+
+/// Keep `summary` as meeting `id`'s, made now; a meeting the user didn't
+/// name takes its title. Whoever wrote it (the summarizer, the agent) goes
+/// through here.
+pub fn store(id: &str, summary: &mut Summary) -> io::Result<()> {
     summary.made_at = chrono::Local::now().timestamp_millis();
     let folder = folder(id)?;
     fs::write(folder.join("summary.json"), serde_json::to_vec_pretty(&summary)?)?;
@@ -215,9 +224,7 @@ pub fn summarize(id: &str, style: &str, you: &str, person: &str, by: &str, chunk
     if meeting.title.is_none() && !summary.title.trim().is_empty() {
         meeting.title = Some(summary.title.trim().to_string());
     }
-    save(&folder, &meeting)?;
-    on_progress(1.0);
-    Ok(summary)
+    save(&folder, &meeting)
 }
 
 /// The language a text is in, by name, from its most common short words:
