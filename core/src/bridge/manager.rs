@@ -353,14 +353,17 @@ fn boards(running: &[Running]) -> usize {
 }
 
 /// The targets to run sessions for: on USB, on WiFi, and why there are none.
+/// A fixed WiFi target is the only one; a fixed USB port only replaces the
+/// search on USB, so the board unplugged is still found on the WiFi.
 fn candidates(config: &BridgeConfig) -> (Vec<String>, Vec<String>, Option<&'static str>) {
-    if let Some(port) = &config.port {
-        return match wifi::target(port) {
-            Some(_) => (Vec::new(), vec![port.clone()], None),
-            None => (vec![port.clone()], Vec::new(), None),
-        };
+    if let Some(port) = config.port.as_ref().filter(|p| wifi::target(p).is_some()) {
+        return (Vec::new(), vec![port.clone()], None);
     }
-    let usb = if config.transport == Transport::Wifi { Vec::new() } else { serial::board_ports() };
+    let usb = match &config.port {
+        Some(port) => vec![port.clone()],
+        None if config.transport == Transport::Wifi => Vec::new(),
+        None => serial::board_ports(),
+    };
     let wifi_targets: Vec<String> =
         if config.transport == Transport::Usb { Vec::new() } else { wifi::load_paired().into_iter().map(|b| format!("{}:{}", wifi::SCHEME, b.id)).collect() };
     let why = match config.transport {
@@ -461,9 +464,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_fixed_port_is_the_only_candidate() {
-        let config = BridgeConfig { port: Some("/dev/ttyACM9".into()), ..Default::default() };
+    fn a_fixed_port_replaces_the_search_on_usb() {
+        let config = BridgeConfig { port: Some("/dev/ttyACM9".into()), transport: Transport::Usb, ..Default::default() };
         assert_eq!(candidates(&config), (vec!["/dev/ttyACM9".to_string()], vec![], None));
+        let config = BridgeConfig { port: Some("/dev/ttyACM9".into()), ..Default::default() };
+        assert_eq!(candidates(&config).0, vec!["/dev/ttyACM9".to_string()], "the paired WiFi boards are tried too");
         let config = BridgeConfig { port: Some("wifi:a1b2c3d4e5f6".into()), ..Default::default() };
         assert_eq!(candidates(&config), (vec![], vec!["wifi:a1b2c3d4e5f6".to_string()], None));
     }
