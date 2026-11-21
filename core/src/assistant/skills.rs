@@ -20,7 +20,11 @@ pub struct Skill {
 }
 
 /// The skills that come with Yoru.
-const BUILT_IN: &[&str] = &[include_str!("skills/summarize-meeting.md")];
+const BUILT_IN: &[&str] = &[
+    include_str!("skills/summarize-meeting.md"),
+    include_str!("skills/process-meeting.md"),
+    include_str!("skills/people-profile.md"),
+];
 
 /// Every skill, by name: the built-in ones and the user's, theirs first
 /// where both have a name.
@@ -104,6 +108,7 @@ mod tests {
             assert!(!s.description.is_empty() && !s.body.is_empty() && !s.body.starts_with("---"));
         }
         assert!(get("summarize-meeting").unwrap().body.contains("`interview`"));
+        assert!(get("process-meeting").is_some() && get("people-profile").is_some());
     }
 
     #[test]

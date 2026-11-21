@@ -43,6 +43,7 @@ tempfile = "3.27.0"
 # Gemini Live's TLS provider, chosen by hand: the app's connectors also bring
 # in aws-lc-rs, and with two providers rustls refuses to pick one.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
 
 # The mouse pointer (Yoru's eyes) on X11, loaded at run time.
 [target.'cfg(target_os = "linux")'.dependencies]

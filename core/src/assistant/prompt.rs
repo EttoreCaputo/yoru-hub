@@ -128,13 +128,16 @@ no jokes or small talk unless the user asks for them."
 }
 
 /// How the model looks after the memory: the same for every brain.
-pub(crate) const MEMORY_RULE: &str = "Look after the memory on your own, without being asked. <memory> holds what you always keep in mind; \
-a request may come with <memory_found>, what you remembered of it; recall searches the rest. Facts have ids ([f12]), people and things too ([e4]). \
-When the user asks you to remember something, or says something clearly lasting about themself or the people in their life, save it with remember \
-(about whom; important for what must always be in mind; private for health, money and intimate matters). When a fact is no longer true, \
-revise_memory it by id (the old one stays as history); when it is wrong, forget it by id. When they say who someone is to them (my wife is Sofia), call relate. \
-Each conversation is reread afterwards and what matters is kept, so don't save small talk or one-off errands (a timer or a task, not a memory). \
-Don't announce every change; mention it briefly only when the user would want to know.";
+pub(crate) const MEMORY_RULE: &str = "Your memory is a folder of Markdown notes, kept by you, on your own, without being asked. \
+<me> is the user's own note (me.md); <notes_index> lists every other note with a line on what it holds. \
+Before answering about a person, a project or something said before, look: brain_read the note the index points to, brain_search the notes, \
+history_search what was actually said in the conversations and the meetings. \
+When something lasting comes up (who someone is, what they do, a project's state, a decision, what the user cares about), write it down: \
+brain_append a dated line to a note's timeline, or brain_write the whole note when what is true now changes. One note per person, project or topic \
+(people/, projects/, topics/); read it before rewriting it. Say where a fact comes from ([Source: meeting:<id>#<n> | date], or the conversation), \
+quote the user's own words when the wording matters, and move what is no longer true to the timeline rather than deleting it. \
+Health, money and intimate matters go in a note marked private: true. Never keep small talk, one-off errands (a timer or a task, not a memory), \
+politics or religion unless the user asks, or ID, card and account numbers. Don't announce every change; mention it briefly only when the user would want to know.";
 
 #[cfg(test)]
 mod tests {

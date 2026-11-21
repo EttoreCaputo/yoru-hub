@@ -2,7 +2,7 @@
 
 Decided and built on 2026-11-08 (where it stands: How it works, below). Yoru's memory was one Markdown file (`memory.md`) put whole into every prompt; it is now a graph of the people and things in your life, with facts that know when they were true, searched for what each answer needs, consolidated after each conversation and tidied once a night. Yoru also knows who is speaking by their voice.
 
-Planned on 2026-11-21: this graph gives way to a second brain of Markdown notes, kept by Yoru's one agent and fed from conversations and meetings' whole transcripts. See [agent.md](agent.md).
+Replaced on 2026-11-21: this graph gave way to a second brain of Markdown notes (`brain/` in the data folder), kept by Yoru's one agent and fed from conversations and meetings' whole transcripts; the graph was written out once as notes. What follows is the history of the graph; `memory.db` still holds the voice prints and the people they belong to. See [agent.md](agent.md).
 
 ## What was wrong with the file
 

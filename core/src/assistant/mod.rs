@@ -11,8 +11,8 @@
 //! new ([`watchers`]), the morning recap ([`routines`]), a task the user gave
 //! it ([`tasks`]).
 //!
-//! How a turn goes: the model gets Yoru's own tools (`notify`, `remember`,
-//! `forget`, `revise_memory`, `get_inbox`, the timers), the board's, web search (a server
+//! How a turn goes: the model gets Yoru's own tools (`notify`, the notes'
+//! `brain_*`, `history_search`, `get_inbox`, the timers), the board's, web search (a server
 //! tool), and the connectors' tools deferred behind tool search, so only
 //! the ones a request needs are loaded. It calls them until it answers in
 //! words. A connector tool that changes something (sends a mail, creates an
@@ -35,6 +35,7 @@
 
 pub mod app_tools;
 pub mod history;
+pub mod notes;
 pub mod coding;
 pub mod compat;
 pub mod confirm;
@@ -58,7 +59,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::{Local, Timelike};
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -98,17 +99,10 @@ const CONVERSATION_MAX: usize = 120;
 /// Lines of a conversation a brain starting afresh in it is reminded of.
 const EARLIER_LINES: usize = 16;
 const EARLIER_CHARS: usize = 400;
+/// `me.md` and the notes' index in the prompt, in characters.
+const NOTES_CHARS: usize = 12_000;
 /// Lines kept in the chat log the app shows.
 const LOG_KEEP: usize = 300;
-/// The facts found for a request, in characters (a small local model gets half).
-const RECALL_CHARS: usize = 4000;
-/// Tries at reading an episode before the sleep gives it up.
-const SLEEP_TRIES: i64 = 6;
-/// The wait after the first failure, doubled after each next one
-/// (10, 20, 40, 80, 160 minutes).
-const SLEEP_RETRY_MS: i64 = 10 * 60 * 1000;
-/// The core of the memory, always in the prompt, in characters.
-const CORE_CHARS: usize = 12_000;
 /// How long a card waits for Allow or Deny.
 pub const CONFIRM_WAIT: Duration = Duration::from_secs(90);
 /// How long a connector's tool may take.
@@ -342,6 +336,8 @@ pub struct Assistant {
     dir: Option<PathBuf>,
     settings: Mutex<Settings>,
     pub memory: Memory,
+    /// What Yoru knows: the notes in `brain/`.
+    pub notes: notes::Notes,
     /// Every conversation and meeting transcript, searchable.
     pub history: history::History,
     pub inbox: Arc<Inbox>,
@@ -402,6 +398,7 @@ impl Assistant {
         Self {
             memory: Memory::open(dir.as_deref()),
             history: history::History::open(dir.as_deref()),
+            notes: notes::Notes::open(dir.as_deref()),
             coding: coding::Coding::new(inbox.clone()),
             inbox,
             tasks: Arc::new(Tasks::open(file("tasks.json"))),
@@ -725,12 +722,7 @@ impl Assistant {
         let user = self.memory.user();
         let brain = settings.brain();
         let cloud = brain != Some(Brain::Ollama);
-        let max = if cloud { RECALL_CHARS } else { RECALL_CHARS / 2 };
         let mut notes = Vec::new();
-        let found = self.memory.recalled(text, speaker, max, cloud);
-        if !found.is_empty() {
-            notes.push(format!("<memory_found>\n{found}\n</memory_found>"));
-        }
         let who = self.who(speaker);
         let who = if cloud { self.memory.veil(&who, &self.memory.called_in(text)) } else { who };
         match speaker {
@@ -831,61 +823,21 @@ impl Assistant {
         result
     }
 
-    /// One pass of the sleep (docs/memory.md, Sleep): the finished
-    /// episodes reread and kept, vectors for new facts, and once a night
-    /// (3 to 5) the memory tidied. What it did, a line each.
+    /// One pass of the sleep: the old memory written out as notes once, and
+    /// the transcripts indexed. The notes are kept by the agent itself
+    /// (docs/agent.md, Writing). What it did, a line each.
     pub fn sleep_once(&self) -> Vec<String> {
         let mut done = Vec::new();
-        if !self.is_ready() {
-            return done;
-        }
-        let settings = self.settings();
-        let ask = |prompt: &str, schema: &Value| self.complete_json(prompt, schema);
-        let now = memory::now_ms();
-        for episode in self.memory.pending_episodes() {
-            // Failures so far, and when to try again: "2:1731900000000".
-            let key = format!("sleep_failed_{}", episode.id);
-            let state = self.memory.meta(&key).unwrap_or_default();
-            let mut state = state.split(':').map(|v| v.parse::<i64>().unwrap_or(0));
-            let (failed, retry_at) = (state.next().unwrap_or(0), state.next().unwrap_or(0));
-            if now < retry_at {
-                continue;
-            }
-            match memory::sleep::consolidate(&self.memory, &episode, &settings.name, &ask) {
-                Ok(what) => {
-                    self.memory.drop_meta(&key);
-                    done.push(format!("episode {} ({}): {what}", episode.id, episode.source));
-                }
-                Err(e) => {
-                    // The brain may be away: try again later, waiting longer
-                    // each time, for some hours, not forever.
-                    let failed = failed + 1;
-                    if failed >= SLEEP_TRIES {
-                        self.memory.mark_consolidated(episode.id);
-                        self.memory.drop_meta(&key);
-                        done.push(format!("episode {}: {e}; given up after {failed} tries", episode.id));
-                    } else {
-                        let wait = SLEEP_RETRY_MS << (failed - 1);
-                        self.memory.set_meta(&key, &format!("{failed}:{}", now + wait));
-                        done.push(format!("episode {}: {e}; trying again in {} min", episode.id, wait / 60_000));
-                    }
-                    break;
-                }
+        if !self.notes.migrated() {
+            match notes::migrate(&self.memory, &self.notes) {
+                Ok(n) => done.push(format!("notes: the old memory written out as {n} notes")),
+                Err(e) => done.push(format!("notes: writing out the old memory: {e}")),
             }
         }
-        self.memory.embed_missing();
         let indexed = self.sync_history();
         let embedded = self.history.embed_missing(512);
         if indexed + embedded > 0 {
             done.push(format!("history: {indexed} transcripts indexed, {embedded} turns embedded"));
-        }
-        let today = Local::now().format("%Y-%m-%d").to_string();
-        if (3..5).contains(&Local::now().hour()) && self.memory.meta("night").as_deref() != Some(today.as_str()) {
-            self.memory.set_meta("night", &today);
-            match memory::sleep::tidy(&self.memory, &settings.name, &ask) {
-                Ok(what) => done.push(format!("tidy: {what}")),
-                Err(e) => done.push(format!("tidy: {e}")),
-            }
         }
         done
     }
@@ -960,8 +912,10 @@ impl Assistant {
     pub fn summarize_meeting(&self, id: &str, style: &str) -> Result<crate::meetings::Summary, String> {
         let settings = self.settings();
         let before = crate::meetings::summary(id).ok().flatten().map(|s| s.made_at);
+        // The first summary also carries the meeting into the notes; a new style of the same one doesn't.
+        let then = if before.is_none() { " Then carry it into the notes, following the process-meeting skill." } else { "" };
         let prompt = format!(
-            "{}\n\n<task>\nSummarize meeting {id} in style {style}, following the summarize-meeting skill.\n</task>\n\n\
+            "{}\n\n<task>\nSummarize meeting {id} in style {style}, following the summarize-meeting skill.{then}\n</task>\n\n\
              This is a job you do on your own, not a conversation: nobody is reading your answer. Don't notify. End with one short line saying what you did.",
             context_line(self.reply_language(None).as_deref(), Channel::Text)
         );
@@ -997,7 +951,7 @@ impl Assistant {
         let tools = self.tool_list(settings, &board_tools, &external_tools);
         let mut system = json!([
             {"type": "text", "text": prompt::system(&settings.name, prompt::Reach::Claude), "cache_control": {"type": "ephemeral"}},
-            {"type": "text", "text": format!("<memory>\n{}\n</memory>", self.memory.core(CORE_CHARS, true))},
+            {"type": "text", "text": self.notes.prompt(false, NOTES_CHARS)},
         ]);
         // After the cached part: a change of language keeps the cache.
         if let Some(l) = self.reply_language(None) {
@@ -1128,52 +1082,7 @@ impl Assistant {
                 let id = self.inbox.post(source, title, input["text"].as_str().unwrap_or_default(), urgency, url, input["by"].as_str().map(str::to_string));
                 return Ok(format!("notified ({id}, {})", urgency.name()));
             }
-            "remember" => {
-                let result = self.memory.remember(
-                    input["text"].as_str().unwrap_or_default(),
-                    input["about"].as_str(),
-                    input["section"].as_str().unwrap_or("notes"),
-                    input["important"].as_bool().unwrap_or(false),
-                    input["private"].as_bool().unwrap_or(false),
-                    None,
-                );
-                if result.is_ok() {
-                    self.show_done("Memory", "remember");
-                }
-                return result;
-            }
-            "forget" => {
-                let ids: Vec<i64> = input["ids"].as_array().into_iter().flatten().filter_map(|v| v.as_str().and_then(memory::fact_id).or(v.as_i64())).collect();
-                let result = self.memory.forget_tool(&ids, input["text"].as_str().unwrap_or_default());
-                if result.as_ref().is_ok_and(|r| r.starts_with("forgot")) {
-                    self.show_done("Memory", "forget");
-                }
-                return result;
-            }
-            "revise_memory" => {
-                let which = input["id"].as_str().or(input["old"].as_str()).unwrap_or_default();
-                let result = self.memory.revise(which, input["text"].as_str().unwrap_or_default());
-                if result.is_ok() {
-                    self.show_done("Memory", "remember");
-                }
-                return result;
-            }
-            "recall" => {
-                let cloud = self.settings().brain() != Some(Brain::Ollama);
-                return Ok(self.memory.recall(input["query"].as_str().unwrap_or_default(), cloud));
-            }
-            "relate" => {
-                let result = self.memory.relate_tool(
-                    input["person"].as_str().unwrap_or_default(),
-                    input["relation"].as_str().unwrap_or_default(),
-                    input["of"].as_str(),
-                    input["gender"].as_str(),
-                );
-                if result.is_ok() {
-                    self.show_done("Memory", "remember");
-                }
-                return result;
-            }
+            "brain_search" | "brain_read" | "brain_write" | "brain_append" => return notes::call(self, name, input),
             "this_is" => return self.this_is(input["name"].as_str().unwrap_or_default(), input["is_user"].as_bool().unwrap_or(false)),
             n if coding::TOOLS.contains(&n) => return self.coding.call_tool(n, input),
             "tasks" => {
@@ -1323,7 +1232,6 @@ fn spoken_wait(d: Duration, language: &str) -> String {
 
 /// Yoru's own tools.
 fn own_tools() -> Vec<Value> {
-    let sections: Vec<&str> = memory::SECTIONS.iter().map(|(k, _)| *k).collect();
     let mut tools = vec![
         json!({
             "name": "notify",
@@ -1338,60 +1246,6 @@ fn own_tools() -> Vec<Value> {
                     "url": {"type": "string", "description": "A link that opens it, if there is one"},
                 },
                 "required": ["title", "urgency"],
-            },
-        }),
-        json!({
-            "name": "remember",
-            "description": "Save a lasting fact in the memory, about the user or someone or something in their life. Sections: about (who they are), \
-matters (people, projects, topics that matter to them), tell (what they want to be told about), quiet (what they don't want to hear about), notes (anything else). \
-Says the fact's id, or the one that already says it.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "One short line, in the user's language"},
-                    "about": {"type": "string", "description": "Whom or what it is about: a name (Sofia), a kinship word (my mother-in-law) or a thing (the boat); leave out for the user"},
-                    "section": {"type": "string", "enum": sections},
-                    "important": {"type": "boolean", "description": "Always keep it in mind (a health matter, a firm wish)"},
-                    "private": {"type": "boolean", "description": "Never send it to a cloud model (health, money, intimate matters)"},
-                },
-                "required": ["text", "section"],
-            },
-        }),
-        json!({
-            "name": "forget",
-            "description": "Remove facts that are wrong, by id ([f12]); or with a few words of one, which removes it only when it is the only match and otherwise lists the candidates.",
-            "input_schema": {
-                "type": "object",
-                "properties": {"ids": {"type": "array", "items": {"type": "string"}, "description": "Fact ids: f12"}, "text": {"type": "string"}},
-            },
-        }),
-        json!({
-            "name": "revise_memory",
-            "description": "A fact is no longer true or was said badly: the old one is closed (kept as what was true before) and `text` takes its place.",
-            "input_schema": {
-                "type": "object",
-                "properties": {"id": {"type": "string", "description": "The fact's id: f12"}, "text": {"type": "string", "description": "The new line, short"}},
-                "required": ["id", "text"],
-            },
-        }),
-        json!({
-            "name": "recall",
-            "description": "Search the memory for what isn't in <memory> or <memory_found>: facts, people, and what used to be true, with dates.",
-            "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
-        }),
-        json!({
-            "name": "relate",
-            "description": "Who someone is to someone else: \"my wife is Sofia\" is person Sofia, relation partner. Someone already known only by the relation \
-(\"your wife\") becomes that person.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "person": {"type": "string", "description": "Their name"},
-                    "relation": {"type": "string", "enum": memory::kin::KINDS, "description": "What person is to `of`"},
-                    "of": {"type": "string", "description": "Whose: a name; leave out for the user"},
-                    "gender": {"type": "string", "enum": ["f", "m"]},
-                },
-                "required": ["person", "relation"],
             },
         }),
         json!({
@@ -1411,6 +1265,7 @@ Says the fact's id, or the one that already says it.",
         Tasks::tool(),
         skills::tool(),
     ];
+    tools.extend(notes::tools());
     tools.extend(history::tools());
     tools.extend(coding::Coding::tools());
     tools
@@ -1719,8 +1574,8 @@ mod tests {
         assert!(r.starts_with("notified"));
         assert_eq!(a.inbox.list()[0].urgency, Urgency::High);
         assert!(a.call_tool("notify", &json!({"title": " "}), &[], &[], &NoBoard).is_err());
-        a.call_tool("remember", &json!({"section": "about", "text": "Likes espresso"}), &[], &[], &NoBoard).unwrap();
-        assert!(a.memory.text().contains("- Likes espresso"));
+        a.call_tool("brain_write", &json!({"path": "me.md", "content": "# Me\n\n## Who I am\n- Likes espresso\n", "why": "they said so"}), &[], &[], &NoBoard).unwrap();
+        assert!(a.notes.read("me.md", false).unwrap().contains("- Likes espresso"));
         assert!(a.call_tool("get_inbox", &json!({}), &[], &[], &NoBoard).unwrap().contains("Mail from Marco"));
     }
 
@@ -1812,7 +1667,7 @@ mod tests {
         let (url, requests) = fake_api(vec![
             json!({"model": "claude-opus-5-5", "stop_reason": "tool_use", "content": [
                 {"type": "thinking", "thinking": "", "signature": "s"},
-                {"type": "tool_use", "id": "t1", "name": "remember", "input": {"section": "about", "text": "Likes espresso"}},
+                {"type": "tool_use", "id": "t1", "name": "brain_append", "input": {"path": "me.md", "entry": "Likes espresso", "why": "they said so"}},
             ]}),
             json!({"model": "claude-opus-5-5", "stop_reason": "end_turn", "content": [{"type": "text", "text": "Fatto, me lo ricordo."}]}),
         ]);
@@ -1826,7 +1681,7 @@ mod tests {
         assert_eq!(reply.text, "Fatto, me lo ricordo.");
         assert_eq!(reply.actions.len(), 1);
         assert!(reply.actions[0].ok);
-        assert!(a.memory.text().contains("- Likes espresso"));
+        assert!(a.notes.read("me.md", false).unwrap().contains("Likes espresso"));
         let first = requests.recv().unwrap();
         assert_eq!(first["model"], DEFAULT_MODEL);
         assert_eq!(first["fallbacks"], "default");

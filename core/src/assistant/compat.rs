@@ -301,9 +301,9 @@ pub(super) fn run(a: &Assistant, brain: Brain, messages: &mut Vec<Value>, prompt
     let language = a.reply_language(None).map(|l| format!("\n\nAlways reply in {}.", super::language_name(&l))).unwrap_or_default();
     let tags = if a.audio_tags() { format!("\n\n{}", super::audio_tags_rule()) } else { String::new() };
     let system = json!({"role": "system", "content": format!(
-        "{}\n\n<memory>\n{}\n</memory>{language}{tags}",
+        "{}\n\n{}{language}{tags}",
         super::prompt::system(&settings.name, super::prompt::Reach::Compat { services: &services_line(&findable), web: searches_web(&external_tools) }),
-        a.memory.core(budget.memory_max, brain != Brain::Ollama)
+        a.notes.prompt(brain == Brain::Ollama, budget.memory_max)
     )});
     let model = format!("{}:{}", brain.provider().id, settings.model_of(brain));
     let mut actions: Vec<Action> = Vec::new();
@@ -520,7 +520,7 @@ mod tests {
     fn a_call_written_as_words_is_made() {
         let _env = crate::assistant::tests::ENV.lock().unwrap_or_else(|e| e.into_inner());
         let (url, requests) = fake_server(vec![
-            answer(json!({"role": "assistant", "content": "Ci penso io. [remember(section=\"about\", text=\"Likes espresso\")]"})),
+            answer(json!({"role": "assistant", "content": "Ci penso io. [brain_append(path=\"me.md\", entry=\"Likes espresso\", why=\"they said so\")]"})),
             answer(json!({"role": "assistant", "content": "Fatto, me lo ricordo."})),
         ]);
         point_groq_at(&url);
@@ -528,13 +528,13 @@ mod tests {
         a.set_settings(groq_settings()).unwrap();
         let reply = a.respond("Ricordati che amo l'espresso", Some("it"), Channel::Text, &NoBoard).unwrap();
         assert_eq!(reply.text, "Fatto, me lo ricordo.");
-        assert!(a.memory.text().contains("- Likes espresso"));
+        assert!(a.notes.read("me.md", false).unwrap().contains("Likes espresso"));
         assert_eq!(reply.actions.len(), 1);
         let _ = requests.recv().unwrap();
         let second = requests.recv().unwrap();
         let said = &second["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "assistant").unwrap();
         assert_eq!(said["content"], "Ci penso io.");
-        assert_eq!(said["tool_calls"][0]["function"]["name"], "remember");
+        assert_eq!(said["tool_calls"][0]["function"]["name"], "brain_append");
     }
 
     #[test]
@@ -542,7 +542,7 @@ mod tests {
         let _env = crate::assistant::tests::ENV.lock().unwrap_or_else(|e| e.into_inner());
         let (url, requests) = fake_server(vec![
             answer(json!({"role": "assistant", "content": null, "reasoning": "hidden", "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "remember", "arguments": "{\"section\": \"about\", \"text\": \"Likes espresso\"}"}},
+                {"id": "c1", "type": "function", "function": {"name": "brain_append", "arguments": "{\"path\": \"me.md\", \"entry\": \"Likes espresso\", \"why\": \"they said so\"}"}},
                 {"id": "c2", "type": "function", "function": {"name": "gmail__send", "arguments": "{\"to\": \"marco@example.com\"}"}},
             ]})),
             answer(json!({"role": "assistant", "content": "Fatto, me lo ricordo."})),
@@ -554,7 +554,7 @@ mod tests {
         let reply = a.respond("Ricordati che amo l'espresso e manda una mail a Marco", Some("it"), Channel::Voice, &NoBoard).unwrap();
         assert_eq!(reply.text, "Fatto, me lo ricordo.");
         assert_eq!(reply.model, "groq:openai/gpt-oss-120b");
-        assert!(a.memory.text().contains("- Likes espresso"));
+        assert!(a.notes.read("me.md", false).unwrap().contains("Likes espresso"));
         // The send asked first, and NoBoard said no.
         assert_eq!(reply.actions.len(), 2);
         assert!(!reply.actions[1].ok);

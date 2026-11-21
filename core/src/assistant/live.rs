@@ -22,7 +22,7 @@ impl Assistant {
         let mut tools = own_tools();
         tools.extend(Timers::tools().iter().map(tool_json));
         tools.extend(board.iter().filter(|t| BOARD_ESSENTIALS.contains(&t.name.as_str())).map(tool_json));
-        let mut system = format!("{}\n\n<memory>\n{}\n</memory>", prompt::system(&settings.name, prompt::Reach::Live), self.memory.core(CORE_CHARS, true));
+        let mut system = format!("{}\n\n{}", prompt::system(&settings.name, prompt::Reach::Live), self.notes.prompt(false, 8000));
         // Live has no context line per request: where it is, said once.
         if host.in_notch() {
             system.push_str("\n\nYou are in the Mac's notch now (via: the notch).");
@@ -88,10 +88,10 @@ mod tests {
     fn a_live_session_gets_the_memory_and_the_essential_tools() {
         let a = Assistant::open(None, Arc::new(Timers::default()));
         let setup = a.live_setup(&Board, "Puck");
-        assert!(setup.system.contains("<memory>"));
+        assert!(setup.system.contains("<notes_index>"));
         assert!(setup.system.contains("Your name is Yoru"));
         let names: Vec<&str> = setup.tools.iter().filter_map(|t| t["name"].as_str()).collect();
-        assert!(names.contains(&"remember") && names.contains(&"react") && names.contains(&"get_state"));
+        assert!(names.contains(&"brain_append") && names.contains(&"react") && names.contains(&"get_state"));
         assert!(!names.contains(&"set_setting"), "only the board's essentials");
         assert_eq!(setup.voice, "Puck");
     }
