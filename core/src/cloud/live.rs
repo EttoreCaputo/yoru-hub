@@ -26,6 +26,31 @@ pub const MODEL: &str = "gemini-3.8-live";
 pub const MODELS: &[&str] = &[MODEL, "gemini-3.1-flash-live-preview", "gemini-2.5-flash-native-audio-preview-12-2025"];
 const REFUSED_FOR: Duration = Duration::from_secs(3600);
 static REFUSED: Mutex<Vec<(&str, Instant)>> = Mutex::new(Vec::new());
+/// The models the user may pick, with a note: [`MODELS`], the ones Yoru's
+/// sessions are set up for. On a free AI Studio key the 3.8 and 3.1 ones were
+/// refused for their limit every time (2026-11-22 to 24), and 2.5 answered
+/// and called tools; when the user leaves it to Yoru, the first with quota
+/// left is picked.
+pub const CHOICES: &[(&str, &str)] = &[
+    (MODEL, "Gemini 3.8 Live: the newest; a free key may have no use of it"),
+    ("gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live (preview); a free key may have no use of it"),
+    ("gemini-2.5-flash-native-audio-preview-12-2025", "Gemini 2.5 Flash Native Audio: works on a free key"),
+];
+/// The model the user picked (one of [`CHOICES`]); empty: the first of
+/// [`MODELS`] with quota left.
+static CHOSEN: Mutex<String> = Mutex::new(String::new());
+
+/// Use `model` for the sessions from now on; empty, or one not in
+/// [`CHOICES`]: the first of [`MODELS`] with quota left.
+pub fn choose(model: &str) {
+    let known = CHOICES.iter().any(|(m, _)| *m == model);
+    *CHOSEN.lock().unwrap() = if known { model.to_string() } else { String::new() };
+}
+
+/// The model the user picked; empty when it's left to Yoru.
+pub fn chosen() -> String {
+    CHOSEN.lock().unwrap().clone()
+}
 pub const URL: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 /// What Google sends: 16-bit PCM, little-endian.
 pub const OUTPUT_RATE: u32 = 24_000;
@@ -167,9 +192,14 @@ pub struct Session {
 }
 
 impl Session {
-    /// Open a session with the AI Studio `key` on the first of [`MODELS`]
-    /// that has quota left; the model it runs.
-    pub fn open_any(key: &str, setup: &Setup) -> Result<(Self, &'static str), String> {
+    /// Open a session with the AI Studio `key` on the model the user picked
+    /// ([`choose`]), or else on the first of [`MODELS`] that has quota left;
+    /// the model it runs.
+    pub fn open_any(key: &str, setup: &Setup) -> Result<(Self, String), String> {
+        let chosen = chosen();
+        if !chosen.is_empty() {
+            return Self::open(key, &Setup { model: chosen.clone(), ..setup.clone() }).map(|session| (session, chosen));
+        }
         let mut last = None;
         for &model in MODELS {
             let refused = REFUSED.lock().unwrap().iter().any(|(m, at)| *m == model && at.elapsed() < REFUSED_FOR);
@@ -177,7 +207,7 @@ impl Session {
                 continue;
             }
             match Self::open(key, &Setup { model: model.into(), ..setup.clone() }) {
-                Ok(session) => return Ok((session, model)),
+                Ok(session) => return Ok((session, model.to_string())),
                 Err(e) if is_limit(&e) => {
                     crate::hostlog::line("live", &format!("Gemini Live: {model} refused, trying the next model: {e}"));
                     REFUSED.lock().unwrap().retain(|(m, _)| *m != model);

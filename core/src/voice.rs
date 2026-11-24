@@ -706,6 +706,10 @@ fn respond(link: &Link, session: &Session, config: &VoiceConfig, sink: &EventSin
 struct LiveChat {
     session: Option<live::Session>,
     voice: String,
+    /// The model the session runs, and the one the user had picked then
+    /// (empty: left to Yoru): picking another opens a new session.
+    model: String,
+    picked: String,
     /// The utterance going on is being sent as it comes.
     streaming: bool,
     /// Google refused a session then (no quota left, a bad key): the usual
@@ -736,7 +740,7 @@ const LIVE_PAUSE: Duration = Duration::from_secs(600);
 impl LiveChat {
     /// A session for `voice`, open; `false` when Google refused it (said once).
     fn open(&mut self, assistant: &crate::Assistant, host: &VoiceHost, voice: &str, sink: &EventSink) -> bool {
-        if self.session.as_ref().is_some_and(|s| s.is_open()) && self.voice == voice {
+        if self.session.as_ref().is_some_and(|s| s.is_open()) && self.voice == voice && self.picked == live::chosen() {
             return true;
         }
         self.session = None;
@@ -747,11 +751,14 @@ impl LiveChat {
             sink(BridgeEvent::BoardLog { line: "host: Gemini Live is on but there's no Google key: answering without it".into() });
             return false;
         };
+        let picked = live::chosen();
         match live::Session::open_any(&key, &assistant.live_setup(host, voice)) {
             Ok((session, model)) => {
                 sink(BridgeEvent::BoardLog { line: format!("host: Gemini Live session open ({model}, {voice})") });
                 self.session = Some(session);
                 self.voice = voice.to_string();
+                self.model = model;
+                self.picked = picked;
                 self.refused = None;
                 true
             }
@@ -780,7 +787,7 @@ impl LiveChat {
     /// opened ahead not long ago, or the conversation going on.
     fn ready_for(&self, voice: &str) -> bool {
         let fresh = self.prepared.is_some_and(|t| t.elapsed() < PREPARED_FOR) || self.last_turn.is_some_and(|t| t.elapsed() < LIVE_CONVERSATION);
-        fresh && self.voice == voice && self.session.as_ref().is_some_and(|s| s.is_open())
+        fresh && self.voice == voice && self.picked == live::chosen() && self.session.as_ref().is_some_and(|s| s.is_open())
     }
 
     /// The board started streaming: Google listens from now. A follow-up,

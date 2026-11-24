@@ -148,6 +148,15 @@
         <div class="what"><b>{t.liveOnTitle(s.live)}</b><span class="dim">{t.liveOnHint}</span></div>
         <div class="how"><button class="btn small" onclick={() => set({ live: "" })}>{t.liveTurnOff}</button></div>
       </div>
+      <div class="setting">
+        <div class="what"><b>{t.liveModel}</b><span class="dim">{t.liveModelHint}</span></div>
+        <div class="how">
+          <select value={s.live_model ?? ""} onchange={(e) => set({ live_model: e.currentTarget.value })} aria-label={t.liveModel}>
+            <option value="">{t.liveModelAuto}</option>
+            {#each info.live_models ?? [] as [id, note] (id)}<option value={id}>{t.liveModels[id] ?? note.split(":")[0]}</option>{/each}
+          </select>
+        </div>
+      </div>
     </section>
   {:else}
     <!-- The everyday choices: whether he listens, whether he answers aloud, and with which voice. -->

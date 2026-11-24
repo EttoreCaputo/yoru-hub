@@ -36,6 +36,13 @@ final class Talk {
     private var running = false
     /// Other apps' media was paused at start, to be started again at the end.
     private var paused = false
+    /// Where commands run; the engine's notifications are sent here too.
+    private let queue: DispatchQueue
+    private var watching = false
+
+    init(queue: DispatchQueue) {
+        self.queue = queue
+    }
 
     func handle(_ command: [String: Any]) {
         switch command["cmd"] as? String {
@@ -93,6 +100,31 @@ final class Talk {
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: speech)
         }
+        if !watching {
+            // Voice processing reshapes the audio device, and so do headphones
+            // coming and going: the engine then stops on its own, often right
+            // after starting, and the microphone went mute until the helper
+            // ended. It is started again each time.
+            watching = true
+            NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+                guard let self else { return }
+                self.queue.async { self.restart() }
+            }
+        }
+        do {
+            try connect()
+        } catch {
+            emit(["event": "error", "message": "the microphone: \(error.localizedDescription)", "fatal": true])
+            return
+        }
+        running = true
+        emit(["event": "ready"])
+    }
+
+    /// The microphone's tap, for the input as it is now, and the engine on.
+    private func connect() throws {
+        let input = engine.inputNode
+        input.removeTap(onBus: 0)
         // With voice processing the input has several channels (9 on a
         // MacBook Pro): the first is the cleaned-up voice, the rest are the
         // raw microphones. Only the first is converted.
@@ -105,12 +137,19 @@ final class Talk {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
-            emit(["event": "error", "message": "the microphone: \(error.localizedDescription)", "fatal": true])
-            return
+            throw error
         }
         player.play()
-        running = true
-        emit(["event": "ready"])
+    }
+
+    /// The engine stopped itself (its device changed): on again, as it was.
+    private func restart() {
+        guard running, !engine.isRunning else { return }
+        do {
+            try connect()
+        } catch {
+            emit(["event": "error", "message": "the microphone stopped: \(error.localizedDescription)"])
+        }
     }
 
     /// Engine off and the paused media playing again: the helper ends.
@@ -182,10 +221,10 @@ final class Talk {
 
 /// Run `talk` until stdin closes.
 func talk() -> Never {
-    let session = Talk()
     // Not the main queue: asking for the microphone waits for an answer
     // that macOS may deliver there.
     let queue = DispatchQueue(label: "yoru-audio.talk")
+    let session = Talk(queue: queue)
     Thread.detachNewThread {
         while let line = readLine() {
             guard let data = line.data(using: .utf8),

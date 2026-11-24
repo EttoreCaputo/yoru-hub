@@ -546,6 +546,7 @@ const voice: VoiceInfo = {
     llm: false,
     llm_model: "qwen3-4b",
     live: "",
+    live_model: "",
   },
   models: [
     { id: "large-v3-turbo-q5", kind: "whisper", language: null, engine: null, bytes: 574_000_000, note: "Fast and accurate on a Mac", license: "MIT", installed: true, provider: null },
@@ -566,6 +567,7 @@ const voice: VoiceInfo = {
   llm: "off",
   llm_error: null,
   llm_server: "/opt/homebrew/bin/llama-server",
+  live_models: [["gemini-3.8-live", "Gemini 3.8 Live: the newest, quick to answer"], ["gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live (preview)"], ["gemini-2.5-flash-native-audio-preview-12-2025", "Gemini 2.5 Flash Native Audio: the most free use a day"]],
   live_voices: [["Charon", "informative", "male"], ["Fenrir", "excitable", "male"], ["Puck", "upbeat", "male"], ["Kore", "firm", "female"], ["Zephyr", "bright", "female"]],
   download: null,
   providers: [

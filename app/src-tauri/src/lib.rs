@@ -152,6 +152,9 @@ struct VoiceSettings {
     /// Answer with Gemini Live in this Google voice (`cloud::live::VOICES`):
     /// it hears and speaks itself. `""`: off, the models above answer.
     live: String,
+    /// Gemini Live's model (`cloud::live::CHOICES`); `""`: the first with
+    /// free use left.
+    live_model: String,
 }
 
 /// This computer and the models for it, with what llama-server says it can
@@ -190,6 +193,7 @@ impl Default for VoiceSettings {
             llm: rec.llm.is_some(),
             llm_model: rec.llm.unwrap_or(models::DEFAULT_LLM).into(),
             live: String::new(),
+            live_model: String::new(),
         }
     }
 }
@@ -534,6 +538,7 @@ fn apply_voice(state: &AppState) {
             model
         })
     });
+    cloud::live::choose(&settings.live_model);
     *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up, intent, turn, voiceprint: state.voiceprinter.clone(), language: None, live: (!settings.live.is_empty()).then(|| settings.live.clone()) };
     apply_language(state);
 }
@@ -699,6 +704,8 @@ struct VoiceInfo {
     recommendation: Recommendation,
     /// Gemini Live's voices: the name and how Google describes it.
     live_voices: Vec<(&'static str, &'static str, &'static str)>,
+    /// Gemini Live's models the user may pick, with a note.
+    live_models: Vec<(&'static str, &'static str)>,
 }
 
 fn voice_info_of(state: &AppState) -> VoiceInfo {
@@ -733,6 +740,7 @@ fn voice_info_of(state: &AppState) -> VoiceInfo {
         hardware,
         recommendation,
         live_voices: cloud::live::VOICES.to_vec(),
+        live_models: cloud::live::CHOICES.to_vec(),
     }
 }
 

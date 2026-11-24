@@ -278,6 +278,8 @@ export type VoiceSettings = {
   llm_model: string;
   /** Gemini Live's voice, which then hears and speaks itself; "" for off. */
   live: string;
+  /** Gemini Live's model, one of `VoiceInfo.live_models`; "" for the first with free use left. */
+  live_model: string;
 };
 export type ModelInfo = {
   id: string;
@@ -310,6 +312,8 @@ export type VoiceInfo = {
   /** Gemini Live's voices: the name, and how Google describes it. */
   /** Name, Google's description, "male" or "female". */
   live_voices: [string, string, string][];
+  /** Gemini Live's models the user may pick: the id and a note. */
+  live_models: [string, string][];
   /** The local models that suit this computer. */
   recommendation?: { whisper: string; llm: string | null; why: string };
 };
