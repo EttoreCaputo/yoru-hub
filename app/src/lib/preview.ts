@@ -341,7 +341,7 @@ function pocketDownload(names: string[]) {
   next();
 }
 
-let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, detail: "detailed", summary_style: "auto", auto_summary: true, detect: false };
+let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, detail: "detailed", summary_style: "auto", auto_summary: true, summarize_by: "", detect: false };
 let meters: ReturnType<typeof setInterval> | undefined;
 
 function startMeeting(a: Record<string, any>): Meeting {
@@ -431,7 +431,6 @@ const groqModels = [
   { id: "openai/gpt-oss-20b", note: "GPT-OSS 20B on Groq: fast, good at tools; about 5 commands a minute free" },
   { id: "openai/gpt-oss-120b", note: "GPT-OSS 120B on Groq: smarter, a little slower; same free limits" },
   { id: "qwen/qwen3.8-27b", note: "Qwen3.8 27B on Groq (preview): good Italian" },
-  { id: "llama-3.3-70b-versatile", note: "Llama 3.3 70B on Groq: good Italian, no thinking" },
 ];
 
 const info: AssistantInfo = {
@@ -825,9 +824,14 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     models: [
       { id: "anthropic:claude-sonnet-5-5", provider: "Claude", model: "claude-sonnet-5-5", note: "Claude Sonnet 5.5: nearly as good, cheaper" },
       { id: "openai:gpt-6-luna", provider: "OpenAI", model: "gpt-6-luna", note: "GPT-6 Luna: fast and cheap" },
-      { id: "groq:openai/gpt-oss-120b", provider: "Groq", model: "openai/gpt-oss-120b", note: "" },
       { id: "google:gemini-3.8-flash", provider: "Google", model: "gemini-3.8-flash", note: "Gemini 3.8 Flash: smarter, good with tools" },
-      { id: "google:gemini-3.5-transcribe", provider: "Google", model: "gemini-3.5-transcribe", note: "" },
+    ],
+    transcribers: [
+      { id: "local", detailed: true, speakers: true, local: true, ready: true },
+      { id: "google:gemini-3.8-flash", detailed: true, speakers: true, local: false, ready: true },
+      { id: "google:gemini-3.5-transcribe", detailed: false, speakers: false, local: false, ready: true },
+      { id: "groq:whisper-large-v3-turbo", detailed: true, speakers: false, local: false, ready: false },
+      { id: "openai:whisper-1", detailed: true, speakers: false, local: false, ready: true },
     ],
   }),
   meeting_summary: (a) =>
@@ -960,7 +964,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
       ],
       openai: [m("gpt-5.2", "gpt-5.2", true, false), m("gpt-5-mini", "gpt-5-mini", true, false), m("gpt-4o-transcribe", "gpt-4o-transcribe", false, true), m("whisper-1", "whisper-1", false, true)],
       anthropic: [m("claude-opus-5-5", "Claude Opus 5.5", true, false), m("claude-sonnet-5-5", "Claude Sonnet 5.5", true, false), m("claude-haiku-5-5", "Claude Haiku 5.5", true, false)],
-      groq: [m("whisper-large-v3-turbo", "whisper-large-v3-turbo", false, true), m("llama-3.3-70b-versatile", "llama-3.3-70b-versatile", true, false)],
+      groq: [m("whisper-large-v3-turbo", "whisper-large-v3-turbo", false, true), m("qwen/qwen3.8-27b", "qwen/qwen3.8-27b", true, false)],
     };
     return lists[a.provider] ?? [];
   },

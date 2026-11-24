@@ -12,7 +12,7 @@
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { store } from "../store.svelte";
-  import { transcriptionRequirement } from "../meeting-readiness";
+  import { serviceOf, transcriptionRequirement } from "../meeting-readiness";
   import type { ActionItem, Meeting, MeetingSettings, MeetingTrack, Speaker, Summarizers, Summary, Transcript, TranscriptLine } from "../types";
   import { clock } from "../ui/when";
 
@@ -76,10 +76,12 @@
     if (done?.id === id) untrack(() => ((summary = done.summary), (view = "summary")));
   });
 
-  /** Whether a brain is set up: Yoru writes the summaries with it. */
-  const canSummarize = $derived(!!summarizers?.brain);
-  const requirement = $derived(settings ? transcriptionRequirement(settings.transcribe_by, model, !!store.info?.google_key) : "loading");
-  const transcriptionHint = $derived(requirement === "local" ? t.needModel : requirement === "google" ? t.noGoogleKey : requirement === "unsupported" ? t.unknownTranscriber : t.loadingTranscriber);
+  /** Whether something can write the summary: the model chosen for it, else Yoru's brain. */
+  const canSummarize = $derived(settings?.summarize_by ? !!summarizers?.models.some((m) => m.id === settings?.summarize_by) : !!summarizers?.brain);
+  const requirement = $derived(settings ? transcriptionRequirement(settings.transcribe_by, model, summarizers?.transcribers ?? null) : "loading");
+  const transcriptionHint = $derived(
+    requirement === "local" ? t.needModel : requirement === "key" ? t.missingKey(serviceOf(settings?.transcribe_by ?? "")) : requirement === "unsupported" ? t.unknownTranscriber : t.loadingTranscriber,
+  );
   function openBrainSettings() {
     store.settingsSection = "brain";
     store.go("settings");

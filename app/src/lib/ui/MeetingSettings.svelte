@@ -7,6 +7,7 @@
 <script lang="ts">
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
+  import { serviceOf } from "../meeting-readiness";
   import { store } from "../store.svelte";
   import type { MeetingSettings, Summarizers } from "../types";
   import ModelPicker, { type Choice } from "./ModelPicker.svelte";
@@ -48,23 +49,28 @@
     }
   }
 
-  const described = (m: Summarizers["models"][number]): Choice => ({ value: m.id, label: m.note.split(":")[0] || m.model, note: m.note.split(":").slice(1).join(":").trim(), group: i18n.t.picker.suggested });
-  /** A Gemini model that only writes the words down: it can't make a detailed transcript. */
-  const wordsOnly = (model: string) => model.includes("-transcribe");
   const simple = $derived(settings?.detail === "simple");
-  /** A transcript: Parakeet here (detailed only), or a Gemini model that hears a whole recording (not a Live one). */
-  const transcribers = $derived<Choice[]>([
-    ...(simple ? [] : [{ value: "local", label: t.parakeet, note: t.simpleLocal }]),
-    ...(summarizers?.models ?? []).filter((m) => m.id.startsWith("google:") && (simple || !wordsOnly(m.model))).map(described),
+  /** The transcriber chosen, as the app offers it. */
+  const by = $derived(summarizers?.transcribers.find((x) => x.id === settings?.transcribe_by));
+  /** Only what was tried on meetings: Parakeet, then the online ones with their key (the chosen one even without). */
+  const transcribers = $derived<Choice[]>(
+    (summarizers?.transcribers ?? [])
+      .filter((x) => x.ready || x.id === settings?.transcribe_by)
+      .map((x) => {
+        const [label, note] = x.local ? [t.parakeet, t.simpleLocal] : (t.transcribers[x.id] ?? [x.id, ""]);
+        return { value: x.id, label, note: x.ready ? note : `${note} · ${t.needsKey(serviceOf(x.id))}`, group: x.local ? t.onThisMac : t.online };
+      }),
+  );
+  /** Who writes the summaries: Yoru's brain, or a model tried for them. */
+  const summaryChoices = $derived<Choice[]>([
+    { value: "", label: t.brainOf(summarizers?.brain ?? "—"), group: t.brainGroup },
+    ...(summarizers?.models ?? []).map((m) => ({ value: m.id, label: m.note.split(":")[0] || m.model, note: m.note.split(":").slice(1).join(":").trim() || m.model, group: m.provider })),
   ]);
-  const geminis = $derived((summarizers?.models ?? []).filter((m) => m.id.startsWith("google:")));
 
-  /** Switch the kind of transcript, and the model with it when it can't make that kind. */
+  /** Switch the kind of transcript; a detailed one needs a transcriber that times its lines. */
   function setDetail(detail: MeetingSettings["detail"]) {
     if (!settings || settings.detail === detail) return;
-    const by = settings.transcribe_by;
-    if (detail === "simple" && by === "local") save({ detail, transcribe_by: geminis[0]?.id ?? by });
-    else if (detail === "detailed" && wordsOnly(by)) save({ detail, transcribe_by: geminis.find((m) => !wordsOnly(m.model))?.id ?? "local" });
+    if (detail === "detailed" && by && !by.detailed) save({ detail, transcribe_by: "local" });
     else save({ detail });
   }
   const parakeet = $derived(settings?.transcribe_by === "local");
@@ -82,28 +88,28 @@
     <div class="setting">
       <div class="what"><b>{t.simpleTranscript}</b><span>{t.transcribeByHint}</span></div>
       <div class="how">
-        <ModelPicker value={settings.transcribe_by} choices={transcribers} providers={store.info?.google_key ? [{ id: "google", name: "Google" }] : []} need="stt" accept={(m) => !m.model.includes("-live") && (simple || !wordsOnly(m.model))} label={t.simpleTranscript} onchange={(v) => save({ transcribe_by: v })} />
+        <ModelPicker value={settings.transcribe_by} choices={transcribers} label={t.simpleTranscript} onchange={(v) => save({ transcribe_by: v, ...(summarizers?.transcribers.find((x) => x.id === v)?.detailed === false ? { detail: "simple" as const } : {}) })} />
       </div>
     </div>
     <div class="setting stack">
       <div class="what"><b>{t.detail}</b><span>{t.detailHint}</span></div>
       <div class="kinds" role="radiogroup" aria-label={t.detail}>
-        <button class="kind" class:on={!simple} role="radio" aria-checked={!simple} onclick={() => setDetail("detailed")}>
+        <button class="kind" class:on={!simple} role="radio" aria-checked={!simple} title={by && !by.detailed ? t.detailedNeedsTimes : undefined} onclick={() => setDetail("detailed")}>
           <b>{t.detailed}</b>
           <span class="sample timed">
             {#each t.detailedExample as [at, who, said] (at)}<span class="mono faint">{at}</span><span class="who">{who}</span><span>{said}</span>{/each}
           </span>
           <span class="dim small">{t.detailedHint}</span>
         </button>
-        <button class="kind" class:on={simple} role="radio" aria-checked={simple} disabled={!simple && !geminis.length} title={!geminis.length ? t.simpleNeedsGemini : undefined} onclick={() => setDetail("simple")}>
+        <button class="kind" class:on={simple} role="radio" aria-checked={simple} onclick={() => setDetail("simple")}>
           <b>{t.simple}</b>
           <span class="sample">{t.simpleExample}</span>
           <span class="dim small">{t.simpleHint}</span>
         </button>
       </div>
     </div>
-    {#if settings.transcribe_by.startsWith("google:") && !store.info?.google_key}<div class="setting"><p class="error-text">{t.noGoogleKey}</p></div>{/if}
-    {#if summarizers && !summarizers.brain}<div class="setting"><p class="error-text">{t.needSummarizer}</p></div>{/if}
+    {#if by && !by.ready}<div class="setting"><p class="error-text">{t.missingKey(serviceOf(by.id))}</p></div>{/if}
+    {#if summarizers && !summarizers.brain && !settings.summarize_by}<div class="setting"><p class="error-text">{t.needSummarizer}</p></div>{/if}
   </section>
   <h2 class="section-title">{t.stepNotice}</h2>
   <section class="panel">
@@ -154,8 +160,8 @@
         </select>
       </div>
     </div>
-    <div class="setting" class:off={simple && !parakeet}>
-      <div class="what"><b>{t.speakers}</b><span>{t.speakersHint}</span></div>
+    <div class="setting" class:off={simple || (by && !by.speakers)}>
+      <div class="what"><b>{t.speakers}</b><span>{by && !by.speakers ? t.speakersNone : t.speakersHint}</span></div>
       <div class="how"><Toggle checked={settings.speakers} label={t.speakers} onchange={(on) => save({ speakers: on })} /></div>
     </div>
   </section>
@@ -163,6 +169,10 @@
   <h2 class="section-title">{t.stepSummary}</h2>
   <p class="dim note">{t.stepSummaryNote}</p>
   <section class="panel">
+    <div class="setting">
+      <div class="what"><b>{t.summarizeBy}</b><span>{t.summarizeByHint}</span></div>
+      <div class="how"><ModelPicker value={settings.summarize_by} choices={summaryChoices} label={t.summarizeBy} onchange={(v) => save({ summarize_by: v })} /></div>
+    </div>
     <div class="setting">
       <div class="what"><b>{t.style}</b><span>{t.styleHint}</span></div>
       <div class="how">

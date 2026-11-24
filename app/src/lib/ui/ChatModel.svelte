@@ -1,7 +1,7 @@
 <!--
   The model Yoru answers with, picked from a conversation's head: every
-  service with a key (and Ollama's models, when it has any), the described
-  models first, then each service's whole list. Picking one sets the brain
+  service with a key (and the Ollama models tried with Yoru, when it has
+  any): only the models known to work. Picking one sets the brain
   and its model in the settings, as Settings → Conversation does; a new
   brain starts its messages afresh, reminded of the conversation's last lines.
 -->
@@ -54,7 +54,6 @@
   });
 
   const value = $derived(brain && s ? `${brain}:${s[FIELD[brain]]}` : "");
-  const providers = $derived(keyed.map((b) => ({ id: b, name: NAMES[b] })));
 
   function pick(v: string) {
     const at = v.indexOf(":");
@@ -69,5 +68,5 @@
 </script>
 
 {#if value}
-  <ModelPicker {value} {choices} {providers} compact custom={brain === "anthropic"} label={i18n.t.home.model} onchange={pick} />
+  <ModelPicker {value} {choices} compact label={i18n.t.home.model} onchange={pick} />
 {/if}

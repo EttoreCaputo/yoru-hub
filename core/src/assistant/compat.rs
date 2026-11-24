@@ -623,8 +623,8 @@ mod tests {
         let first = requests.recv().unwrap();
         assert_eq!(first["response_format"]["type"], "json_schema");
         assert_eq!(first["response_format"]["json_schema"]["strict"], true);
-        // Llama has JSON mode only: the schema goes in the prompt.
-        a.set_settings(Settings { groq_model: "llama-3.3-70b-versatile".into(), ..groq_settings() }).unwrap();
+        // A model with JSON mode only gets the schema in the prompt.
+        a.set_settings(Settings { groq_model: "allam-2-7b".into(), ..groq_settings() }).unwrap();
         a.complete_json("list them", &schema).unwrap();
         let second = requests.recv().unwrap();
         assert_eq!(second["response_format"]["type"], "json_object");
@@ -765,10 +765,10 @@ mod tests {
         a.set_settings(Settings { provider: Some(Brain::Ollama), ollama_model: "qwen3:8b".into(), ..Settings::default() }).unwrap();
         assert!(a.is_ready());
         assert_eq!(a.respond("Ciao", Some("it"), Channel::Text, &NoBoard).unwrap().model, "ollama:qwen3:8b");
-        // Through Ollama's own API: thinking on, no limit.
+        // Through Ollama's own API: thinking on, no limit on the answer, room for the prompt.
         let second = requests.recv().unwrap();
         assert_eq!((second["model"].as_str(), second["think"].as_bool()), (Some("qwen3:8b"), Some(true)));
-        assert!(second.get("options").is_none());
+        assert!(second["options"].get("num_predict").is_none() && second["options"]["num_ctx"].as_u64().is_some());
         unsafe {
             std::env::remove_var("OPENAI_BASE_URL");
             std::env::remove_var("OPENAI_API_KEY");
@@ -783,6 +783,6 @@ mod tests {
         assert!(brain_error(&CloudError::Status { provider: "Groq", status: 413, message: String::new() }).contains("too big"));
         assert!(brain_error(&CloudError::Network { provider: "Ollama", why: "refused".into() }).contains("running"));
         let names: Vec<&str> = models(Brain::Groq).into_iter().map(|(id, _)| id).collect();
-        assert!(names.contains(&super::super::DEFAULT_GROQ_MODEL) && names.contains(&"llama-3.3-70b-versatile"));
+        assert!(names.contains(&super::super::DEFAULT_GROQ_MODEL) && names.contains(&"qwen/qwen3.8-27b"));
     }
 }

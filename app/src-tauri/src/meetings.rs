@@ -179,7 +179,7 @@ fn after_recording(app: &AppHandle, id: String) {
     }
     let app = app.clone();
     thread::spawn(move || {
-        if meetings::settings().gemini().is_some() || meetings::model_present() {
+        if meetings::settings().transcribe_by != "local" || meetings::model_present() {
             queue(&app, id);
         }
     });
@@ -197,14 +197,10 @@ fn queue(app: &AppHandle, id: String) {
         let settings = meetings::settings();
         board(&app, "transcribing", None);
         let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
-        let result = if settings.transcribe_by != "local" && settings.gemini().is_none() {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported meeting transcription service"))
-        } else {
-            meetings::transcribe(&id, settings.gemini(), settings.detail, language, settings.speakers, |track, phase, fraction| {
-                let event = Event::Progress { id: id.clone(), track: track.into(), phase: phase.into(), fraction };
-                let _ = app.emit("meeting", &event);
-            })
-        };
+        let result = meetings::transcribe(&id, &settings.transcribe_by, settings.detail, language, settings.speakers, |track, phase, fraction| {
+            let event = Event::Progress { id: id.clone(), track: track.into(), phase: phase.into(), fraction };
+            let _ = app.emit("meeting", &event);
+        });
         state.queued.lock().unwrap().remove(&id);
         let event = match result {
             Ok(meeting) => {
@@ -242,7 +238,9 @@ fn queue_summary(app: &AppHandle, id: String, style: Option<String>, on_its_own:
         // counted, so the bar shows only that it started.
         let _ = app.emit("meeting", &Event::Summarizing { id: id.clone(), fraction: 0.1 });
         let style = style.unwrap_or_else(|| meetings::settings().summary_style);
-        let result = summarizer(&app).and_then(|_| app.state::<AppState>().assistant.summarize_meeting(&id, &style));
+        let by = meetings::settings().summarize_by;
+        let by = Some(by.as_str()).filter(|b| !b.is_empty());
+        let result = summarizer(&app).and_then(|_| app.state::<AppState>().assistant.summarize_meeting(&id, &style, by));
         state.queued.lock().unwrap().remove(&key);
         let event = match result.and_then(|summary| meetings::get(&id).map(|meeting| (meeting, summary)).map_err(|e| e.to_string())) {
             Ok((meeting, summary)) => Event::Summarized { meeting, summary },
@@ -266,10 +264,15 @@ fn announces(meeting: &Meeting, settings: &Settings) -> bool {
     meeting.origin.as_deref() == Some("pocket") && settings.transcribe == When::After && settings.auto_summary
 }
 
-/// Whether the agent can summarize: a brain with its key, or why not.
+/// Whether the agent can summarize: the model chosen for summaries, or
+/// else the brain, with its key; or why not.
 fn summarizer(app: &AppHandle) -> Result<(), String> {
+    let by = meetings::settings().summarize_by;
+    if let Some((brain, _)) = by.split_once(':') {
+        return Brain::by_id(brain).filter(|b| b.has_key()).map(|_| ()).ok_or_else(|| format!("no key for {by} (Settings, Keys)"));
+    }
     let settings = app.state::<AppState>().assistant.settings();
-    settings.brain().filter(|b| b.has_key()).map(|_| ()).ok_or_else(|| "no brain is set up (Settings, Brain)".to_string())
+    settings.brain().filter(|b| b.has_key() && assistant::writes_summaries(*b)).map(|_| ()).ok_or_else(|| "Yoru's brain can't write summaries: pick a model for them (Settings, Meetings)".to_string())
 }
 
 #[tauri::command]
@@ -294,13 +297,24 @@ pub fn meeting_summary(id: String) -> Result<Option<Summary>, String> {
     meetings::summary(&id).map_err(|e| e.to_string())
 }
 
-/// What can summarize and transcribe: the brain's name (the agent writes
-/// the summaries), and every model of the providers with a key (and
-/// Ollama's, if running), for the transcriber.
+/// What can summarize and transcribe, of what was tried
+/// (`meetings::TRANSCRIBERS`, `assistant::summarizers`): the brain's name
+/// (it writes the summaries unless a model is chosen), the models with a
+/// key (and Ollama's, if running) that can write them, and every
+/// transcriber, with whether its key is there.
 #[derive(Serialize)]
 pub struct Summarizers {
     brain: Option<String>,
     models: Vec<SummaryModel>,
+    transcribers: Vec<TranscriberInfo>,
+}
+
+#[derive(Serialize)]
+pub struct TranscriberInfo {
+    #[serde(flatten)]
+    transcriber: meetings::Transcriber,
+    /// Its service's key is there (Parakeet needs none).
+    ready: bool,
 }
 
 /// A model that can summarize: `id` is the setting's value (`groq:qwen/…`).
@@ -317,14 +331,16 @@ pub async fn meeting_summarizers(app: AppHandle) -> Result<Summarizers, String> 
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let settings = state.assistant.settings();
-        let models = Brain::ALL
-            .into_iter()
-            .filter(|b| b.has_key())
-            .flat_map(|b| assistant::chat_models(b).into_iter().map(move |(model, note)| SummaryModel { id: format!("{}:{model}", b.id()), provider: b.name(), model, note }))
+        let models = assistant::summarizers().into_iter().filter(|m| m.brain.has_key()).map(|m| SummaryModel { id: m.id, provider: m.brain.name(), model: m.model, note: m.note }).collect();
+        let transcribers = meetings::TRANSCRIBERS
+            .iter()
+            .map(|t| TranscriberInfo { transcriber: *t, ready: t.local || t.id.split_once(':').and_then(|(p, _)| yoru_core::cloud::Provider::by_id(p)).is_some_and(|p| p.api_key().is_some()) })
             .collect();
         Summarizers {
-            brain: settings.brain().filter(|b| b.has_key()).map(|b| format!("{} · {}", b.name(), settings.model_of(b))),
+            // Groq's and Ollama's models don't write summaries well enough.
+            brain: settings.brain().filter(|b| b.has_key() && assistant::writes_summaries(*b)).map(|b| format!("{} · {}", b.name(), settings.model_of(b))),
             models,
+            transcribers,
         }
     })
     .await

@@ -46,8 +46,9 @@ pub enum Detail {
 #[serde(default)]
 pub struct Settings {
     pub transcribe: When,
-    /// What makes the transcript: `local` (Parakeet, on this computer) or
-    /// a Gemini model, `google:gemini-3.8-flash`, which hears the audio.
+    /// What makes the transcript: one of [`TRANSCRIBERS`], `local`
+    /// (Parakeet, on this computer) or a service's model
+    /// (`google:gemini-3.8-flash`, `groq:whisper-large-v3-turbo`).
     pub transcribe_by: String,
     /// `it`, `en`…, or empty: the language is found.
     pub language: String,
@@ -56,11 +57,14 @@ pub struct Settings {
     pub speakers: bool,
     /// How summaries are laid out unless one is asked for (`summary::STYLES`).
     pub summary_style: String,
-    /// What a Gemini transcript holds: everything (times, speakers) or
-    /// only the words. Parakeet's are always detailed.
+    /// What a transcript holds: everything (times, speakers) or only the
+    /// words; a transcriber that can't time its lines makes simple ones.
     pub detail: Detail,
     /// Summarize a meeting once its transcript is made.
     pub auto_summary: bool,
+    /// What writes the summaries: empty for Yoru's brain, or a model of
+    /// [`crate::assistant::summarizers`] (`groq:openai/gpt-oss-120b`).
+    pub summarize_by: String,
     /// Notice a meeting starting (the calendar, a call app taking the
     /// microphone) and ask whether to record it (docs/meetings.md, Detection).
     pub detect: bool,
@@ -68,7 +72,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, detail: Detail::Detailed, summary_style: "auto".into(), auto_summary: true, detect: false }
+        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, detail: Detail::Detailed, summary_style: "auto".into(), auto_summary: true, summarize_by: String::new(), detect: false }
     }
 }
 
@@ -82,8 +86,11 @@ pub fn settings() -> Settings {
 }
 
 pub fn set_settings(settings: &Settings) -> io::Result<()> {
-    if settings.transcribe_by != "local" && settings.gemini().is_none() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "unsupported meeting transcription service"));
+    if transcriber(&settings.transcribe_by).is_none() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{} doesn't make transcripts", settings.transcribe_by)));
+    }
+    if !settings.summarize_by.is_empty() && !crate::assistant::summarizes(&settings.summarize_by) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{} doesn't write summaries", settings.summarize_by)));
     }
     let file = settings_file()?;
     fs::create_dir_all(file.parent().unwrap())?;
@@ -261,12 +268,53 @@ pub fn download_model(mut on_progress: impl FnMut(f64)) -> io::Result<()> {
     if done["present"] == true { Ok(()) } else { Err(io::Error::other("the model didn't download")) }
 }
 
+/// A way to make transcripts the app offers. Each was tried on real
+/// recordings (docs/meetings.md, What makes the transcript): a model that
+/// can't do the job isn't offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Transcriber {
+    /// What [`Settings::transcribe_by`] holds.
+    pub id: &'static str,
+    /// Whether it times its lines: it makes detailed transcripts.
+    pub detailed: bool,
+    /// Whether it tells who speaks within a track.
+    pub speakers: bool,
+    /// Whether it runs on this computer.
+    pub local: bool,
+}
+
+const fn cloud(id: &'static str, detailed: bool, speakers: bool) -> Transcriber {
+    Transcriber { id, detailed, speakers, local: false }
+}
+
+/// Every transcriber, the default first. Any of them makes simple transcripts.
+pub const TRANSCRIBERS: &[Transcriber] = &[
+    Transcriber { id: "local", detailed: true, speakers: true, local: true },
+    cloud("google:gemini-3.8-flash", true, true),
+    cloud("google:gemini-3.5-transcribe", false, false),
+    cloud("groq:whisper-large-v3-turbo", true, false),
+    cloud("groq:whisper-large-v3", true, false),
+    cloud("openai:whisper-1", true, false),
+];
+
+/// The transcriber `id` names, if the app offers it.
+pub fn transcriber(id: &str) -> Option<&'static Transcriber> {
+    TRANSCRIBERS.iter().find(|t| t.id == id)
+}
+
 impl Settings {
-    /// A model that only writes the words down makes simple transcripts,
-    /// whatever was chosen before the choice existed.
+    /// Settings saved before the lists of what works: a transcriber no
+    /// longer offered goes back to Parakeet, one that can't time its lines
+    /// makes simple transcripts, and a summarizer no longer offered gives
+    /// way to the brain.
     fn fitted(mut self) -> Self {
-        if self.gemini().is_some_and(|m| m.contains("-transcribe")) {
+        let by = transcriber(&self.transcribe_by).unwrap_or(&TRANSCRIBERS[0]);
+        self.transcribe_by = by.id.into();
+        if !by.detailed {
             self.detail = Detail::Simple;
+        }
+        if !self.summarize_by.is_empty() && !crate::assistant::summarizes(&self.summarize_by) {
+            self.summarize_by.clear();
         }
         self
     }
@@ -277,30 +325,37 @@ impl Settings {
     }
 }
 
-/// Transcribe every track of meeting `id` and keep the transcript, with
-/// Parakeet or, when `gemini` names a model, with Google's Gemini (as
-/// `detail` says). `on_progress` hears the track, the phase and how far it
-/// got. With `speakers`, who speaks is told apart within each track.
-pub fn transcribe(id: &str, gemini: Option<&str>, detail: Detail, language: Option<&str>, speakers: bool, mut on_progress: impl FnMut(&str, &str, f64)) -> io::Result<Meeting> {
+/// Transcribe every track of meeting `id` with transcriber `by` (one of
+/// [`TRANSCRIBERS`]) and keep the transcript, as `detail` says.
+/// `on_progress` hears the track, the phase and how far it got. With
+/// `speakers`, who speaks is told apart within each track, where `by` can.
+pub fn transcribe(id: &str, by: &str, detail: Detail, language: Option<&str>, speakers: bool, mut on_progress: impl FnMut(&str, &str, f64)) -> io::Result<Meeting> {
     let mut meeting = get(id)?;
     if meeting.state == State::Recording {
         return Err(io::Error::new(io::ErrorKind::ResourceBusy, "still recording"));
     }
-    if let Some(model) = gemini {
+    let transcriber = transcriber(by).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("{by} doesn't make transcripts")))?;
+    let detailed = detail == Detail::Detailed && transcriber.detailed;
+    if !transcriber.local {
         let folder = folder(id)?;
         let mut lines = Vec::new();
         let mut timed = true;
         for track in &meeting.tracks {
             let Some(file) = track.file.as_deref() else { continue };
             let path = folder.join(checked(file)?);
-            let answer = super::gemini::transcribe(&path, model, language, speakers, detail == Detail::Detailed, |phase, f| on_progress(&track.name, phase, f))?;
+            let progress = |phase: &str, f| on_progress(&track.name, phase, f);
+            let answer = match by.strip_prefix("google:") {
+                Some(model) => super::gemini::transcribe(&path, model, language, speakers, detailed, progress)?,
+                None => super::whisper::transcribe(&path, by, language, detailed, progress)?,
+            };
             timed &= answer.timed;
             lines.extend(lines_of(track, &answer.segments));
         }
         if !timed {
             lines.iter_mut().for_each(|l| (l.start_ms, l.end_ms, l.speaker) = (0, 0, None));
         }
-        return keep(&mut meeting, &folder, format!("gemini:{model}"), language, lines, timed);
+        let engine = by.strip_prefix("google:").map_or_else(|| by.to_string(), |m| format!("gemini:{m}"));
+        return keep(&mut meeting, &folder, engine, language, lines, timed);
     }
     let model = model_dir()?;
     let diarizer = speakers_dir()?;
@@ -313,14 +368,21 @@ pub fn transcribe(id: &str, gemini: Option<&str>, detail: Detail, language: Opti
         if let Some(language) = language {
             args.extend([OsStr::new("--language"), OsStr::new(language)]);
         }
-        if speakers {
+        if speakers && detailed {
             args.extend([OsStr::new("--speakers"), diarizer.as_os_str()]);
         }
         on_progress(&track.name, "load", 0.0);
         let done = run(&args, |phase, f| on_progress(&track.name, phase, f))?;
-        lines.extend(lines_of(track, &done["segments"]));
+        let segments = if detailed { done["segments"].clone() } else { simple_of(&done["segments"]) };
+        lines.extend(lines_of(track, &segments));
     }
-    keep(&mut meeting, &folder, ENGINE.into(), language, lines, true)
+    keep(&mut meeting, &folder, ENGINE.into(), language, lines, detailed)
+}
+
+/// Timed segments as a simple transcript's paragraphs.
+fn simple_of(segments: &Value) -> Value {
+    let words: Vec<&str> = segments.as_array().into_iter().flatten().filter_map(|s| s["text"].as_str()).map(str::trim).filter(|t| !t.is_empty()).collect();
+    super::gemini::paragraphs(&words.join(" "))
 }
 
 /// Write the transcript of `lines` and mark the meeting transcribed.
@@ -565,6 +627,10 @@ mod tests {
         assert_eq!(s.gemini(), Some("gemini-3.8-flash"));
         assert_eq!(s.clone().fitted().detail, Detail::Detailed);
         let s = Settings { transcribe_by: "google:gemini-3.5-transcribe".into(), ..s };
-        assert_eq!(s.fitted().detail, Detail::Simple);
+        assert_eq!(s.clone().fitted().detail, Detail::Simple);
+        // What isn't offered any more goes back to what is.
+        let s = Settings { transcribe_by: "google:gemini-9-unknown".into(), summarize_by: "groq:not-a-model".into(), ..s }.fitted();
+        assert_eq!((s.transcribe_by.as_str(), s.summarize_by.as_str()), ("local", ""));
+        assert!(TRANSCRIBERS.iter().all(|t| t.local || t.id.contains(':')));
     }
 }

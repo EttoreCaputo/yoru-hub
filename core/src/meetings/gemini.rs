@@ -89,7 +89,7 @@ const PIECE_MS: usize = 10 * 60 * 1000;
 const SEEK_MS: usize = 20_000;
 /// How many times a piece is asked again when the answer loops.
 const TRIES: usize = 3;
-const RATE: usize = 16_000;
+pub(super) const RATE: usize = 16_000;
 
 /// The words of the audio at `path`, in paragraphs, piece by piece.
 fn simple(key: &str, path: &Path, model: &str, language: Option<&str>, mut on_progress: impl FnMut(&str, f64)) -> io::Result<Answer> {
@@ -98,7 +98,7 @@ fn simple(key: &str, path: &Path, model: &str, language: Option<&str>, mut on_pr
     convert(&["-f", "WAVE", "-d", "LEI16@16000", "-c", "1"], path, &pcm)?;
     let samples = read_wav(&fs::read(&pcm)?).ok_or_else(|| io::Error::other("couldn't read the converted audio"))?;
     fs::remove_file(&pcm)?;
-    let pieces = cuts(&samples);
+    let pieces = cuts(&samples, PIECE_MS);
     let mut segments = Vec::new();
     for (i, (from, to)) in pieces.iter().enumerate() {
         let wav = temp.path().join("piece.wav");
@@ -131,11 +131,11 @@ fn piece(key: &str, model: &str, file: &Value, language: Option<&str>) -> io::Re
     Ok(best)
 }
 
-/// Where to cut `samples` into pieces: about [`PIECE_MS`] each, at a quiet
+/// Where to cut `samples` into pieces: about `piece_ms` each, at a quiet
 /// moment; the last piece takes up to half a piece more rather than leave
 /// a scrap.
-fn cuts(samples: &[i16]) -> Vec<(usize, usize)> {
-    let (piece, seek) = (PIECE_MS * RATE / 1000, SEEK_MS * RATE / 1000);
+pub(super) fn cuts(samples: &[i16], piece_ms: usize) -> Vec<(usize, usize)> {
+    let (piece, seek) = (piece_ms * RATE / 1000, SEEK_MS * RATE / 1000);
     let mut out = Vec::new();
     let mut from = 0;
     while samples.len() - from > piece * 3 / 2 {
@@ -156,7 +156,7 @@ fn quietest(samples: &[i16], from: usize, to: usize) -> usize {
 }
 
 /// The 16-bit samples of a WAV file (its `data` chunk).
-fn read_wav(bytes: &[u8]) -> Option<Vec<i16>> {
+pub(super) fn read_wav(bytes: &[u8]) -> Option<Vec<i16>> {
     if bytes.get(..4)? != b"RIFF" || bytes.get(8..12)? != b"WAVE" {
         return None;
     }
@@ -173,7 +173,7 @@ fn read_wav(bytes: &[u8]) -> Option<Vec<i16>> {
 }
 
 /// 16 kHz mono 16-bit `samples` as a WAV file.
-fn wav_of(samples: &[i16]) -> Vec<u8> {
+pub(super) fn wav_of(samples: &[i16]) -> Vec<u8> {
     let data = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data as usize);
     out.extend_from_slice(b"RIFF");
@@ -217,13 +217,13 @@ fn readable(path: &Path) -> io::Result<Readable> {
     Ok(Readable { path: copy, mime: "audio/aac", _temp: Some(temp) })
 }
 
-fn convert(options: &[&str], input: &Path, output: &Path) -> io::Result<()> {
-    let result = Command::new("/usr/bin/afconvert").args(options).arg(input).arg(output).output().map_err(|e| io::Error::other(format!("couldn't start audio conversion for Gemini: {e}")))?;
+pub(super) fn convert(options: &[&str], input: &Path, output: &Path) -> io::Result<()> {
+    let result = Command::new("/usr/bin/afconvert").args(options).arg(input).arg(output).output().map_err(|e| io::Error::other(format!("couldn't start the audio conversion: {e}")))?;
     if result.status.success() {
         return Ok(());
     }
     let detail: String = String::from_utf8_lossy(&result.stderr).trim().chars().take(300).collect();
-    Err(io::Error::other(if detail.is_empty() { format!("couldn't convert the audio for Gemini ({})", result.status) } else { format!("couldn't convert the audio for Gemini: {detail}") }))
+    Err(io::Error::other(if detail.is_empty() { format!("couldn't convert the audio ({})", result.status) } else { format!("couldn't convert the audio: {detail}") }))
 }
 
 /// Send `audio` with the Files API's resumable upload: its `file` record.
@@ -418,7 +418,7 @@ const PARAGRAPH: usize = 600;
 /// Plain text as untimed segments, one per paragraph (or line). A model
 /// that only transcribes writes ten minutes as one block: a long one is
 /// split after whole sentences, about [`PARAGRAPH`] characters each.
-fn paragraphs(text: &str) -> Value {
+pub(super) fn paragraphs(text: &str) -> Value {
     let text = text.trim().trim_start_matches("```").trim_end_matches("```");
     let mut parts = Vec::new();
     for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && *l != "```") {
@@ -655,12 +655,12 @@ mod tests {
         let mut samples = vec![1000i16; 25 * minute];
         // A quiet second just after ten minutes.
         samples[10 * minute + 5 * RATE..10 * minute + 6 * RATE].fill(0);
-        let pieces = cuts(&samples);
+        let pieces = cuts(&samples, PIECE_MS);
         assert_eq!(pieces.len(), 2);
         let cut = pieces[0].1;
         assert!((10 * minute + 5 * RATE..10 * minute + 6 * RATE).contains(&cut), "{cut}");
         assert_eq!(pieces[1], (cut, samples.len()));
-        assert_eq!(cuts(&samples[..14 * minute]), vec![(0, 14 * minute)]);
+        assert_eq!(cuts(&samples[..14 * minute], PIECE_MS), vec![(0, 14 * minute)]);
     }
 
     #[test]
@@ -760,7 +760,7 @@ mod tests {
         let input = folder.path().join("broken.caf");
         fs::write(&input, b"not audio").unwrap();
         let error = match readable(&input) { Ok(_) => panic!("invalid audio was accepted"), Err(e) => e.to_string() };
-        assert!(error.contains("couldn't convert the audio for Gemini:"));
+        assert!(error.contains("couldn't convert the audio:"));
         assert_eq!(fs::read(input).unwrap(), b"not audio");
     }
 }

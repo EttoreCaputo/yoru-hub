@@ -145,7 +145,6 @@ pub const GROQ: Provider = Provider {
             r#"{"reasoning_effort": "low", "include_reasoning": false, "max_tokens": 1024}"#,
         ),
         chat("qwen/qwen3.8-27b", "Qwen3.8 27B on Groq (preview): good Italian", r#"{"reasoning_effort": "none"}"#),
-        chat("llama-3.3-70b-versatile", "Llama 3.3 70B on Groq: good Italian, no thinking", ""),
         orpheus("hannah", "Orpheus on Groq, English, woman's voice; 100 sentences a day free"),
         orpheus("diana", "Orpheus on Groq, English, woman's voice"),
         orpheus("autumn", "Orpheus on Groq, English, woman's voice"),

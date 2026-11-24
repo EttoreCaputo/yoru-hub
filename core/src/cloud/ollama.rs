@@ -19,6 +19,9 @@ use crate::stream::{self, Delta, OnDelta};
 
 /// A model on this computer that thinks as long as it likes can take minutes.
 const TIMEOUT: Duration = Duration::from_secs(600);
+/// The context asked for, in tokens: room for the instructions, the tools
+/// and a meeting's transcript.
+const CONTEXT: u32 = 32_768;
 
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
@@ -96,15 +99,16 @@ fn chat_request(client: &Client, request: &Value) -> Value {
     if let Some(format) = format(&request["response_format"]) {
         body["format"] = format;
     }
-    let mut options = Map::new();
+    // Ollama's own default context (4,096 tokens) is shorter than Yoru's
+    // instructions and tools: it cuts the prompt from the start, and the
+    // model answers without the task ("I didn't get a clear message").
+    let mut options = Map::from_iter([("num_ctx".to_string(), Value::from(CONTEXT))]);
     for (from, to) in [("temperature", "temperature"), ("top_p", "top_p"), ("top_k", "top_k"), ("seed", "seed"), ("stop", "stop"), ("max_tokens", "num_predict")] {
         if let Some(v) = request.get(from) {
             options.insert(to.into(), v.clone());
         }
     }
-    if !options.is_empty() {
-        body["options"] = Value::Object(options);
-    }
+    body["options"] = Value::Object(options);
     body
 }
 
@@ -197,8 +201,9 @@ mod tests {
         assert_eq!(body["messages"][1]["tool_calls"][0]["function"]["arguments"]["text"], "hi");
         assert_eq!(body["messages"][2]["tool_name"], "notify");
         assert_eq!(body["format"], "json");
-        // No limit unless asked; llama.cpp's switch for thinking is read too.
-        assert!(body.get("options").is_none());
+        // No limit unless asked, but always room for Yoru's prompt;
+        // llama.cpp's switch for thinking is read too.
+        assert_eq!(body["options"], json!({"num_ctx": CONTEXT}));
         let body = chat_request(&client, &json!({"messages": [], "max_tokens": 80, "chat_template_kwargs": {"enable_thinking": false}}));
         assert_eq!((body["think"].as_bool(), body["options"]["num_predict"].as_u64()), (Some(false), Some(80)));
         assert!(chat_request(&client, &json!({"messages": []})).get("think").is_none());

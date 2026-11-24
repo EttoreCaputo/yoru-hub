@@ -97,7 +97,6 @@
       })),
     ),
   );
-  const sttServices = $derived(hearing.filter((svc) => svc !== LOCAL && keyed(svc)).map((svc) => ({ id: svc, name: nameOf(svc) })));
   const model = (id: string | undefined) => info?.models.find((m) => m.id === id);
   const mb = (m: ModelInfo) => Math.round(m.bytes / 1e6);
   const missing = (m: ModelInfo | undefined) => !!m && !m.installed && !m.provider;
@@ -228,7 +227,7 @@
           <div class="what"><b>{t.sttModel}</b></div>
           <div class="how">
             {#if sttModel && missing(sttModel)}{@render fetch(sttModel)}{/if}
-            <ModelPicker value={s.model} choices={sttChoices} providers={sttServices} need="stt" accept={(m) => !m.model.includes("-live")} label={t.sttModel} onchange={(model) => set({ enabled: true, model })} />
+            <ModelPicker value={s.model} choices={sttChoices} label={t.sttModel} onchange={(model) => set({ enabled: true, model })} />
           </div>
         </div>
         {@render picker(t.turnModel, t.turnHint, s.turn_model, t.turnPause, turns, (id) => set({ turn_model: id }))}

@@ -358,7 +358,10 @@ export type ActionItem = { text: string; owner: string; due: string; date: strin
 /** A meeting's to-do on the To-do page (`meeting_todos`): the meeting it came from, and whether it's ticked off. */
 export type Todo = { meeting: string; title: string; started_at: number; item: ActionItem; done: boolean };
 /** `meeting_summarizers`: the brain's name (Yoru writes the summaries with it), and every model of a provider with a key, for the transcriber. */
-export type Summarizers = { brain: string | null; models: { id: string; provider: string; model: string; note: string }[] };
+/** A way to make transcripts the app offers (`meetings::TRANSCRIBERS`): `ready` when its service's key is there. */
+export type Transcriber = { id: string; detailed: boolean; speakers: boolean; local: boolean; ready: boolean };
+/** What can write summaries and make transcripts: only what was tried and works. */
+export type Summarizers = { brain: string | null; models: { id: string; provider: string; model: string; note: string }[]; transcribers: Transcriber[] };
 /** A stretch of speech: `kind` `mic` is the user's track; `speaker` who, within the track (0: first heard). */
 export type TranscriptLine = { track: string; kind: "mic" | "others"; start_ms: number; end_ms: number; text: string; speaker: number | null };
 /** Someone heard: `key` is `<track>/<speaker or ->`; `number` 0 is the user, then 1, 2… as they first speak. */
@@ -366,7 +369,7 @@ export type Speaker = { key: string; number: number; name: string | null };
 /** `timed` false: a simple transcript, paragraphs without times or speakers. */
 export type Transcript = { engine: string; language: string | null; lines: TranscriptLine[]; timed: boolean; speakers: Speaker[] };
 /** `meeting_settings`: when to transcribe, the language (empty: Parakeet finds it), whether to tell the speakers apart, and whether to notice meetings on their own (`detect`). */
-export type MeetingSettings = { transcribe: "after" | "live" | "manual"; /** `local` (Parakeet) or a Gemini model (`google:gemini-3.8-flash`). */ transcribe_by: string; language: string; speakers: boolean; /** Gemini's transcript: timed lines and speakers, or only the words. */ detail: "detailed" | "simple"; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; detect: boolean };
+export type MeetingSettings = { transcribe: "after" | "live" | "manual"; /** One of `Summarizers.transcribers`: `local` (Parakeet) or a service's model (`groq:whisper-large-v3-turbo`). */ transcribe_by: string; language: string; speakers: boolean; /** Timed lines and speakers, or only the words. */ detail: "detailed" | "simple"; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; /** Empty: Yoru's brain writes the summaries; else one of `Summarizers.models`. */ summarize_by: string; detect: boolean };
 /** What can be recorded right now (`meeting_sources`). */
 export type MeetingSources = { apps: { id: string; name: string; playing: boolean; icon?: string }[]; microphones: { id: string; name: string; default: boolean }[] };
 /** What to record (`meeting_start`): everything played, or one app's sound, and microphones. */

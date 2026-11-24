@@ -11,11 +11,12 @@ mod gemini;
 mod summary;
 mod todos;
 mod transcript;
+mod whisper;
 
 pub use summary::{ActionItem, STYLES, Section, Summary, store as store_summary, summary};
 pub use todos::{Todo, set_done as set_todo_done, todos};
 
-pub use transcript::{Detail, Format, Line, labels as speaker_labels, Settings, Speaker, Transcript, When, download_model, export, import, import_recording, model_present, rename_speaker, set_settings, settings, transcribe, transcript, voices};
+pub use transcript::{Detail, Format, Line, labels as speaker_labels, Settings, Speaker, TRANSCRIBERS, Transcriber, Transcript, When, download_model, export, import, import_recording, model_present, rename_speaker, set_settings, settings, transcribe, transcriber, transcript, voices};
 
 use std::collections::BTreeMap;
 use std::fs;

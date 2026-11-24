@@ -14,7 +14,7 @@
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store, type Page } from "../store.svelte";
-  import type { AssistantInfo, AssistantSettings, Brain, Effort, KeySource, McpInfo, MeetingSettings, VoiceInfo } from "../types";
+  import type { AssistantInfo, AssistantSettings, Brain, Effort, KeySource, McpInfo, MeetingSettings, Summarizers, VoiceInfo } from "../types";
   import YoruBoard from "../YoruBoard.svelte";
   import Board from "../ui/Board.svelte";
   import KeyField from "../ui/KeyField.svelte";
@@ -25,7 +25,7 @@
   import PocketSettingsPage from "../ui/PocketSettings.svelte";
   import Profiles from "../ui/Profiles.svelte";
   import ModelPicker, { type Choice } from "../ui/ModelPicker.svelte";
-  import { transcriptionRequirement } from "../meeting-readiness";
+  import { serviceOf, transcriptionRequirement } from "../meeting-readiness";
   import { PAGE_ICONS } from "../icons/pages";
   import Icon from "../ui/Icon.svelte";
   import type { IconName } from "../icons/icons";
@@ -60,13 +60,17 @@
   let voice = $state<VoiceInfo | null>(null);
   let mcp = $state<McpInfo | null>(null);
   let notch = $state(false);
-  let meetings = $state<{ settings: MeetingSettings; model: boolean } | null>(null);
+  let meetings = $state<{ settings: MeetingSettings; model: boolean; engines: Summarizers | null } | null>(null);
   let error = $state("");
 
   async function readAll() {
     [voice, mcp] = await Promise.all([call<VoiceInfo>("voice_info").catch(() => null), call<McpInfo>("mcp_info").catch(() => null)]);
-    const [ms, model] = await Promise.all([call<MeetingSettings>("meeting_settings").catch(() => null), call<boolean>("meeting_model").catch(() => true)]);
-    meetings = ms ? { settings: ms, model } : null;
+    const [ms, model, engines] = await Promise.all([
+      call<MeetingSettings>("meeting_settings").catch(() => null),
+      call<boolean>("meeting_model").catch(() => true),
+      call<Summarizers>("meeting_summarizers").catch(() => null),
+    ]);
+    meetings = ms ? { settings: ms, model, engines } : null;
     notch = (await call<{ notch?: boolean }>("status").catch(() => null))?.notch ?? false;
   }
   $effect(() => {
@@ -157,11 +161,11 @@
     return { text: [tp.phases[p.phase], p.phase === "connected" && p.battery !== null ? `${p.battery}%` : ""].filter(Boolean).join(" · "), dot };
   });
   const meetingProblem = $derived(
-    meetings && transcriptionRequirement(meetings.settings.transcribe_by, meetings.model, !!store.info?.google_key)
-      ? meetings.settings.transcribe_by === "local"
-        ? t.meetingsNoModel
-        : i18n.t.meetings.noGoogleKey
-      : null,
+    meetings && transcriptionRequirement(meetings.settings.transcribe_by, meetings.model, meetings.engines?.transcribers ?? null) === "local"
+      ? t.meetingsNoModel
+      : meetings && transcriptionRequirement(meetings.settings.transcribe_by, meetings.model, meetings.engines?.transcribers ?? null) === "key"
+        ? i18n.t.meetings.missingKey(serviceOf(meetings.settings.transcribe_by))
+        : null,
   );
   const summary = $derived<Record<Part, { text: string; dot: string }>>({
     brain: !store.info?.ready
@@ -461,7 +465,7 @@
           {#if ollamaError}<span class="error-text">{ollamaError}</span>{:else if ollamaModels && !ollamaModels.length}<span class="error-text">{t.ollamaNone}</span>{/if}
         </div>
         <div class="how">
-          <ModelPicker value={s.ollama_model} choices={brainChoices("ollama")} bare custom label={name} onchange={(v) => setModel("ollama", v)} />
+          <ModelPicker value={s.ollama_model} choices={brainChoices("ollama")} bare label={name} onchange={(v) => setModel("ollama", v)} />
           <button class="btn small" onclick={readOllama}>{t.ollamaRefresh}</button>
           <button class="btn small" onclick={() => call("open_key_page", { provider: "ollama" })}>{t.ollamaGet}</button>
         </div>
@@ -474,7 +478,7 @@
       <div class="setting">
         <div class="what"><b>{name}</b></div>
         <div class="how">
-          <ModelPicker value={modelOf(b)} choices={brainChoices(b)} providers={keyOf(b)?.source ? [{ id: b, name: BRAIN_NAMES[b] }] : []} bare custom={b === "anthropic"} label={name} onchange={(v) => setModel(b, v)} />
+          <ModelPicker value={modelOf(b)} choices={brainChoices(b)} bare label={name} onchange={(v) => setModel(b, v)} />
         </div>
       </div>
     {/if}
