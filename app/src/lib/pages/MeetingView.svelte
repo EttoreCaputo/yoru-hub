@@ -243,8 +243,8 @@
     {/if}
 
     <div class="seg" role="tablist">
-      <button role="tab" class:on={view === "summary"} aria-selected={view === "summary"} onclick={() => (view = "summary")}>{th.summaryTab}</button>
       <button role="tab" class:on={view === "transcript"} aria-selected={view === "transcript"} onclick={() => (view = "transcript")}>{th.transcriptTab}</button>
+      <button role="tab" class:on={view === "summary"} aria-selected={view === "summary"} onclick={() => (view = "summary")}>{th.summaryTab}</button>
     </div>
 
     {#if error}<p class="error-text">{error}</p>{/if}
@@ -304,9 +304,20 @@
             </span>
           </div>
           {#if !canSummarize}<p class="dim small">{t.needSummarizer} <button class="btn link small" onclick={openBrainSettings}>{t.openBrainSettings}</button></p>{/if}
+        {:else if !m.transcribed_at}
+          <!-- A summary is written from the transcript: nothing to summarize yet. -->
+          <div class="empty">
+            {#if id in store.transcribing}
+              <p>{t.summaryAfterTranscript}</p>
+              <p class="dim small">{t.transcribing(percent(store.transcribing[id]))}</p>
+            {:else}
+              <p>{t.needTranscript}</p>
+            {/if}
+            <button class="btn" onclick={() => (view = "transcript")}>{t.goToTranscript}</button>
+          </div>
         {:else if summary === null}
           <div class="empty">
-            <p>{m.transcribed_at ? t.summarize : t.needTranscript}</p>
+            <p>{t.summarize}</p>
             {#if m.transcribed_at}
               <button class="btn primary" disabled={!canSummarize} title={canSummarize ? undefined : t.needSummarizer} onclick={summarize}>{t.summarize}</button>
               {#if !canSummarize}<p class="dim small">{t.needSummarizer}</p><button class="btn" onclick={openBrainSettings}>{t.openBrainSettings}</button>{/if}

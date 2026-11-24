@@ -51,21 +51,145 @@ pub(super) struct Answer {
 pub(super) fn transcribe(path: &Path, model: &str, language: Option<&str>, speakers: bool, detailed: bool, mut on_progress: impl FnMut(&str, f64)) -> io::Result<Answer> {
     let key = GOOGLE.api_key().ok_or_else(|| io::Error::other("Google: no API key (add one in Settings)"))?;
     on_progress("load", 0.0);
-    let audio = readable(path)?;
-    let file = upload(&key, &audio.path, audio.mime)?;
-    let mime = audio.mime;
-    drop(audio);
-    let name = file["name"].as_str().unwrap_or_default().to_string();
-    let result = ready(&key, file).and_then(|file| {
-        on_progress("transcribe", 0.5);
-        generate(&key, model, &file, mime, language, speakers, detailed)
-    });
-    if !name.is_empty() {
-        let _ = agent().delete(format!("{ROOT}/v1beta/{name}")).header("x-goog-api-key", &key).call();
+    if !detailed {
+        return simple(&key, path, model, language, on_progress);
     }
-    let answer = result?;
+    let audio = readable(path)?;
+    let answer = with_file(&key, &audio.path, audio.mime, |file| {
+        on_progress("transcribe", 0.5);
+        let (text, cut) = generate(&key, model, file, audio.mime, language, speakers, true)?;
+        if cut {
+            return Err(io::Error::other("Gemini: the recording is too long for one answer"));
+        }
+        Ok(answer_of(&text, true))
+    })?;
     on_progress("transcribe", 1.0);
     Ok(answer)
+}
+
+/// Upload `audio`, hand it to `job` once Google has it ready, and delete it
+/// from Google whatever `job` did.
+fn with_file<T>(key: &str, audio: &Path, mime: &str, job: impl FnOnce(&Value) -> io::Result<T>) -> io::Result<T> {
+    let file = upload(key, audio, mime)?;
+    let name = file["name"].as_str().unwrap_or_default().to_string();
+    let result = ready(key, file).and_then(|file| job(&file));
+    if !name.is_empty() {
+        let _ = agent().delete(format!("{ROOT}/v1beta/{name}")).header("x-goog-api-key", key).call();
+    }
+    result
+}
+
+/// A simple transcript is written a piece of about [`PIECE_MS`] at a time:
+/// a model that only transcribes can't be asked to go on ("Multiturn chat
+/// is not enabled for this model"), and on a long recording it sometimes
+/// says one sentence over and over until its 32,768-token limit.
+const PIECE_MS: usize = 10 * 60 * 1000;
+/// A piece ends at the quietest half second this close to its end, not in
+/// the middle of a word.
+const SEEK_MS: usize = 20_000;
+/// How many times a piece is asked again when the answer loops.
+const TRIES: usize = 3;
+const RATE: usize = 16_000;
+
+/// The words of the audio at `path`, in paragraphs, piece by piece.
+fn simple(key: &str, path: &Path, model: &str, language: Option<&str>, mut on_progress: impl FnMut(&str, f64)) -> io::Result<Answer> {
+    let temp = tempfile::Builder::new().prefix("yoru-gemini-").tempdir()?;
+    let pcm = temp.path().join("audio.wav");
+    convert(&["-f", "WAVE", "-d", "LEI16@16000", "-c", "1"], path, &pcm)?;
+    let samples = read_wav(&fs::read(&pcm)?).ok_or_else(|| io::Error::other("couldn't read the converted audio"))?;
+    fs::remove_file(&pcm)?;
+    let pieces = cuts(&samples);
+    let mut segments = Vec::new();
+    for (i, (from, to)) in pieces.iter().enumerate() {
+        let wav = temp.path().join("piece.wav");
+        let aac = temp.path().join("piece.aac");
+        fs::write(&wav, wav_of(&samples[*from..*to]))?;
+        convert(&["-f", "adts", "-d", "aac@16000", "-c", "1", "-b", "48000"], &wav, &aac)?;
+        on_progress("transcribe", i as f64 / pieces.len() as f64);
+        let text = with_file(key, &aac, "audio/aac", |file| piece(key, model, file, language))?;
+        if let Value::Array(mut parts) = paragraphs(&text) {
+            segments.append(&mut parts);
+        }
+    }
+    on_progress("transcribe", 1.0);
+    Ok(Answer { segments: Value::Array(segments), timed: false })
+}
+
+/// One piece's words. An answer that loops is asked for again; if every
+/// try loops, what came before the loop is kept.
+fn piece(key: &str, model: &str, file: &Value, language: Option<&str>) -> io::Result<String> {
+    let mut best = String::new();
+    for _ in 0..TRIES {
+        let (text, cut) = generate(key, model, file, "audio/aac", language, false, false)?;
+        match looping(&text) {
+            None if !cut => return Ok(text),
+            Some(at) if at > best.len() => best = text[..at].to_string(),
+            None if text.len() > best.len() => best = text,
+            _ => {}
+        }
+    }
+    Ok(best)
+}
+
+/// Where to cut `samples` into pieces: about [`PIECE_MS`] each, at a quiet
+/// moment; the last piece takes up to half a piece more rather than leave
+/// a scrap.
+fn cuts(samples: &[i16]) -> Vec<(usize, usize)> {
+    let (piece, seek) = (PIECE_MS * RATE / 1000, SEEK_MS * RATE / 1000);
+    let mut out = Vec::new();
+    let mut from = 0;
+    while samples.len() - from > piece * 3 / 2 {
+        let to = quietest(samples, from + piece - seek, from + piece + seek);
+        out.push((from, to));
+        from = to;
+    }
+    out.push((from, samples.len()));
+    out
+}
+
+/// The middle of the quietest half second between `from` and `to`.
+fn quietest(samples: &[i16], from: usize, to: usize) -> usize {
+    let (block, window) = (RATE / 10, 5);
+    let loud: Vec<u64> = samples[from..to].chunks(block).map(|b| b.iter().map(|s| s.unsigned_abs() as u64).sum()).collect();
+    let best = (0..loud.len().saturating_sub(window)).min_by_key(|&i| loud[i..i + window].iter().sum::<u64>()).unwrap_or(0);
+    from + (best * block) + window * block / 2
+}
+
+/// The 16-bit samples of a WAV file (its `data` chunk).
+fn read_wav(bytes: &[u8]) -> Option<Vec<i16>> {
+    if bytes.get(..4)? != b"RIFF" || bytes.get(8..12)? != b"WAVE" {
+        return None;
+    }
+    let mut at = 12;
+    while at + 8 <= bytes.len() {
+        let size = u32::from_le_bytes(bytes[at + 4..at + 8].try_into().ok()?) as usize;
+        if &bytes[at..at + 4] == b"data" {
+            let data = bytes.get(at + 8..(at + 8 + size).min(bytes.len()))?;
+            return Some(data.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect());
+        }
+        at += 8 + size + size % 2;
+    }
+    None
+}
+
+/// 16 kHz mono 16-bit `samples` as a WAV file.
+fn wav_of(samples: &[i16]) -> Vec<u8> {
+    let data = (samples.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + data as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&(RATE as u32).to_le_bytes());
+    out.extend_from_slice(&(RATE as u32 * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data.to_le_bytes());
+    samples.iter().for_each(|s| out.extend_from_slice(&s.to_le_bytes()));
+    out
 }
 
 /// A private temporary directory owns any converted audio and removes it even
@@ -144,44 +268,20 @@ fn ready(key: &str, mut file: Value) -> io::Result<Value> {
     Ok(file)
 }
 
-/// Ask `model` for the transcript of the uploaded `file`. It thinks a little
-/// and answers in JSON if it can: a model that only transcribes
+/// Ask `model` for the transcript of the uploaded `file`: the answer's text,
+/// and whether it stopped at the most it may write. A detailed one thinks a
+/// little and answers in JSON if it can: a model that only transcribes
 /// (`gemini-3.5-transcribe`) refuses a thinking setting or JSON mode, so
-/// each refusal is asked again without it; the prompt asks for the same JSON
-/// anyway.
-///
-/// A long recording's words don't fit one answer: a simple transcript is
-/// asked to go on from where the answer stopped, up to [`PARTS`] times.
-fn generate(key: &str, model: &str, file: &Value, mime: &str, language: Option<&str>, speakers: bool, detailed: bool) -> io::Result<Answer> {
+/// each refusal is asked again without it; the prompt asks for the same
+/// JSON anyway. A free tier's limit for the minute is waited out, and a model
+/// too busy to answer is asked again.
+fn generate(key: &str, model: &str, file: &Value, mime: &str, language: Option<&str>, speakers: bool, detailed: bool) -> io::Result<(String, bool)> {
     let mut request = if detailed { request(file, mime, language, speakers) } else { plain_request(file, mime, language) };
-    let mut text = String::new();
-    let mut parts = 0;
-    let mut waits = 0;
+    let (mut waits, mut busy) = (0, 0);
     loop {
         let answer = send(key, model, &request);
         let config = request["generationConfig"].as_object_mut().expect("the request's config");
         match answer {
-            Ok((mut part, true)) if !detailed && parts + 1 < PARTS => {
-                parts += 1;
-                // A model stuck saying the same thing over goes on from where it began.
-                if let Some(from) = looping(&part) {
-                    part.truncate(from);
-                }
-                text.push_str(&part);
-                let turns = request["contents"].as_array_mut().expect("the request's turns");
-                turns.push(json!({"role": "model", "parts": [{"text": part}]}));
-                turns.push(json!({"role": "user", "parts": [{"text": GO_ON}]}));
-            }
-            Ok((_, true)) => {
-                return Err(io::Error::other("Gemini: the recording is too long for one answer"));
-            }
-            Ok((mut part, false)) => {
-                if let Some(from) = looping(&part).filter(|_| !detailed) {
-                    part.truncate(from);
-                }
-                text.push_str(&part);
-                return Ok(answer_of(&text, detailed));
-            }
             Err(e) if refuses_thinking(&e.to_string()) && config.contains_key("thinkingConfig") => {
                 config.remove("thinkingConfig");
             }
@@ -189,14 +289,32 @@ fn generate(key: &str, model: &str, file: &Value, mime: &str, language: Option<&
                 config.remove("responseMimeType");
                 config.remove("responseSchema");
             }
-            // The free tier counts the audio again with every part: wait for the minute to pass.
-            Err(e) if parts > 0 && waits < 3 && e.to_string().contains("limit reached") => {
+            Err(e) if waits < 5 && for_the_minute(&e.to_string()) => {
                 waits += 1;
                 thread::sleep(Duration::from_secs(65));
             }
-            Err(e) => return Err(e),
+            Err(e) if busy < 4 && overloaded(&e.to_string()) => {
+                busy += 1;
+                thread::sleep(Duration::from_secs(10 << busy));
+            }
+            Err(e) if overloaded(&e.to_string()) => {
+                return Err(io::Error::other(format!("Google: {model} is too busy right now (asked for five minutes); try again later")));
+            }
+            answer => return answer,
         }
     }
+}
+
+/// Google's 503 ("This model is currently experiencing high demand") or
+/// 500: worth asking again a little later (20 s, 40 s, 80 s, 160 s).
+fn overloaded(error: &str) -> bool {
+    error.starts_with("Google (503)") || error.starts_with("Google (500)") || error.to_lowercase().contains("high demand")
+}
+
+/// Google's 429 for a limit that a minute's wait lifts (not the day's).
+fn for_the_minute(error: &str) -> bool {
+    let error = error.to_lowercase();
+    error.contains("limit reached") && error.contains("per minute")
 }
 
 /// Where `text` starts saying the same thing over and over, if it does: a
@@ -265,11 +383,6 @@ fn plain_request(file: &Value, mime: &str, language: Option<&str>) -> Value {
     })
 }
 
-/// How many answers a simple transcript may take.
-const PARTS: usize = 12;
-/// What asks for the rest of a simple transcript.
-const GO_ON: &str = "Go on with the transcript from the exact word where you stopped, without repeating anything, until the end of the recording. Same rules.";
-
 /// The transcript in `text`: timed segments if `detailed` and they're
 /// there, else paragraphs.
 fn answer_of(text: &str, detailed: bool) -> Answer {
@@ -299,10 +412,29 @@ fn send(key: &str, model: &str, request: &Value) -> io::Result<(String, bool)> {
     Ok((text, cut))
 }
 
-/// Plain text as untimed segments, one per paragraph (or line).
+/// About how long a paragraph of a simple transcript is.
+const PARAGRAPH: usize = 600;
+
+/// Plain text as untimed segments, one per paragraph (or line). A model
+/// that only transcribes writes ten minutes as one block: a long one is
+/// split after whole sentences, about [`PARAGRAPH`] characters each.
 fn paragraphs(text: &str) -> Value {
     let text = text.trim().trim_start_matches("```").trim_end_matches("```");
-    let parts: Vec<Value> = text.lines().map(str::trim).filter(|l| !l.is_empty() && *l != "```").map(|l| json!({"text": l})).collect();
+    let mut parts = Vec::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && *l != "```") {
+        let mut from = 0;
+        for (i, c) in line.char_indices() {
+            let end = i + c.len_utf8();
+            let ends_sentence = matches!(c, '.' | '?' | '!') && line[end..].starts_with(' ');
+            if ends_sentence && end - from >= PARAGRAPH {
+                parts.push(json!({"text": line[from..end].trim()}));
+                from = end;
+            }
+        }
+        if !line[from..].trim().is_empty() {
+            parts.push(json!({"text": line[from..].trim()}));
+        }
+    }
     Value::Array(parts)
 }
 
@@ -506,8 +638,45 @@ mod tests {
     }
 
     #[test]
+    fn a_busy_model_is_asked_again() {
+        assert!(overloaded("Google (503): This model is currently experiencing high demand. Spikes in demand are usually temporary."));
+        assert!(!overloaded("Google (400): Multiturn chat is not enabled for this model"));
+    }
+
+    #[test]
+    fn a_minute_limit_is_waited_out_but_not_the_days() {
+        assert!(for_the_minute("Google: limit reached (Quota exceeded for metric: input_token_count, limit: 10000 … tokens per minute limit exceeded on Free Tier)"));
+        assert!(!for_the_minute("Google: limit reached (Quota exceeded: requests per day)"));
+    }
+
+    #[test]
+    fn long_audio_is_cut_at_a_quiet_moment() {
+        let minute = 60 * RATE;
+        let mut samples = vec![1000i16; 25 * minute];
+        // A quiet second just after ten minutes.
+        samples[10 * minute + 5 * RATE..10 * minute + 6 * RATE].fill(0);
+        let pieces = cuts(&samples);
+        assert_eq!(pieces.len(), 2);
+        let cut = pieces[0].1;
+        assert!((10 * minute + 5 * RATE..10 * minute + 6 * RATE).contains(&cut), "{cut}");
+        assert_eq!(pieces[1], (cut, samples.len()));
+        assert_eq!(cuts(&samples[..14 * minute]), vec![(0, 14 * minute)]);
+    }
+
+    #[test]
+    fn wav_round_trips() {
+        let samples = vec![0, 1, -1, i16::MAX, i16::MIN];
+        assert_eq!(read_wav(&wav_of(&samples)).unwrap(), samples);
+    }
+
+    #[test]
     fn plain_text_becomes_paragraphs() {
         assert_eq!(paragraphs("Ciao a tutti.\n\n  Iniziamo.  \n"), json!([{"text": "Ciao a tutti."}, {"text": "Iniziamo."}]));
+        let sentence = format!("{}.", "parola ".repeat(50).trim());
+        let block = vec![sentence.as_str(); 5].join(" ");
+        let split = paragraphs(&block);
+        assert_eq!(split.as_array().unwrap().len(), 3, "{split}");
+        assert!(split.as_array().unwrap().iter().all(|p| p["text"].as_str().unwrap().ends_with('.')));
     }
 
     #[test]
@@ -606,7 +775,8 @@ mod live {
         let model = std::env::var("GEMINI_MODEL").unwrap_or("gemini-3.8-flash".into());
         let started = std::time::Instant::now();
         let detailed = std::env::var("GEMINI_SIMPLE").is_err();
-        let answer = super::transcribe(path.as_ref(), &model, None, true, detailed, |p, f| eprintln!("{p} {f}")).unwrap();
+        let language = std::env::var("GEMINI_LANGUAGE").ok();
+        let answer = super::transcribe(path.as_ref(), &model, language.as_deref(), true, detailed, |p, f| eprintln!("{p} {f}")).unwrap();
         eprintln!("{:?}, timed: {}", started.elapsed(), answer.timed);
         println!("{}", serde_json::to_string_pretty(&answer.segments).unwrap());
     }

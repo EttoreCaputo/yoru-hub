@@ -789,22 +789,35 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
       emit("meeting", { kind: "transcribed", meeting: meetings.find((m) => m.id === a.id) });
     }, 1200);
   },
-  meeting_transcript: () => ({
-    engine: "parakeet-ultra",
-    language: null,
-    timed: true,
-    lines: [
-      { track: "others", kind: "others", start_ms: 0, end_ms: 4200, text: "Ciao, mi senti? Partiamo dalla scadenza di venerdì.", speaker: 0 },
-      { track: "mic", kind: "mic", start_ms: 4600, end_ms: 9100, text: "Sì, ti sento. Per venerdì manca solo la revisione del firmware.", speaker: 0 },
-      { track: "others", kind: "others", start_ms: 9800, end_ms: 15000, text: "Perfetto, allora la fai tu e io aggiorno il documento.", speaker: 0 },
-      { track: "others", kind: "others", start_ms: 15400, end_ms: 19000, text: "Io intanto preparo le schede per i test.", speaker: 1 },
-    ],
-    speakers: [
-      { key: "others/0", number: 1, name: "Marco" },
-      { key: "mic/0", number: 0, name: null },
-      { key: "others/1", number: 2, name: null },
-    ],
-  }),
+  meeting_transcript: (a) =>
+    a.id === "20261028-091500"
+      ? {
+          // A simple transcript (Settings > Meetings, Simple): paragraphs, no times or speakers.
+          engine: "gemini:gemini-3.5-transcribe",
+          language: "it",
+          timed: false,
+          speakers: [],
+          lines: [
+            { track: "others", kind: "others", start_ms: 0, end_ms: 0, text: "Ciao a tutti, partiamo dal budget del trimestre: siamo in linea con quanto previsto.", speaker: null },
+            { track: "others", kind: "others", start_ms: 0, end_ms: 0, text: "Perfetto. Allora la revisione del firmware la chiudiamo entro venerdì e io aggiorno il documento.", speaker: null },
+          ],
+        }
+      : {
+          engine: "parakeet-ultra",
+          language: null,
+          timed: true,
+          lines: [
+            { track: "others", kind: "others", start_ms: 0, end_ms: 4200, text: "Ciao, mi senti? Partiamo dalla scadenza di venerdì.", speaker: 0 },
+            { track: "mic", kind: "mic", start_ms: 4600, end_ms: 9100, text: "Sì, ti sento. Per venerdì manca solo la revisione del firmware.", speaker: 0 },
+            { track: "others", kind: "others", start_ms: 9800, end_ms: 15000, text: "Perfetto, allora la fai tu e io aggiorno il documento.", speaker: 0 },
+            { track: "others", kind: "others", start_ms: 15400, end_ms: 19000, text: "Io intanto preparo le schede per i test.", speaker: 1 },
+          ],
+          speakers: [
+            { key: "others/0", number: 1, name: "Marco" },
+            { key: "mic/0", number: 0, name: null },
+            { key: "others/1", number: 2, name: null },
+          ],
+        },
   meeting_export: () => "/Users/you/Downloads/Weekly with Marco.md",
   meeting_import: () => null,
   meeting_summarizers: () => ({
