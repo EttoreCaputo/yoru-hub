@@ -118,6 +118,11 @@ battery, free storage and firmware; the new recordings, with select all and
 Meetings, each with Open and Delete from the Pocket. Unpaired, the three steps
 of the reset and the Pair button.
 
+While a sync copies, Home lists the recordings being copied at the top
+(From the Pocket): the one under way with its percentage, then those waiting,
+from the status's `transfer` (`name`, `bytes`, `total` and the names still
+`waiting`).
+
 The app needs `NSBluetoothAlwaysUsageDescription` in `Info.plist`; a binary
 run outside the bundle (`cargo run`) doesn't start the Pocket's thread, since
 macOS would end it.

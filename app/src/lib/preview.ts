@@ -328,7 +328,7 @@ function pocketDownload(names: string[]) {
     let bytes = 0;
     const tick = setInterval(() => {
       bytes = Math.min(total, bytes + total / 8);
-      pocket = { ...pocket, transfer: { name, bytes, total, queued: names.length - i - 1 } };
+      pocket = { ...pocket, transfer: { name, bytes, total, waiting: names.slice(i + 1) } };
       emitPocket();
       if (bytes >= total) {
         clearInterval(tick);

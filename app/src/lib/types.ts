@@ -411,7 +411,8 @@ export type PocketStatus = {
   recording: boolean;
   recordings: PocketRecording[];
   checking: boolean;
-  transfer: { name: string; bytes: number; total: number; queued: number } | null;
+  /** The download under way, and the recordings waiting after it (by name). */
+  transfer: { name: string; bytes: number; total: number; waiting: string[] } | null;
   synced_at: number | null;
   error: string | null;
 };

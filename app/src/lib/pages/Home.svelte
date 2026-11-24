@@ -1,7 +1,9 @@
 <!--
   Home, after Pocket's: every conversation with Yoru and every meeting
   recorded, newest first, by day, with a search over their titles; each
-  opens in a tab of its own (tabs.svelte.ts). At the bottom the field to ask
+  opens in a tab of its own (tabs.svelte.ts). While the Pocket syncs, the
+  recordings it is copying head the list, with how far the copy has got; a
+  click opens the Pocket's dialog. At the bottom the field to ask
   Yoru something, which starts a new conversation in a new tab. With
   nothing yet, Yoru greets you in the middle.
 -->
@@ -22,7 +24,17 @@
   let query = $state("");
   let error = $state("");
 
-  type Row = { kind: "chat" | "meeting"; id: string; title: string; faint: boolean; note: string; at: number; now: boolean };
+  type Row = {
+    kind: "chat" | "meeting" | "pocket";
+    id: string;
+    title: string;
+    faint: boolean;
+    note: string;
+    at: number;
+    now: boolean;
+    /** A Pocket recording being copied (0 to 1), or waiting its turn (null). */
+    progress?: number | null;
+  };
 
   const meetingTitle = (m: Meeting) => m.title ?? tm.untitled(`${i18n.date(m.started_at)} · ${i18n.time(m.started_at)}`);
   const rows = $derived.by<Row[]>(() => {
@@ -48,6 +60,18 @@
     return [...chats, ...meetings].filter((r) => !q || `${r.title} ${r.note}`.toLowerCase().includes(q)).sort((a, b) => b.at - a.at);
   });
 
+  // The Pocket's recordings being copied: the one under way, then those waiting.
+  const copying = $derived.by<Row[]>(() => {
+    const tr = store.pocket?.transfer;
+    if (!tr) return [];
+    return [tr.name, ...tr.waiting].map((name) => {
+      const at = store.pocket?.recordings.find((r) => r.name === name)?.started_at ?? store.now;
+      const progress = name === tr.name ? (tr.total ? Math.min(1, tr.bytes / tr.total) : 0) : null;
+      const note = progress === null ? t.copyWaiting : t.copying;
+      return { kind: "pocket", id: name, title: tm.untitled(`${i18n.date(at)} · ${i18n.time(at)}`), faint: false, note, at, now: true, progress };
+    });
+  });
+
   // By day: Today, Yesterday, then the weekday and date.
   const days = $derived.by(() => {
     const groups: { key: string; name: string; date: string; rows: Row[] }[] = [];
@@ -64,10 +88,10 @@
       }
       g.rows.push(r);
     }
-    return groups;
+    return copying.length ? [{ key: "pocket", name: t.pocketKind, date: "", rows: copying }, ...groups] : groups;
   });
 
-  const nothing = $derived(!store.conversations.length && !store.meetings.length);
+  const nothing = $derived(!store.conversations.length && !store.meetings.length && !store.pocket?.transfer);
   const ready = $derived(store.info?.ready ?? true);
   const greeting = $derived.by(() => {
     const h = new Date(store.now).getHours();
@@ -79,7 +103,8 @@
     return () => clearTimeout(hello);
   });
 
-  const open = (r: Row) => tabs.open({ kind: r.kind, id: r.id });
+  const open = (r: Row) => (r.kind === "pocket" ? (store.pocketShown = true) : tabs.open({ kind: r.kind, id: r.id }));
+  const kindName = (r: Row) => (r.kind === "chat" ? t.chatKind : r.kind === "pocket" ? t.pocketKind : t.meetingKind);
 
   async function remove(r: Row) {
     error = "";
@@ -153,14 +178,17 @@
             {#each day.rows as r (r.kind + r.id)}
               <li class:removable={!r.now}>
                 <button class="row" onclick={() => open(r)}>
-                  <span class="kind {r.kind}" title={r.kind === "chat" ? t.chatKind : t.meetingKind}>
-                    <Icon name={r.kind === "chat" ? "message-circle" : "file-text"} size={16} />
+                  <span class="kind {r.kind}" title={kindName(r)}>
+                    <Icon name={r.kind === "chat" ? "message-circle" : r.kind === "pocket" ? "audio-lines" : "file-text"} size={16} />
                   </span>
                   <span class="what">
                     <span class="name" class:faint={r.faint}>{r.title}</span>
                     {#if r.note}<span class="note">{r.note}</span>{/if}
+                    {#if typeof r.progress === "number"}<span class="meter"><span style:--p={r.progress}></span></span>{/if}
                   </span>
-                  {#if r.now}<span class="tag done">{t.now}</span>{/if}
+                  {#if r.kind === "pocket"}
+                    {#if typeof r.progress === "number"}<span class="tag done percent">{Math.round(r.progress * 100)}%</span>{/if}
+                  {:else if r.now}<span class="tag done">{t.now}</span>{/if}
                   <time class="faint">{i18n.time(r.at)}</time>
                 </button>
                 {#if !r.now}
@@ -171,9 +199,10 @@
               </li>
             {/each}
           </ul>
-        {:else}
-          <p class="faint none">{t.noMatch}</p>
         {/each}
+        {#if !rows.length && !copying.length}
+          <p class="faint none">{t.noMatch}</p>
+        {/if}
       {/if}
     </div>
   </div>
@@ -287,6 +316,16 @@
     border-radius: 7px;
     background: var(--night);
     color: var(--dusk);
+  }
+  .kind.pocket {
+    color: var(--pearl);
+  }
+  .what .meter {
+    margin-top: 4px;
+    max-width: 240px;
+  }
+  .percent {
+    font-variant-numeric: tabular-nums;
   }
   .kind.chat {
     border-radius: 50%;

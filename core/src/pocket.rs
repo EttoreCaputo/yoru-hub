@@ -109,8 +109,8 @@ pub struct Transfer {
     pub name: String,
     pub bytes: u64,
     pub total: u64,
-    /// Recordings still waiting after this one.
-    pub queued: usize,
+    /// The recordings still waiting after this one (by name), in order.
+    pub waiting: Vec<String>,
 }
 
 /// Everything the app shows about the Pocket.
@@ -576,9 +576,10 @@ impl Worker {
             })
             .collect();
         let count = wanted.len();
+        let names: Vec<String> = wanted.iter().map(|r| r.name.clone()).collect();
         crate::hostlog::line("pocket", &format!("{} recordings on the Pocket, {} to copy", self.status.lock().unwrap().recordings.len(), count));
         for (i, recording) in wanted.iter().enumerate() {
-            self.fetch(link, recording, count - i - 1).await?;
+            self.fetch(link, recording, &names[i + 1..]).await?;
         }
         let done = synced();
         self.update(|s| {
@@ -612,9 +613,9 @@ impl Worker {
     /// Download one recording and make it a meeting. A file that doesn't
     /// come whole is skipped (and remembered as failed); a broken link
     /// ends the sync.
-    async fn fetch(&mut self, link: &mut Link, recording: &Recording, queued: usize) -> Result<(), LinkError> {
+    async fn fetch(&mut self, link: &mut Link, recording: &Recording, waiting: &[String]) -> Result<(), LinkError> {
         let name = recording.name.clone();
-        self.update(|s| s.transfer = Some(Transfer { name: name.clone(), bytes: 0, total: recording.estimated_bytes(), queued }));
+        self.update(|s| s.transfer = Some(Transfer { name: name.clone(), bytes: 0, total: recording.estimated_bytes(), waiting: waiting.to_vec() }));
         crate::hostlog::line("pocket", &format!("{name}: copying ({} s)", recording.seconds));
         let status = self.status.clone();
         let on_event = &self.on_event;
@@ -622,7 +623,7 @@ impl Worker {
             .download(&command::upload(&recording.date, &name), |got, total| {
                 let snapshot = {
                     let mut s = status.lock().unwrap();
-                    s.transfer = Some(Transfer { name: name.clone(), bytes: got, total, queued });
+                    s.transfer = Some(Transfer { name: name.clone(), bytes: got, total, waiting: waiting.to_vec() });
                     s.clone()
                 };
                 on_event(Event::Status(Box::new(snapshot)));

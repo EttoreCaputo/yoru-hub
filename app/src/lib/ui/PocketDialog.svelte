@@ -107,7 +107,7 @@
       <div class="transfer">
         <span class="small">{t.downloading(when(pocket.recordings.find((r) => r.name === tr.name) ?? { date: "", name: tr.name, seconds: 0, started_at: null, meeting: null }))}</span>
         <span class="meter"><span style:--p={tr.total ? tr.bytes / tr.total : 0}></span></span>
-        <span class="faint small mono">{tr.total ? percent(tr.bytes / tr.total) : 0}%{#if tr.queued} · {t.queued(tr.queued)}{/if}</span>
+        <span class="faint small mono">{tr.total ? percent(tr.bytes / tr.total) : 0}%{#if tr.waiting.length} · {t.queued(tr.waiting.length)}{/if}</span>
       </div>
     {/if}
 
@@ -127,7 +127,7 @@
             <input type="checkbox" checked={picked.includes(r.name)} disabled={!connected || busy} onchange={(e) => toggle(r.name, e.currentTarget.checked)} />
             <span>{when(r)}</span>
             <span class="faint small mono">{clock(r.seconds)}</span>
-            {#if pocket.transfer?.name === r.name}<span class="tag">{t.inProgress}</span>{/if}
+            {#if pocket.transfer?.name === r.name}<span class="tag">{t.inProgress}</span>{:else if pocket.transfer?.waiting.includes(r.name)}<span class="tag">{t.waiting}</span>{/if}
           </label>
         {/each}
       </div>
