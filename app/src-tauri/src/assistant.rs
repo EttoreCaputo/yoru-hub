@@ -285,9 +285,7 @@ fn brain_models(brain: Brain) -> Vec<BrainModel> {
 /// The models Ollama has on this computer; an error when it isn't running.
 #[tauri::command]
 pub async fn ollama_models() -> Result<Vec<String>, String> {
-    // Only the ones tried with Yoru's tools (`assistant::OLLAMA_MODELS`).
-    let listed = tauri::async_runtime::spawn_blocking(|| cloud::list_models(&cloud::OLLAMA).map_err(|e| assistant::compat::brain_error(&e))).await.map_err(|e| e.to_string())?;
-    listed.map(|models| models.into_iter().filter(|m| assistant::tried_on_ollama(m)).collect())
+    tauri::async_runtime::spawn_blocking(|| cloud::list_models(&cloud::OLLAMA).map_err(|e| assistant::compat::brain_error(&e))).await.map_err(|e| e.to_string())?
 }
 
 /// Every model a service offers the key now, for the model pickers: the

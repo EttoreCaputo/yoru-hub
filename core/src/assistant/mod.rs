@@ -1483,28 +1483,15 @@ pub const CLAUDE_MODELS: &[(&str, &str)] = &[
     ("claude-haiku-5-5", "Claude Haiku 5.5: quick and cheap"),
 ];
 
-/// The models on Ollama offered as Yoru's brain: `name:tag`. On the memory
-/// test (`eval::yoru_remembers_his_own_life`, 2026-11-24) Qwen3.5 4B got 5
-/// of 7, Qwen3.5 9B and LFM2.5 8B 3 of 7 (the cloud brains pass it), so
-/// only the 4B is offered, and it doesn't write summaries ([`SUMMARY_BRAINS`]).
-pub const OLLAMA_MODELS: &[&str] = &["qwen3.5:4b"];
-
 /// The chat models `brain` offers, as ids and notes: Claude's, the
-/// catalog's, or those of [`OLLAMA_MODELS`] Ollama has on this computer
-/// (none if it isn't running). Whether there is a key is the caller's concern.
+/// catalog's, or every model Ollama has on this computer, the person's own
+/// choice (none if it isn't running). Whether there is a key is the caller's concern.
 pub fn chat_models(brain: Brain) -> Vec<(String, String)> {
     match brain {
         Brain::Anthropic => CLAUDE_MODELS.iter().map(|(id, note)| (id.to_string(), note.to_string())).collect(),
-        Brain::Ollama => cloud::list_models(&cloud::OLLAMA).unwrap_or_default().into_iter().filter(|id| tried_on_ollama(id)).map(|id| (id, String::new())).collect(),
+        Brain::Ollama => cloud::list_models(&cloud::OLLAMA).unwrap_or_default().into_iter().map(|id| (id, String::new())).collect(),
         brain => compat::models(brain).into_iter().map(|(id, note)| (id.to_string(), note.to_string())).collect(),
     }
-}
-
-/// Whether Ollama's `model` is one of [`OLLAMA_MODELS`] (`qwen3.5:4b-64k`
-/// is `qwen3.5:4b` with a longer context).
-pub fn tried_on_ollama(model: &str) -> bool {
-    let model = model.trim_end_matches(":latest");
-    OLLAMA_MODELS.iter().any(|m| model == *m || model.strip_prefix(m).is_some_and(|rest| rest.starts_with('-')))
 }
 
 /// A model that can write a meeting's summary: `provider:model`.
@@ -1517,11 +1504,9 @@ pub struct Summarizer {
 }
 
 /// The brains whose models write a meeting's summary. Groq's free limit
-/// for the minute is smaller than one summary's request, and the Ollama
-/// models tried (qwen3.5 9b and 4b, lfm2.5 8b, nemotron-3-nano 4b) lost the
-/// thread of the skill's tools: they asked what to do, looked for the
-/// meeting elsewhere or wrote a note instead of the summary.
-const SUMMARY_BRAINS: [Brain; 3] = [Brain::Anthropic, Brain::OpenAi, Brain::Google];
+/// for the minute is smaller than one summary's request. Ollama's models
+/// are the person's own pick, untried by us, so all of them are offered.
+const SUMMARY_BRAINS: [Brain; 4] = [Brain::Anthropic, Brain::OpenAi, Brain::Google, Brain::Ollama];
 
 /// Whether `brain`'s models write a meeting's summary.
 pub fn writes_summaries(brain: Brain) -> bool {
@@ -1533,10 +1518,14 @@ pub fn summarizers() -> Vec<Summarizer> {
     SUMMARY_BRAINS.into_iter().flat_map(|brain| chat_models(brain).into_iter().map(move |(model, note)| Summarizer { id: format!("{}:{model}", brain.id()), brain, model, note })).collect()
 }
 
-/// Whether `id` (`provider:model`) is one of [`summarizers`].
+/// Whether `id` (`provider:model`) is one of [`summarizers`]; any Ollama
+/// model is, without asking Ollama what it has.
 pub fn summarizes(id: &str) -> bool {
     let Some((brain, model)) = id.split_once(':').and_then(|(b, m)| Some((Brain::by_id(b)?, m))) else { return false };
-    writes_summaries(brain) && chat_models(brain).iter().any(|(m, _)| m == model)
+    match brain {
+        Brain::Ollama => !model.is_empty(),
+        brain => writes_summaries(brain) && chat_models(brain).iter().any(|(m, _)| m == model),
+    }
 }
 
 impl Brain {

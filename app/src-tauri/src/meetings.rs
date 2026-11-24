@@ -337,7 +337,7 @@ pub async fn meeting_summarizers(app: AppHandle) -> Result<Summarizers, String> 
             .map(|t| TranscriberInfo { transcriber: *t, ready: t.local || t.id.split_once(':').and_then(|(p, _)| yoru_core::cloud::Provider::by_id(p)).is_some_and(|p| p.api_key().is_some()) })
             .collect();
         Summarizers {
-            // Groq's and Ollama's models don't write summaries well enough.
+            // Groq's free limit is smaller than a summary's request.
             brain: settings.brain().filter(|b| b.has_key() && assistant::writes_summaries(*b)).map(|b| format!("{} · {}", b.name(), settings.model_of(b))),
             models,
             transcribers,
