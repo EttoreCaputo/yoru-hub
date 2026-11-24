@@ -834,7 +834,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   meeting_transcript: (a) =>
     a.id === "20261028-091500"
       ? {
-          // A simple transcript (Settings > Meetings, Simple): paragraphs, no times or speakers.
+          // A simple transcript (Settings > Intelligence > Transcribes, Simple): paragraphs, no times or speakers.
           engine: "gemini:gemini-3.5-transcribe",
           language: "it",
           timed: false,

@@ -4,7 +4,9 @@
   or that all is well; then four quick settings (his voice, the language,
   the brain, do not disturb); then the rest as rows in four groups: Yoru,
   Devices, Accounts and services, General. Every setting lives in one place
-  only: every model and key in Intelligence (ui/Intelligence.svelte). A row opens its page with the everyday choices; models, ports and
+  only: every model and key, with whether Yoru listens and answers aloud
+  and how meetings are transcribed and summarized, in Intelligence
+  (ui/Intelligence.svelte). A row opens its page with the everyday choices; models, ports and
   MCP show only with "Show advanced options", one switch for every page.
 -->
 <script lang="ts">
@@ -19,8 +21,6 @@
   import Board from "../ui/Board.svelte";
   import PermissionList from "../ui/PermissionList.svelte";
   import Toggle from "../ui/Toggle.svelte";
-  import Voice from "../ui/Voice.svelte";
-  import MeetingSettingsPage from "../ui/MeetingSettings.svelte";
   import PocketSettingsPage from "../ui/PocketSettings.svelte";
   import Intelligence, { type Job } from "../ui/Intelligence.svelte";
   import { serviceOf, transcriptionRequirement } from "../meeting-readiness";
@@ -81,20 +81,19 @@
   }
 
   // The parts with a page of their own here; the other rows open an app page.
-  type Part = "brain" | "voice" | "meetings" | "mac" | "board" | "pocket";
-  const PART_ICONS: Record<Part, IconName> = { brain: "sparkles", voice: "audio-waveform", meetings: "users", mac: "laptop", board: "cpu", pocket: "mic" };
+  type Part = "brain" | "mac" | "board" | "pocket";
+  const PART_ICONS: Record<Part, IconName> = { brain: "sparkles", mac: "laptop", board: "cpu", pocket: "mic" };
   type Row = { part: Part } | { page: Page };
   const GROUPS: { id: string; rows: Row[] }[] = [
-    { id: "yoru", rows: [{ part: "brain" }, { part: "voice" }, { part: "meetings" }, { page: "routines" }, { page: "tasks" }] },
+    { id: "yoru", rows: [{ part: "brain" }, { page: "routines" }, { page: "tasks" }] },
     { id: "devices", rows: [{ part: "board" }, { part: "pocket" }, { part: "mac" }] },
     { id: "accounts", rows: [{ page: "connectors" }] },
   ];
 
-  let open = $state<Part | null>(store.settingsSection);
+  let open = $state<Part | null>(store.settingsSection ? "brain" : null);
+  /** Intelligence's row to open with it: the voice tile opens Speaks, a meeting's problem Transcribes. */
+  let row = $state<Job | null>(store.settingsSection);
   store.settingsSection = null;
-
-  /** Intelligence's row to open with it: the voice tile opens Speaks. */
-  let row = $state<Job | null>(null);
   function pick(id: Part, e: Event, job: Job | null = null) {
     open = id;
     row = job;
@@ -127,20 +126,11 @@
     brain: !store.info?.ready
       ? { text: brainProblem, dot: "wrong" }
       : { text: `${brain ? BRAIN_NAMES[brain] : ""}${brainModelName ? " · " + brainModelName : ""}`, dot: store.info?.limited ? "wait" : "" },
-    voice: {
-      text: !vs ? "—" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "),
-      dot: "",
-    },
     mac: { text: [notch ? t.notchOn : t.notchOff, mcp?.registered ? t.claudeCode : ""].filter(Boolean).join(" · "), dot: "" },
     board:
       store.boardState === "off"
         ? { text: t.boardOff, dot: "" }
         : { text: [store.boardState === "boot" ? i18n.t.link.boot : i18n.t.link.live, via, firmware].filter(Boolean).join(" · "), dot: store.boardState === "boot" ? "think" : "done" },
-    meetings: !meetings
-      ? { text: "—", dot: "" }
-      : meetingProblem
-        ? { text: meetingProblem, dot: "wait" }
-        : { text: t.meetingsWhen[meetings.settings.transcribe], dot: "" },
     pocket: pocketSummary,
   });
   const loginNeeded = $derived(store.connectors.filter((c) => c.enabled && (c.state === "needs_login" || c.state === "error")).length);
@@ -154,23 +144,24 @@
 
   // What's wrong right now, each with where it's fixed. Only what stops
   // Yoru from doing something: an update is good news, a tag on its row.
-  type Issue = { text: string; tone: "wrong" | "wait"; to: Part | Page };
+  type Issue = { text: string; tone: "wrong" | "wait"; to: Part | Page; row?: Job };
   const issues = $derived.by<Issue[]>(() => {
     const list: Issue[] = [];
     if (store.info && !store.info.ready) list.push({ text: brainProblem, tone: "wrong", to: "brain" });
     else if (store.info?.limited) list.push({ text: store.info.limited, tone: "wait", to: "brain" });
-    if (vs && !vs.live && vs.enabled && voice?.stt_error) list.push({ text: t.issueVoice(voice.stt_error), tone: "wait", to: "voice" });
-    if (vs && !vs.live && vs.speak && voice?.tts_error) list.push({ text: t.issueVoice(voice.tts_error), tone: "wait", to: "voice" });
-    if (meetingProblem) list.push({ text: meetingProblem, tone: "wait", to: "meetings" });
+    if (vs && !vs.live && vs.enabled && voice?.stt_error) list.push({ text: t.issueVoice(voice.stt_error), tone: "wait", to: "brain", row: "hear" });
+    if (vs && !vs.live && vs.speak && voice?.tts_error) list.push({ text: t.issueVoice(voice.tts_error), tone: "wait", to: "brain", row: "speak" });
+    if (meetingProblem) list.push({ text: meetingProblem, tone: "wait", to: "brain", row: "transcribe" });
     if (loginNeeded) list.push({ text: t.issueConnectors(loginNeeded), tone: "wait", to: "connectors" });
     return list;
   });
   const PARTS: Part[] = Object.keys(PART_ICONS) as Part[];
-  function goTo(to: Part | Page, e: Event) {
-    if ((PARTS as string[]).includes(to)) pick(to as Part, e);
+  function goTo(to: Part | Page, e: Event, job: Job | null = null) {
+    if ((PARTS as string[]).includes(to)) pick(to as Part, e, job);
     else store.go(to as Page);
   }
-  const okLine = $derived([summary.brain.text, summary.voice.text, summary.board.text].filter((x) => x && x !== "—").join(" · "));
+  const voiceLine = $derived(!vs ? "" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "));
+  const okLine = $derived([summary.brain.text, voiceLine, summary.board.text].filter((x) => x && x !== "—").join(" · "));
 
   // The quick settings: his voice in the app's language, and do not disturb.
   const voiceName = $derived.by(() => {
@@ -207,11 +198,9 @@
           <p class="lede">{t.partLedes[open]}</p>
         </div>
       </div>
-      {#if open === "brain"}<Intelligence {row} />
-      {:else if open === "voice"}<Voice onmodels={(e) => pick("brain", e, "hear")} />{@render pageLink("spoken")}
+      {#if open === "brain"}<Intelligence {row} />{@render pageLink("spoken")}
       {:else if open === "mac"}{@render macPage()}
       {:else if open === "board"}<Board />{@render pageLink("animations")}
-      {:else if open === "meetings"}<MeetingSettingsPage onmodels={(e) => pick("brain", e, "transcribe")} />
       {:else}<PocketSettingsPage />{/if}
       {#if error}<p class="error-text note">{error}</p>{/if}
     </div>
@@ -234,7 +223,7 @@
           <div class="issue">
             <span class="dot {issue.tone}"></span>
             <span class="issue-text">{issue.text}</span>
-            <button class="btn small" class:primary={i === 0} onclick={(e) => goTo(issue.to, e)}>{t.fix}</button>
+            <button class="btn small" class:primary={i === 0} onclick={(e) => goTo(issue.to, e, issue.row)}>{t.fix}</button>
           </div>
         {/each}
       </div>

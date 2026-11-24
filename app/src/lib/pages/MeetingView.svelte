@@ -82,8 +82,8 @@
   const transcriptionHint = $derived(
     requirement === "local" ? t.needModel : requirement === "key" ? t.missingKey(serviceOf(settings?.transcribe_by ?? "")) : requirement === "unsupported" ? t.unknownTranscriber : t.loadingTranscriber,
   );
-  function openBrainSettings() {
-    store.settingsSection = "brain";
+  function openBrainSettings(row: "summarize" | "transcribe") {
+    store.settingsSection = row;
     store.go("settings");
   }
 
@@ -305,7 +305,7 @@
               <button class="btn small" disabled={!canSummarize} onclick={summarize}>{t.summarizeAgain}</button>
             </span>
           </div>
-          {#if !canSummarize}<p class="dim small">{t.needSummarizer} <button class="btn link small" onclick={openBrainSettings}>{t.openBrainSettings}</button></p>{/if}
+          {#if !canSummarize}<p class="dim small">{t.needSummarizer} <button class="btn link small" onclick={() => openBrainSettings("summarize")}>{t.openBrainSettings}</button></p>{/if}
         {:else if !m.transcribed_at}
           <!-- A summary is written from the transcript: nothing to summarize yet. -->
           <div class="empty">
@@ -322,7 +322,7 @@
             <p>{t.summarize}</p>
             {#if m.transcribed_at}
               <button class="btn primary" disabled={!canSummarize} title={canSummarize ? undefined : t.needSummarizer} onclick={summarize}>{t.summarize}</button>
-              {#if !canSummarize}<p class="dim small">{t.needSummarizer}</p><button class="btn" onclick={openBrainSettings}>{t.openBrainSettings}</button>{/if}
+              {#if !canSummarize}<p class="dim small">{t.needSummarizer}</p><button class="btn" onclick={() => openBrainSettings("summarize")}>{t.openBrainSettings}</button>{/if}
             {/if}
           </div>
         {/if}
@@ -335,7 +335,7 @@
           <div class="empty">
             <button class="btn primary" disabled={!!requirement || m.state === "recording"} onclick={transcribe}>{t.transcribe}</button>
             {#if m.state === "recording"}<p class="dim small">{t.finishRecording}</p>{:else if requirement}<p class="dim small">{transcriptionHint}</p>{/if}
-            {#if requirement && requirement !== "loading"}<button class="btn" onclick={openBrainSettings}>{t.openBrainSettings}</button>{/if}
+            {#if requirement && requirement !== "loading"}<button class="btn" onclick={() => openBrainSettings("transcribe")}>{t.openBrainSettings}</button>{/if}
           </div>
         {:else}
           <div class="exports">
@@ -346,7 +346,7 @@
             <button class="btn small quiet again" disabled={!!requirement || m.state === "recording"} title={requirement ? transcriptionHint : undefined} onclick={transcribe}>{t.again}</button>
             {#if exported}<span class="faint small saved">{t.exported(exported)}</span>{/if}
           </div>
-          {#if requirement && requirement !== "loading"}<p class="dim small">{transcriptionHint} <button class="btn link small" onclick={openBrainSettings}>{t.openBrainSettings}</button></p>{/if}
+          {#if requirement && requirement !== "loading"}<p class="dim small">{transcriptionHint} <button class="btn link small" onclick={() => openBrainSettings("transcribe")}>{t.openBrainSettings}</button></p>{/if}
           {#if transcript?.lines.length}
             {#if transcript.speakers.length > 1}
               <div class="people">

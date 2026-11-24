@@ -5,7 +5,9 @@
   an open one picks the service, then the model. A service without its key
   asks for it inside the row, and the job keeps its old service until the
   key works. Local models download from the row. Gemini Live hears and
-  speaks, so it merges Listens and Speaks into one row.
+  speaks, so it merges Listens and Speaks into one row. Each row also holds
+  how its job goes: whether Yoru listens and answers aloud, follow-ups, and
+  a meeting's transcript and summary. This is the only place for them.
 -->
 <script module lang="ts">
   export type Job = "hear" | "think" | "speak" | "transcribe" | "summarize" | "memory" | "web" | "keys";
@@ -356,6 +358,36 @@
     }
     return setVoice({ voices: next });
   }
+  // Answering aloud again keeps the voices picked before; with none yet, this Mac's first for each language.
+  function speakOn() {
+    if (!vs) return;
+    if (Object.values(vs.voices).some(Boolean)) return setVoice({ speak: true });
+    const voices = { ...vs.voices };
+    for (const l of LANGS) {
+      const first = voiceModels.find((m) => serviceOf(m.id) === LOCAL && m.language === l);
+      if (first) voices[l] = first.id;
+    }
+    return setVoice({ speak: true, voices });
+  }
+
+  // ---- How meetings go ----
+
+  const simple = $derived(meet?.detail === "simple");
+  /** The transcriber chosen, as the app offers it. */
+  const by = $derived(engines?.transcribers.find((x) => x.id === meet?.transcribe_by));
+  /** Switch the kind of transcript; a detailed one needs a transcriber that times its lines. */
+  function setDetail(detail: MeetingSettings["detail"]) {
+    if (!meet || meet.detail === detail) return;
+    if (detail === "detailed" && by && !by.detailed) setMeet({ detail, transcribe_by: "local" });
+    else setMeet({ detail });
+  }
+  const MEET_LANGS = ["", "it", "en", "es", "fr", "de", "pt"];
+  const WHEN = $derived([
+    ["after", tm.whenAfter],
+    ["manual", tm.whenManual],
+    ["live", tm.whenLive],
+  ] as const);
+
   async function getVoice(id: string) {
     await guard(() => call("download_model", { id }));
     await readVoice();
@@ -519,6 +551,7 @@
     {@render foot(job)}
   {:else}
     {@const svc = shown(job)}
+    {@render switches(job)}
     <div class="lbl">{t.who}</div>
     <div class="svcs" role="radiogroup" aria-label={t.who}>
       {#each services(job) as v (v)}
@@ -539,6 +572,7 @@
       {@render models(job, svc)}
       {@render extras(job, svc)}
     {/if}
+    {@render how(job)}
     {@render suggestion()}
     {@render foot(job)}
   {/if}
@@ -687,6 +721,91 @@
       </select>
     </span>
   </div>
+{/snippet}
+
+<!-- A row's on/off, above its service: whether Yoru listens, whether he answers aloud. -->
+{#snippet switches(job: Job)}
+  {#if vs && job === "hear" && !live}
+    <div class="line onoff">
+      <span class="t"><b>{tb.listensToggle}</b><span>{vs.enabled ? tb.listenHint : tb.listensOffHint}</span></span>
+      <Toggle checked={vs.enabled} label={tb.listensToggle} onchange={(on) => setVoice({ enabled: on })} />
+    </div>
+  {/if}
+  {#if vs && job === "speak"}
+    <div class="line onoff">
+      <span class="t"><b>{tb.speaksToggle}</b><span>{vs.speak ? tb.speaksHint : tb.speaksOffHint}</span></span>
+      <Toggle checked={vs.speak} label={tb.speaksToggle} onchange={(on) => (on ? speakOn() : setVoice({ speak: false }))} />
+    </div>
+  {/if}
+{/snippet}
+
+<!-- How a job goes beside who does it: a conversation's follow-ups, a meeting's transcript and summary. -->
+{#snippet how(job: Job)}
+  {#if vs && ((job === "speak" && vs.speak) || (job === "hear" && live))}
+    <div class="opts">
+      <div class="line">
+        <span class="t"><b>{tb.followUp}</b></span>
+        <Toggle checked={vs.follow_up} label={tb.followUp} onchange={(on) => setVoice({ follow_up: on })} />
+      </div>
+    </div>
+  {/if}
+  {#if meet && job === "transcribe"}
+    <div class="opts">
+      <div class="line">
+        <span class="t"><b>{tm.detect}</b><span>{tm.detectHint}</span></span>
+        <Toggle checked={meet.detect} label={tm.detect} onchange={(on) => setMeet({ detect: on })} />
+      </div>
+      <div class="line col">
+        <span class="t"><b>{tm.detail}</b><span>{tm.detailHint}</span></span>
+        <div class="kinds" role="radiogroup" aria-label={tm.detail}>
+          <button class="kind" class:on={!simple} role="radio" aria-checked={!simple} title={by && !by.detailed ? tm.detailedNeedsTimes : undefined} onclick={() => setDetail("detailed")}>
+            <b>{tm.detailed}</b>
+            <span class="sample timed">
+              {#each tm.detailedExample as [at, who, said] (at)}<span class="mono faint">{at}</span><span class="sw">{who}</span><span>{said}</span>{/each}
+            </span>
+            <span class="dim small">{tm.detailedHint}</span>
+          </button>
+          <button class="kind" class:on={simple} role="radio" aria-checked={simple} onclick={() => setDetail("simple")}>
+            <b>{tm.simple}</b>
+            <span class="sample">{tm.simpleExample}</span>
+            <span class="dim small">{tm.simpleHint}</span>
+          </button>
+        </div>
+      </div>
+      <div class="line col">
+        <span class="t"><b>{tm.when}</b><span>{tm.whenHint}</span></span>
+        <div class="chips" role="radiogroup" aria-label={tm.when}>
+          {#each WHEN as [id, label] (id)}
+            <button class="chip" class:on={meet.transcribe === id} role="radio" aria-checked={meet.transcribe === id} disabled={id === "live"} title={id === "live" ? tm.liveSoon : undefined} onclick={() => setMeet({ transcribe: id })}>{label}</button>
+          {/each}
+        </div>
+      </div>
+      <div class="line">
+        <span class="t"><b>{tm.language}</b><span>{tm.languageHint}</span></span>
+        <select value={meet.language} onchange={(e) => setMeet({ language: e.currentTarget.value })} aria-label={tm.language}>
+          {#each MEET_LANGS as code (code)}<option value={code}>{code ? tm.languages[code as keyof typeof tm.languages] : tm.languageAuto}</option>{/each}
+        </select>
+      </div>
+      <div class="line" class:off={simple || (by && !by.speakers)}>
+        <span class="t"><b>{tm.speakers}</b><span>{by && !by.speakers ? tm.speakersNone : tm.speakersHint}</span></span>
+        <Toggle checked={meet.speakers} label={tm.speakers} onchange={(on) => setMeet({ speakers: on })} />
+      </div>
+    </div>
+  {/if}
+  {#if meet && job === "summarize"}
+    <div class="opts">
+      <div class="line">
+        <span class="t"><b>{tm.style}</b><span>{tm.styleHint}</span></span>
+        <select value={meet.summary_style || "auto"} onchange={(e) => setMeet({ summary_style: e.currentTarget.value })} aria-label={tm.style}>
+          {#each Object.entries(tm.styles) as [id, label] (id)}<option value={id}>{label}</option>{/each}
+        </select>
+      </div>
+      <div class="line">
+        <span class="t"><b>{tm.autoSummary}</b><span>{tm.autoSummaryHint}</span></span>
+        <Toggle checked={meet.auto_summary} label={tm.autoSummary} onchange={(on) => setMeet({ auto_summary: on })} />
+      </div>
+    </div>
+  {/if}
 {/snippet}
 
 <!-- After a key works: the other jobs its service could do. -->
@@ -1108,6 +1227,60 @@
     gap: 10px;
     padding-top: 12px;
     border-top: 1px dashed var(--rim-2);
+  }
+  .onoff {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--rim);
+  }
+  .opts {
+    display: grid;
+    gap: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--rim);
+  }
+  .off {
+    opacity: 0.5;
+  }
+  .kinds {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 8px;
+  }
+  .kind {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    padding: 12px;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    font-size: var(--fs-meta);
+    background: var(--ink);
+    border: 1px solid var(--rim);
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .kind:hover {
+    background: var(--hover);
+  }
+  .kind.on {
+    border-color: var(--think);
+    box-shadow: inset 0 0 0 1px var(--think);
+  }
+  .sample {
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    background: var(--hover);
+    font-size: var(--fs-small);
+    line-height: 1.45;
+  }
+  .sample.timed {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 2px 8px;
+  }
+  .sw {
+    font-weight: 600;
   }
   .foot {
     display: flex;
