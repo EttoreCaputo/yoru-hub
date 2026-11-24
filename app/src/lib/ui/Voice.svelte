@@ -1,21 +1,20 @@
 <!--
-  Yoru's voice: first whether he listens and whether he answers aloud, his
-  voice in each language and how a conversation goes (follow-ups). The
-  board's own (wake word, volume, chime) are on its page. Which service
-  listens and which speaks, and the models that transcribe and judge a turn, show only with Settings' advanced
-  switch; the services' keys are in Settings' AI services page. Local models
-  need a download, which shows its progress while it runs.
+  Yoru's voice: whether he listens, whether he answers aloud, and how a
+  conversation goes (follow-ups). Who listens and with which voice he
+  answers, with their models and keys, are in Settings > Intelligence; the
+  board's own (wake word, volume, chime) are on its page.
 -->
 <script lang="ts">
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
-  import { look } from "../look.svelte";
-  import { store } from "../store.svelte";
-  import type { AccountVoice, ModelInfo, SidecarState, VoiceInfo, VoiceSettings } from "../types";
-  import ModelPicker, { type Choice } from "./ModelPicker.svelte";
+  import type { VoiceInfo, VoiceSettings } from "../types";
+  import Icon from "./Icon.svelte";
   import Toggle from "./Toggle.svelte";
 
+  let { onmodels }: { onmodels?: (e: Event) => void } = $props();
+
   const t = $derived(i18n.t.board);
+  const ti = $derived(i18n.t.intelligence);
   let info = $state<VoiceInfo | null>(null);
   let error = $state("");
 
@@ -23,23 +22,6 @@
   $effect(() => {
     void read();
   });
-  // While something downloads or installs, follow it.
-  $effect(() => {
-    if (!info?.download && !info?.piper_install && info?.stt !== "starting" && info?.tts !== "starting") return;
-    const id = setInterval(read, 700);
-    return () => clearInterval(id);
-  });
-
-  // The ElevenLabs account's voices aren't in the catalog: ask for them
-  // once its key is there. They speak any language, so each one fits both.
-  let account = $state<AccountVoice[]>([]);
-  const elevenKey = $derived(!!info?.providers.find((p) => p.id === "elevenlabs")?.key);
-  $effect(() => {
-    if (!elevenKey) return void (account = []);
-    call<AccountVoice[]>("elevenlabs_voices").then((v) => (account = v), (e) => (error = why(e)));
-  });
-  const ACCOUNT = "elevenlabs:voice/";
-  const accountId = (v: AccountVoice) => `${ACCOUNT}${v.voice_id}`;
 
   async function set(change: Partial<VoiceSettings>) {
     if (!info) return;
@@ -51,92 +33,27 @@
     }
   }
 
-  async function act(cmd: string, args: Record<string, unknown> = {}) {
-    error = "";
-    const job = call(cmd, args).catch((e) => (error = why(e)));
-    setTimeout(read, 200);
-    await job;
-    await read();
-  }
-
-  // A service is "local" or a provider's id; a model's comes from its id.
-  const LOCAL = "local";
   const LANGS = ["it", "en"];
-  const serviceOf = (id: string | undefined) => (!id ? null : id.includes(":") ? id.slice(0, id.indexOf(":")) : LOCAL);
-  const keyed = (svc: string) => svc === LOCAL || !!info?.providers.find((p) => p.id === svc)?.key;
-  const nameOf = (svc: string) => (svc === LOCAL ? t.local : (info?.providers.find((p) => p.id === svc)?.name ?? svc));
-  const noteOf = (svc: string) => t.serviceNotes[svc] ?? info?.providers.find((p) => p.id === svc)?.note ?? "";
-
-  // `elevenlabs:voice` only stands for the account's voices, listed apart.
-  const whispers = $derived(info?.models.filter((m) => m.kind === "whisper") ?? []);
-  const voices = $derived(info?.models.filter((m) => m.kind === "voice" && m.id !== "elevenlabs:voice") ?? []);
-  const of = (list: ModelInfo[], svc: string) => list.filter((m) => serviceOf(m.id) === svc);
-  const uniq = (ids: (string | null)[]) => [...new Set(ids.filter((s): s is string => !!s))].sort((a, b) => (a === LOCAL ? -1 : b === LOCAL ? 1 : 0));
-  const hearing = $derived(uniq(whispers.map((m) => serviceOf(m.id))));
-  const speaking = $derived(uniq([...voices.map((m) => serviceOf(m.id)), ...(info?.providers.some((p) => p.id === "elevenlabs") ? ["elevenlabs"] : [])]));
-  /** A service's models of `list` for a picker, grouped by service: those with a key, and the one in use. */
-  const groups = (services: string[], list: (svc: string) => { id: string; label: string }[], current: string | undefined) =>
-    services.filter((svc) => keyed(svc) || serviceOf(current) === svc).map((svc) => ({ svc, options: list(svc) })).filter((g) => g.options.length);
-
-  /** A service's voices for a language: the catalog's, and for ElevenLabs the account's. */
-  function voicesIn(svc: string, lang: string): { id: string; label: string }[] {
-    const list = of(voices, svc)
-      .filter((m) => m.language === lang || !m.language)
-      .map((m) => ({ id: m.id, label: label(m) }));
-    if (svc === "elevenlabs") list.push(...account.map((a) => ({ id: accountId(a), label: `${a.name}${a.category ? ` · ${a.category}` : ""}` })));
-    return list;
-  }
-  /** The transcribers to pick: the catalog's, by service, then every one a keyed service offers. */
-  const sttChoices = $derived<Choice[]>(
-    groups(hearing, (svc) => of(whispers, svc).map((h) => ({ id: h.id, label: "" })), info?.settings.model).flatMap((g) =>
-      of(whispers, g.svc).map((h) => ({
-        value: h.id,
-        label: h.id.replace(/^[^:]+:/, ""),
-        note: [h.note, missing(h) ? t.toDownload(mb(h)) : ""].filter(Boolean).join(" · "),
-        group: nameOf(g.svc),
-      })),
-    ),
-  );
-  const model = (id: string | undefined) => info?.models.find((m) => m.id === id);
-  const mb = (m: ModelInfo) => Math.round(m.bytes / 1e6);
-  const missing = (m: ModelInfo | undefined) => !!m && !m.installed && !m.provider;
-  const label = (m: ModelInfo) => `${m.id.replace(/^[^:]+:/, "")}${m.note ? ` — ${m.note}` : ""}${missing(m) ? ` · ${t.toDownload(mb(m))}` : ""}`;
-  const dl = $derived(info?.download ?? null);
-  const intents = $derived(info?.models.filter((m) => m.kind === "intent") ?? []);
-  const turns = $derived(info?.models.filter((m) => m.kind === "turn") ?? []);
-
-  // What each row of tiles shows as picked. Speaking follows the app's language's voice.
+  const serviceOf = (id: string | undefined) => (!id ? null : id.includes(":") ? id.slice(0, id.indexOf(":")) : "local");
+  const nameOf = (svc: string) => (svc === "local" ? t.local : (info?.providers.find((p) => p.id === svc)?.name ?? svc));
   const heard = $derived(info?.settings.enabled ? serviceOf(info.settings.model) : null);
   const spoken = $derived(info?.settings.speak ? serviceOf(info.settings.voices[i18n.lang] ?? Object.values(info.settings.voices)[0]) : null);
-  const canSpeak = (svc: string) => keyed(svc) && LANGS.some((l) => voicesIn(svc, l).length);
 
-  function hearWith(svc: string | null) {
-    if (!svc || !info) return set({ enabled: false });
-    const keep = serviceOf(info.settings.model) === svc;
-    set({ enabled: true, model: keep ? info.settings.model : (of(whispers, svc)[0]?.id ?? info.settings.model) });
-  }
-  // Each language takes the service's first voice for it, unless it has one there already.
-  function speakWith(svc: string | null) {
-    if (!svc || !info) return set({ speak: false });
-    const now = info.settings.voices;
-    const next = { ...now };
-    for (const l of LANGS) {
-      const list = voicesIn(svc, l);
-      if (list.length && serviceOf(now[l]) !== svc) next[l] = list[0].id;
-    }
-    set({ speak: true, voices: next });
-  }
-  // Answering aloud again keeps the voices picked before; with none yet, this Mac's.
+  // Answering aloud again keeps the voices picked before; with none yet, this Mac's first for each language.
   function speakOn() {
     if (!info) return;
-    if (Object.values(info.settings.voices).some(Boolean)) set({ speak: true });
-    else speakWith(LOCAL);
+    if (Object.values(info.settings.voices).some(Boolean)) return set({ speak: true });
+    const voices = { ...info.settings.voices };
+    for (const l of LANGS) {
+      const first = info.models.find((m) => m.kind === "voice" && serviceOf(m.id) === "local" && m.language === l);
+      if (first) voices[l] = first.id;
+    }
+    set({ speak: true, voices });
   }
 </script>
 
 {#if info}
   {@const s = info.settings}
-  {@const sttModel = model(s.model)}
   <section class="panel">
     <div class="setting"><div class="what"><b>{t.currentVoice}</b><span>{s.live ? t.currentLive(s.live) : t.currentPipeline(heard ? nameOf(heard) : t.off, spoken ? nameOf(spoken) : t.off)}</span></div></div>
     {#if !s.live && info.stt_error}<div class="setting"><p class="error-text">{info.stt_error}</p></div>{/if}
@@ -146,64 +63,22 @@
     <section class="panel active live-on">
       <div class="setting">
         <div class="what"><b>{t.liveOnTitle(s.live)}</b><span class="dim">{t.liveOnHint}</span></div>
-        <div class="how"><button class="btn small" onclick={() => set({ live: "" })}>{t.liveTurnOff}</button></div>
-      </div>
-      <div class="setting">
-        <div class="what"><b>{t.liveModel}</b><span class="dim">{t.liveModelHint}</span></div>
-        <div class="how">
-          <select value={s.live_model ?? ""} onchange={(e) => set({ live_model: e.currentTarget.value })} aria-label={t.liveModel}>
-            <option value="">{t.liveModelAuto}</option>
-            {#each info.live_models ?? [] as [id, note] (id)}<option value={id}>{t.liveModels[id] ?? note.split(":")[0]}</option>{/each}
-          </select>
-        </div>
       </div>
     </section>
   {:else}
-    <!-- The everyday choices: whether he listens, whether he answers aloud, and with which voice. -->
     <section class="panel">
       <div class="setting">
         <div class="what"><b>{t.listensToggle}</b><span>{s.enabled ? t.listenHint : t.listensOffHint}</span></div>
-        <div class="how"><Toggle checked={s.enabled} label={t.listensToggle} onchange={(on) => hearWith(on ? (serviceOf(s.model) ?? LOCAL) : null)} /></div>
+        <div class="how"><Toggle checked={s.enabled} label={t.listensToggle} onchange={(on) => set({ enabled: on })} /></div>
       </div>
-      {#if s.enabled && sttModel && missing(sttModel)}
-        <div class="setting">
-          <div class="what"><b>{t.sttToDownload}</b><span class="mono">{sttModel.id}</span></div>
-          <div class="how">{@render fetch(sttModel)}</div>
-        </div>
-      {/if}
       <div class="setting">
         <div class="what"><b>{t.speaksToggle}</b><span>{s.speak ? t.speaksHint : t.speaksOffHint}</span></div>
-        <div class="how"><Toggle checked={s.speak} label={t.speaksToggle} onchange={(on) => (on ? speakOn() : speakWith(null))} /></div>
+        <div class="how"><Toggle checked={s.speak} label={t.speaksToggle} onchange={(on) => (on ? speakOn() : set({ speak: false }))} /></div>
       </div>
-      {#if s.speak}
-        {#each LANGS as lang (lang)}
-          {@const m = model(s.voices[lang])}
-          {@const options = groups(speaking, (svc) => voicesIn(svc, lang), s.voices[lang])}
-          <div class="setting">
-            <div class="what"><b>{t.voiceFor(lang)}</b></div>
-            <div class="how">
-              {#if m && missing(m)}{@render fetch(m)}{/if}
-              <select value={s.voices[lang] ?? ""} onchange={(e) => set({ speak: true, voices: { ...s.voices, [lang]: e.currentTarget.value } })} aria-label={t.voiceFor(lang)}>
-                {#if !s.voices[lang]}<option value="" disabled>—</option>{/if}
-                {#each options as g (g.svc)}
-                  <optgroup label={nameOf(g.svc)}>{#each g.options as v (v.id)}<option value={v.id}>{v.label}</option>{/each}</optgroup>
-                {/each}
-                {#if s.voices[lang]?.startsWith(ACCOUNT) && !account.length}<option value={s.voices[lang]}>{s.voices[lang].slice(ACCOUNT.length)}</option>{/if}
-              </select>
-            </div>
-          </div>
-        {/each}
-        {#if spoken === LOCAL && !info.piper}
-          <div class="setting">
-            <div class="what"><b>{t.localVoiceEngine}</b>{#if info.piper_install}<span>{info.piper_install}</span>{/if}</div>
-            <div class="how"><button class="btn small" disabled={!!info.piper_install} onclick={() => act("install_engine", { engine: "piper" })}>{t.installPiper}</button></div>
-          </div>
-        {/if}
-      {/if}
     </section>
   {/if}
 
-  {#if s.speak}
+  {#if s.speak || s.live}
     <h2 class="section-title">{t.conversation}</h2>
     <section class="panel">
       <div class="setting">
@@ -212,89 +87,24 @@
       </div>
     </section>
   {/if}
-  <p class="dim note">{t.onTheBoard}</p>
 
-  <!-- Which service listens and which speaks, and the models behind a turn: Settings' advanced switch. -->
-  {#if look.advanced}
-    <h2 class="section-title">{i18n.t.settings.advanced}</h2>
-    <p class="dim hint">{t.customServicesHint}</p>
-    <h3 class="section-title first">{t.listenWith}</h3>
-    <section class="tiles" aria-label={t.listenWith}>
-      {@render tile(null, heard === null, t.offListen, info.stt, hearWith)}
-      {#each hearing as svc (svc)}{@render tile(svc, heard === svc, noteOf(svc), info.stt, hearWith)}{/each}
+  {#if onmodels}
+    <section class="panel link">
+      <div class="setting">
+        <div class="what"><b>{ti.link}</b><span>{ti.voiceLinkHint}</span></div>
+        <div class="how"><button class="btn small" onclick={onmodels}><Icon name="sparkles" size={14} />{ti.open}</button></div>
+      </div>
     </section>
-    <h3 class="section-title">{t.speakWith}</h3>
-    <section class="tiles" aria-label={t.speakWith}>
-      {@render tile(null, spoken === null, t.offSpeak, info.tts, speakWith)}
-      {#each speaking as svc (svc)}{@render tile(svc, spoken === svc, noteOf(svc), info.tts, speakWith, !canSpeak(svc))}{/each}
-    </section>
-    {#if [...hearing, ...speaking].some((svc) => !keyed(svc))}<p class="dim note">{t.addKeys}</p>{/if}
-    {#if s.enabled}
-      <p class="dim hint">{t.advancedHint}</p>
-      <section class="panel">
-        <div class="setting">
-          <div class="what"><b>{t.sttModel}</b></div>
-          <div class="how">
-            {#if sttModel && missing(sttModel)}{@render fetch(sttModel)}{/if}
-            <ModelPicker value={s.model} choices={sttChoices} label={t.sttModel} onchange={(model) => set({ enabled: true, model })} />
-          </div>
-        </div>
-        {@render picker(t.turnModel, t.turnHint, s.turn_model, t.turnPause, turns, (id) => set({ turn_model: id }))}
-        {#if s.speak && s.follow_up}
-          {@render picker(t.intentModel, t.intentHint, s.intent_model, t.intentPhrases, intents, (id) => set({ intent_model: id }), !info.llm_server ? t.needsLlamaServer : "")}
-        {/if}
-      </section>
-    {/if}
   {/if}
+  <p class="dim note">{t.onTheBoard}</p>
   {#if error}<p class="error-text note">{error}</p>{/if}
 {/if}
 
-<!-- A service to pick (null: none), with what it's like, or why it can't be picked. -->
-{#snippet tile(svc: string | null, on: boolean, note: string, state: SidecarState, pick: (svc: string | null) => void, blocked = svc !== null && !keyed(svc))}
-  <button class="tile" class:on disabled={blocked} onclick={() => pick(svc)}>
-    <b>{svc ? nameOf(svc) : t.off}</b>
-    <span>{note}</span>
-    {#if blocked}<span class="tag dim">{keyed(svc!) ? t.noVoices : t.needsKey(nameOf(svc!))}</span>
-    {:else if on && svc}<span class="tag" class:dim={state !== "ready"}>{state === "ready" ? t.inUse : t.state[state]}</span>{/if}
-  </button>
-{/snippet}
-
-<!-- One job a small local model can do, or the built-in way ("" picks it). -->
-{#snippet picker(name: string, hint: string, value: string, builtIn: string, list: ModelInfo[], pick: (id: string) => void, blocked = "")}
-  {@const m = model(value)}
-  <div class="setting">
-    <div class="what"><b>{name}</b><span class="dim">{blocked || hint}</span></div>
-    <div class="how">
-      {#if m && missing(m)}{@render fetch(m)}{/if}
-      <select {value} onchange={(e) => pick(e.currentTarget.value)} aria-label={name}>
-        <option value="">{builtIn}</option>
-        {#each list as option (option.id)}<option value={option.id} disabled={!!blocked}>{label(option)}</option>{/each}
-      </select>
-    </div>
-  </div>
-{/snippet}
-
-<!-- A picked local model still to download. -->
-{#snippet fetch(m: ModelInfo)}
-  {#if dl?.[0] === m.id}
-    <span class="dim">{t.downloading(Math.round(dl[1]))}</span>
-  {:else}
-    <button class="btn primary small" disabled={!!dl} onclick={() => act("download_model", { id: m.id })}>{t.download} · {mb(m)} MB</button>
-  {/if}
-{/snippet}
-
 <style>
-  .section-title.first {
-    margin-top: 0;
-  }
   .note {
     margin-top: 12px;
   }
-  .hint {
-    margin: -4px 0 10px;
-    font-size: var(--fs-meta);
-  }
-  select {
-    max-width: 340px;
+  .link {
+    margin-top: 22px;
   }
 </style>

@@ -4,7 +4,7 @@
   or that all is well; then four quick settings (his voice, the language,
   the brain, do not disturb); then the rest as rows in four groups: Yoru,
   Devices, Accounts and services, General. Every setting lives in one place
-  only. A row opens its page with the everyday choices; models, ports and
+  only: every model and key in Intelligence (ui/Intelligence.svelte). A row opens its page with the everyday choices; models, ports and
   MCP show only with "Show advanced options", one switch for every page.
 -->
 <script lang="ts">
@@ -14,17 +14,15 @@
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store, type Page } from "../store.svelte";
-  import type { AssistantInfo, AssistantSettings, Brain, Effort, KeySource, McpInfo, MeetingSettings, Summarizers, VoiceInfo } from "../types";
+  import type { Brain, McpInfo, MeetingSettings, Summarizers, VoiceInfo } from "../types";
   import YoruBoard from "../YoruBoard.svelte";
   import Board from "../ui/Board.svelte";
-  import KeyField from "../ui/KeyField.svelte";
   import PermissionList from "../ui/PermissionList.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import Voice from "../ui/Voice.svelte";
   import MeetingSettingsPage from "../ui/MeetingSettings.svelte";
   import PocketSettingsPage from "../ui/PocketSettings.svelte";
-  import Profiles from "../ui/Profiles.svelte";
-  import ModelPicker, { type Choice } from "../ui/ModelPicker.svelte";
+  import Intelligence, { type Job } from "../ui/Intelligence.svelte";
   import { serviceOf, transcriptionRequirement } from "../meeting-readiness";
   import { PAGE_ICONS } from "../icons/pages";
   import Icon from "../ui/Icon.svelte";
@@ -32,7 +30,6 @@
 
   const t = $derived(i18n.t.settings);
   const s = $derived(store.info?.settings);
-  const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
   /** Claude's models, by what they're like; the ids are in the option's value. */
   const CLAUDE_MODELS = $derived([
     ["claude-opus-5-5", t.claudeModels.opus],
@@ -41,21 +38,12 @@
   ] as const);
   const brain = $derived(store.info?.brain ?? null);
   const BRAIN_NAMES: Record<Brain, string> = { anthropic: "Claude", openai: "OpenAI", google: "Gemini", groq: "Groq", ollama: "Ollama" };
-  const BRAINS: Brain[] = ["anthropic", "openai", "google", "groq", "ollama"];
   const langName = (id: Lang) => LANGUAGES.find((l) => l.id === id)?.name ?? id;
 
   // Each brain's model, where it's kept, and the models it offers.
   const MODEL_FIELD = { anthropic: "model", openai: "openai_model", google: "google_model", groq: "groq_model", ollama: "ollama_model" } as const;
   const modelOf = (b: Brain) => (s ? s[MODEL_FIELD[b]] : "");
-  const setModel = (b: Brain, v: string) => store.saveSettings((x: AssistantSettings) => (x[MODEL_FIELD[b]] = v));
-  const catalog = (b: Brain) => (b === "openai" ? store.info?.openai_models : b === "google" ? store.info?.google_models : b === "groq" ? store.info?.groq_models : undefined) ?? [];
-  /** A brain's described models, first in its picker; the service lists the rest. */
-  const brainChoices = (b: Brain): Choice[] =>
-    b === "anthropic"
-      ? CLAUDE_MODELS.map(([m, label]) => ({ value: m, label: label.split(" — ")[0], note: label.split(" — ").slice(1).join(" — "), group: i18n.t.picker.suggested }))
-      : b === "ollama"
-        ? (ollamaModels ?? []).map((m) => ({ value: m, label: m }))
-        : catalog(b).map((m) => ({ value: m.id, label: m.note.split(":")[0] || m.id, note: m.note.split(":").slice(1).join(":").trim(), group: i18n.t.picker.suggested }));
+
 
   let voice = $state<VoiceInfo | null>(null);
   let mcp = $state<McpInfo | null>(null);
@@ -77,40 +65,6 @@
     void readAll();
   });
 
-  // Every key in one place: the brains' (OpenAI's and Groq's serve speech to
-  // text too, Google's Gemini Live), the web's, and the voice-only services'.
-  type Key = { id: string; name: string; hint: string; source: KeySource | null; placeholder?: string; group: "brains" | "voices" | "web" };
-  const keys = $derived.by<Key[]>(() => {
-    const i: AssistantInfo | null = store.info;
-    const brainKeys: Key[] = [
-      { id: "anthropic", name: t.anthropic, hint: t.anthropicHint, source: i?.key ?? null, placeholder: "sk-ant-…", group: "brains" },
-      { id: "openai", name: t.openai, hint: t.openaiHint, source: i?.openai_key ?? null, placeholder: "sk-proj-…", group: "brains" },
-      { id: "google", name: t.google, hint: t.googleHint, source: i?.google_key ?? null, placeholder: "AIza…", group: "brains" },
-      { id: "groq", name: t.groq, hint: t.groqHint, source: i?.groq_key ?? null, placeholder: "gsk_…", group: "brains" },
-    ];
-    const voices: Key[] = (voice?.providers ?? [])
-      .filter((p) => !(BRAINS as string[]).includes(p.id) && p.id !== "tavily")
-      .map((p) => ({ id: p.id, name: p.name, hint: i18n.t.board.serviceNotes[p.id] ?? p.note, source: p.key, group: "voices" }));
-    return [...brainKeys, ...voices, { id: "tavily", name: t.tavily, hint: t.tavilyHint, source: i?.tavily_key ?? null, placeholder: "tvly-…", group: "web" }];
-  });
-  const keyOf = (b: Brain) => keys.find((k) => k.id === b);
-
-  // Ollama's models are the ones pulled on this computer: asked when it is the brain.
-  let ollamaModels = $state<string[] | null>(null);
-  let ollamaError = $state("");
-  async function readOllama() {
-    ollamaError = "";
-    try {
-      ollamaModels = await call<string[]>("ollama_models");
-    } catch (e) {
-      ollamaModels = null;
-      ollamaError = why(e);
-    }
-  }
-  $effect(() => {
-    if (brain === "ollama") void readOllama();
-  });
-
   async function run<T>(job: () => Promise<T>, then: (v: T) => void) {
     error = "";
     try {
@@ -127,27 +81,29 @@
   }
 
   // The parts with a page of their own here; the other rows open an app page.
-  type Part = "brain" | "voice" | "meetings" | "keys" | "mac" | "board" | "pocket";
-  const PART_ICONS: Record<Part, IconName> = { brain: "message-circle", voice: "audio-waveform", meetings: "users", keys: "key-round", mac: "laptop", board: "cpu", pocket: "mic" };
+  type Part = "brain" | "voice" | "meetings" | "mac" | "board" | "pocket";
+  const PART_ICONS: Record<Part, IconName> = { brain: "sparkles", voice: "audio-waveform", meetings: "users", mac: "laptop", board: "cpu", pocket: "mic" };
   type Row = { part: Part } | { page: Page };
   const GROUPS: { id: string; rows: Row[] }[] = [
     { id: "yoru", rows: [{ part: "brain" }, { part: "voice" }, { part: "meetings" }, { page: "routines" }, { page: "tasks" }] },
     { id: "devices", rows: [{ part: "board" }, { part: "pocket" }, { part: "mac" }] },
-    { id: "accounts", rows: [{ page: "connectors" }, { part: "keys" }] },
+    { id: "accounts", rows: [{ page: "connectors" }] },
   ];
 
   let open = $state<Part | null>(store.settingsSection);
   store.settingsSection = null;
 
-  function pick(id: Part, e: Event) {
+  /** Intelligence's row to open with it: the voice tile opens Speaks. */
+  let row = $state<Job | null>(null);
+  function pick(id: Part, e: Event, job: Job | null = null) {
     open = id;
+    row = job;
     (e.currentTarget as HTMLElement).closest("main")?.scrollTo({ top: 0 });
   }
 
   // What each row says now, and its dot.
   const brainModel = $derived(brain ? modelOf(brain) : "");
   const brainModelName = $derived(brain === "anthropic" ? (CLAUDE_MODELS.find(([m]) => m === brainModel)?.[1].split(" — ")[0] ?? brainModel) : brainModel);
-  const keyed = $derived(keys.filter((k) => k.source).length);
   const firmware = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   const via = $derived(onWifi(store.port) ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
   const vs = $derived(voice?.settings);
@@ -175,7 +131,6 @@
       text: !vs ? "—" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "),
       dot: "",
     },
-    keys: { text: keyed ? t.keysOf(keyed, keys.length) : t.noKeys, dot: "" },
     mac: { text: [notch ? t.notchOn : t.notchOff, mcp?.registered ? t.claudeCode : ""].filter(Boolean).join(" · "), dot: "" },
     board:
       store.boardState === "off"
@@ -252,12 +207,11 @@
           <p class="lede">{t.partLedes[open]}</p>
         </div>
       </div>
-      {#if open === "brain"}{@render brainPage()}
-      {:else if open === "voice"}<Voice />{@render pageLink("spoken")}
-      {:else if open === "keys"}{@render keysPage()}
+      {#if open === "brain"}<Intelligence {row} />
+      {:else if open === "voice"}<Voice onmodels={(e) => pick("brain", e, "hear")} />{@render pageLink("spoken")}
       {:else if open === "mac"}{@render macPage()}
       {:else if open === "board"}<Board />{@render pageLink("animations")}
-      {:else if open === "meetings"}<MeetingSettingsPage />
+      {:else if open === "meetings"}<MeetingSettingsPage onmodels={(e) => pick("brain", e, "transcribe")} />
       {:else}<PocketSettingsPage />{/if}
       {#if error}<p class="error-text note">{error}</p>{/if}
     </div>
@@ -289,7 +243,7 @@
     <h2 class="section-title">{t.quick}</h2>
     <div class="quick">
       <div class="panel q">
-        <button class="q-open" onclick={(e) => pick("voice", e)}>
+        <button class="q-open" onclick={(e) => pick("brain", e, "speak")}>
           <span class="q-label">{t.quickVoice}</span>
           <b>{voiceName}</b>
         </button>
@@ -388,120 +342,6 @@
       <span class="chev"><Icon name="chevron-right" size={16} /></span>
     </button>
   </nav>
-{/snippet}
-
-<!--
-  The brain in use, with its key where a banner's "Fix" leads; then the
-  guided change of service; the brain's own tiles and model are advanced.
--->
-{#snippet brainPage()}
-  {#if s}
-    <section class="panel active">
-      <div class="setting">
-        <div class="what"><b>{t.inUse}</b><span class:error-text={!store.info?.ready}>{summary.brain.text}</span></div>
-      </div>
-      {#if store.info?.ready && store.info?.limited}<p class="error-text note">{store.info.limited}</p>{/if}
-      {#if brain && brain !== "ollama"}
-        {@const k = keyOf(brain)}
-        {#if k}
-          <div class="block">
-            <div class="what"><b>{t.keyOf(k.name)}</b><span class="dim">{k.hint}</span></div>
-            <KeyField provider={k.id} source={k.source} placeholder={k.placeholder} onchange={() => (store.refreshInfo(), readAll())} />
-          </div>
-        {/if}
-      {/if}
-      {#if brain === "ollama"}{@render modelRow("ollama")}{/if}
-      {#if brain === "anthropic"}
-        <div class="setting">
-          <div class="what"><b>{t.webSearch}</b></div>
-          <div class="how"><Toggle checked={s.web_search} label={t.webSearch} onchange={(on) => store.saveSettings((x) => (x.web_search = on))} /></div>
-        </div>
-      {/if}
-    </section>
-
-    <h2 class="section-title">{t.changeService}</h2>
-    <p class="dim small">{t.changeServiceHint}</p>
-    <section class="panel wizard"><Profiles onchange={readAll} /></section>
-
-    {#if look.advanced}
-      <h2 class="section-title">{t.advanced}</h2>
-      <section class="tiles" aria-label={t.provider}>
-        {#each BRAINS as b (b)}
-          <button class="tile" class:on={brain === b} onclick={() => store.saveSettings((x) => (x.provider = b))}>
-            <b>{BRAIN_NAMES[b]}</b>
-            <span>{t.brainNotes[b]}</span>
-            {#if brain === b && store.info?.ready}<span class="tag">{t.inUse}</span>{/if}
-          </button>
-        {/each}
-      </section>
-      {#if brain && brain !== "ollama"}
-        <section class="panel">
-          {@render modelRow(brain)}
-          {#if brain === "anthropic"}
-            <div class="setting">
-              <div class="what"><b>{t.effort}</b><span class="dim">{t.effortHint}</span></div>
-              <div class="how">
-                <select value={s.effort} onchange={(e) => store.saveSettings((x) => (x.effort = e.currentTarget.value as Effort))} aria-label={t.effort}>
-                  {#each EFFORTS as e (e)}<option value={e}>{t.efforts[e]}</option>{/each}
-                </select>
-              </div>
-            </div>
-          {:else}
-            <p class="dim small">{t.groqNote}</p>
-          {/if}
-        </section>
-      {/if}
-    {/if}
-  {/if}
-{/snippet}
-
-<!-- A brain's model: Claude's typed or picked, Ollama's from what's pulled here, the others' from their catalog. -->
-{#snippet modelRow(b: Brain, name = t.model)}
-  {#if s}
-    {#if b === "ollama"}
-      <div class="setting">
-        <div class="what">
-          <b>{name}</b><span class="dim">{t.ollamaHint}</span>
-          {#if ollamaError}<span class="error-text">{ollamaError}</span>{:else if ollamaModels && !ollamaModels.length}<span class="error-text">{t.ollamaNone}</span>{/if}
-        </div>
-        <div class="how">
-          <ModelPicker value={s.ollama_model} choices={brainChoices("ollama")} bare label={name} onchange={(v) => setModel("ollama", v)} />
-          <button class="btn small" onclick={readOllama}>{t.ollamaRefresh}</button>
-          <button class="btn small" onclick={() => call("open_key_page", { provider: "ollama" })}>{t.ollamaGet}</button>
-        </div>
-      </div>
-      <div class="setting">
-        <div class="what"><b>{t.ollamaThink}</b><span class="dim">{t.ollamaThinkHint}</span></div>
-        <div class="how"><Toggle checked={s.think} label={t.ollamaThink} onchange={(on) => store.saveSettings((x) => (x.think = on))} /></div>
-      </div>
-    {:else}
-      <div class="setting">
-        <div class="what"><b>{name}</b></div>
-        <div class="how">
-          <ModelPicker value={modelOf(b)} choices={brainChoices(b)} bare label={name} onchange={(v) => setModel(b, v)} />
-        </div>
-      </div>
-    {/if}
-  {/if}
-{/snippet}
-
-<!-- Every service's key, grouped by what it's for. -->
-{#snippet keysPage()}
-  <p class="dim small">{t.keysPrivacy}</p>
-  {#each ["brains", "voices", "web"] as g (g)}
-    {@const list = keys.filter((k) => k.group === g)}
-    {#if list.length}
-      <h2 class="section-title">{t.keyGroups[g]}</h2>
-      <section class="panel">
-        {#each list as k (k.id)}
-          <div class="block">
-            <div class="what"><b>{k.name}</b><span class="dim">{k.hint}</span></div>
-            <KeyField provider={k.id} source={k.source} placeholder={k.placeholder} onchange={() => (store.refreshInfo(), readAll())} />
-          </div>
-        {/each}
-      </section>
-    {/if}
-  {/each}
 {/snippet}
 
 <!-- Yoru on this Mac: its permissions, the notch, and Claude Code through his MCP server. -->
@@ -717,10 +557,6 @@
     color: var(--haze);
     max-width: 580px;
   }
-  .wizard {
-    padding: 16px 18px;
-  }
-
   .perm-hint {
     margin: 10px 0 18px;
   }
@@ -735,33 +571,6 @@
     margin-top: 12px;
   }
 
-  .block {
-    display: grid;
-    gap: 12px;
-    padding: 6px 0 16px;
-  }
-  .setting + .block,
-  .block + .setting,
-  .block + .block {
-    border-top: 1px solid var(--rim);
-  }
-  .block + .block,
-  .setting + .block {
-    padding-top: 16px;
-  }
-  .block .what {
-    display: grid;
-    gap: 2px;
-  }
-  .block .what b {
-    font-weight: 550;
-  }
-  .block .what span {
-    font-size: var(--fs-meta);
-  }
-  .model {
-    width: 220px;
-  }
   select {
     max-width: 340px;
   }

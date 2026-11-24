@@ -1,28 +1,26 @@
 <!--
   Settings > Meetings (docs/meetings.md): what happens to a meeting, in the
   order it happens: noticing a call, the transcript made on this Mac, and
-  the summary written from it. Each step says where it runs and what it
-  needs downloaded.
+  the summary written from it. Who transcribes and who summarizes, and
+  Parakeet's download, are in Settings > Intelligence with every model.
 -->
 <script lang="ts">
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
   import { serviceOf } from "../meeting-readiness";
-  import { store } from "../store.svelte";
   import type { MeetingSettings, Summarizers } from "../types";
-  import ModelPicker, { type Choice } from "./ModelPicker.svelte";
+  import Icon from "./Icon.svelte";
   import Toggle from "./Toggle.svelte";
+
+  let { onmodels }: { onmodels?: (e: Event) => void } = $props();
 
   const t = $derived(i18n.t.meetings);
   let settings = $state<MeetingSettings | null>(null);
-  /** Whether Parakeet is downloaded; null until known. */
-  let model = $state<boolean | null>(null);
   let summarizers = $state<Summarizers | null>(null);
   let error = $state("");
 
   $effect(() => {
     call<MeetingSettings>("meeting_settings").then((x) => (settings = x), (e) => (error = why(e)));
-    call<boolean>("meeting_model").then((x) => (model = x), () => {});
     call<Summarizers>("meeting_summarizers").then((x) => (summarizers = x), () => {});
   });
 
@@ -36,45 +34,15 @@
     }
   }
 
-  async function downloadModel() {
-    error = "";
-    store.modelDownload = 0;
-    try {
-      await call("meeting_model_download");
-      model = await call<boolean>("meeting_model");
-    } catch (e) {
-      error = why(e);
-    } finally {
-      store.modelDownload = null;
-    }
-  }
-
   const simple = $derived(settings?.detail === "simple");
   /** The transcriber chosen, as the app offers it. */
   const by = $derived(summarizers?.transcribers.find((x) => x.id === settings?.transcribe_by));
-  /** Only what was tried on meetings: Parakeet, then the online ones with their key (the chosen one even without). */
-  const transcribers = $derived<Choice[]>(
-    (summarizers?.transcribers ?? [])
-      .filter((x) => x.ready || x.id === settings?.transcribe_by)
-      .map((x) => {
-        const [label, note] = x.local ? [t.parakeet, t.simpleLocal] : (t.transcribers[x.id] ?? [x.id, ""]);
-        return { value: x.id, label, note: x.ready ? note : `${note} · ${t.needsKey(serviceOf(x.id))}`, group: x.local ? t.onThisMac : t.online };
-      }),
-  );
-  /** Who writes the summaries: Yoru's brain, or a model tried for them. */
-  const summaryChoices = $derived<Choice[]>([
-    { value: "", label: t.brainOf(summarizers?.brain ?? "—"), group: t.brainGroup },
-    ...(summarizers?.models ?? []).map((m) => ({ value: m.id, label: m.note.split(":")[0] || m.model, note: m.note.split(":").slice(1).join(":").trim() || m.model, group: m.provider })),
-  ]);
-
   /** Switch the kind of transcript; a detailed one needs a transcriber that times its lines. */
   function setDetail(detail: MeetingSettings["detail"]) {
     if (!settings || settings.detail === detail) return;
     if (detail === "detailed" && by && !by.detailed) save({ detail, transcribe_by: "local" });
     else save({ detail });
   }
-  const parakeet = $derived(settings?.transcribe_by === "local");
-  const percent = (f: number) => Math.round(f * 100);
   const LANGUAGES = ["", "it", "en", "es", "fr", "de", "pt"];
   const WHEN = $derived([
     ["after", t.whenAfter],
@@ -84,13 +52,15 @@
 </script>
 
 {#if settings}
-  <section class="panel">
-    <div class="setting">
-      <div class="what"><b>{t.simpleTranscript}</b><span>{t.transcribeByHint}</span></div>
-      <div class="how">
-        <ModelPicker value={settings.transcribe_by} choices={transcribers} label={t.simpleTranscript} onchange={(v) => save({ transcribe_by: v, ...(summarizers?.transcribers.find((x) => x.id === v)?.detailed === false ? { detail: "simple" as const } : {}) })} />
+  {#if onmodels}
+    <section class="panel">
+      <div class="setting">
+        <div class="what"><b>{i18n.t.intelligence.link}</b><span>{i18n.t.intelligence.meetingsLinkHint}</span></div>
+        <div class="how"><button class="btn small" onclick={onmodels}><Icon name="sparkles" size={14} />{i18n.t.intelligence.open}</button></div>
       </div>
-    </div>
+    </section>
+  {/if}
+  <section class="panel">
     <div class="setting stack">
       <div class="what"><b>{t.detail}</b><span>{t.detailHint}</span></div>
       <div class="kinds" role="radiogroup" aria-label={t.detail}>
@@ -122,20 +92,6 @@
   <h2 class="section-title">{t.stepTranscript}</h2>
   <p class="dim note">{t.stepTranscriptNote}</p>
   <section class="panel">
-    {#if parakeet}
-      <div class="setting">
-        <div class="what"><b>{t.model}</b><span>{t.modelHint}</span></div>
-        <div class="how">
-          {#if store.modelDownload !== null}
-            <span class="dim small">{t.downloading(percent(store.modelDownload))}</span>
-          {:else if model}
-            <span class="state"><span class="dot done"></span>{t.modelReady}</span>
-          {:else if model === false}
-            <button class="btn small primary" onclick={downloadModel}>{t.download}</button>
-          {/if}
-        </div>
-      </div>
-    {/if}
     <div class="setting stack">
       <div class="what"><b>{t.when}</b><span>{t.whenHint}</span></div>
       <div class="how chips" role="radiogroup" aria-label={t.when}>
@@ -170,10 +126,6 @@
   <p class="dim note">{t.stepSummaryNote}</p>
   <section class="panel">
     <div class="setting">
-      <div class="what"><b>{t.summarizeBy}</b><span>{t.summarizeByHint}</span></div>
-      <div class="how"><ModelPicker value={settings.summarize_by} choices={summaryChoices} label={t.summarizeBy} onchange={(v) => save({ summarize_by: v })} /></div>
-    </div>
-    <div class="setting">
       <div class="what"><b>{t.style}</b><span>{t.styleHint}</span></div>
       <div class="how">
         <select value={settings.summary_style || "auto"} onchange={(e) => save({ summary_style: e.currentTarget.value })} aria-label={t.style}>
@@ -196,14 +148,6 @@
   }
   .small {
     font-size: var(--fs-meta);
-  }
-  .state {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--haze);
-    font-size: var(--fs-meta);
-    white-space: nowrap;
   }
   select {
     max-width: 340px;
