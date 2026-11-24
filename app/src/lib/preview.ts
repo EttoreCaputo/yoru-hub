@@ -123,6 +123,34 @@ let inbox: Notification[] = [
   { id: "n1", source: "ESP32 news", title: "ESP-IDF 6.1.1 is out", text: "A fix for the USB-JTAG console dropping lines.", urgency: "low", url: "https://github.com/espressif/esp-idf/releases", at: now() - 50 * 60 * MIN, read: true, by: "esp-news" },
 ];
 
+// An answer written in Markdown, as models do: the chat renders it (lib/markdown.ts).
+const MARKDOWN_REPLY = `For the **1.0 release**, three things are left:
+
+1. **Firmware**: merge \`YOR-142\` and flash the boards. Giulia *reviews* it tomorrow.
+2. **App**: the notch's settings, see [the issue](https://linear.app/).
+3. **Docs**: update \`docs/app.md\`.
+
+| Piece | Owner | Due |
+| --- | --- | --- |
+| Firmware | Marco | Friday |
+| App | you | Monday |
+
+> Ship on Friday only if the boards pass the night test.
+
+\`\`\`mermaid
+flowchart LR
+  A[Merge YOR-142] --> B[Flash boards]
+  B --> C{Night test}
+  C -->|ok| D[Release 1.0]
+  C -->|fails| A
+\`\`\`
+
+\`\`\`sh
+tools/flash.sh
+\`\`\`
+
+<script>alert("not run")</script> <img src=x onerror=alert(1)>`;
+
 let chatTitle: ChatTitle = { text: "Morning issues", by_user: false, lines: 2 };
 let chat: ChatLine[] = [
   { from: "you", text: "Anything new this morning?", channel: "voice", at: now() - 40 * MIN },
@@ -136,6 +164,8 @@ let chat: ChatLine[] = [
     ],
     at: now() - 40 * MIN + 9000,
   },
+  { from: "you", text: "What's left before the release?", channel: "text", at: now() - 20 * MIN },
+  { from: "yoru", text: MARKDOWN_REPLY, channel: "text", at: now() - 20 * MIN + 7000 },
 ];
 
 const HOUR = 60 * MIN;
@@ -617,6 +647,17 @@ async function ask(text: string) {
     while (confirmations.some((c) => c.id === "y1")) await sleep(200);
     reply = lastAnswer ? "Done: YOR-143, in Yoru's backlog." : "All right, I didn't create it.";
     actions.push({ tool: "linear__create_issue", ok: lastAnswer, summary: lastAnswer ? "created YOR-143" : "denied" });
+  }
+  if (/markdown|diagram/i.test(text)) {
+    // Written a piece at a time, as a stream would: partial Markdown, an open mermaid fence.
+    reply = MARKDOWN_REPLY;
+    addChat({ from: "yoru", text: "", channel: "text" });
+    for (let n = 12; n < reply.length; n += 12) {
+      chat = [...chat.slice(0, -1), { ...chat[chat.length - 1], text: reply.slice(0, n) }];
+      emitChat();
+      await sleep(40);
+    }
+    chat = chat.slice(0, -1);
   }
   emit("bridge", { kind: "voice_state", state: "idle" });
   addChat({ from: "yoru", text: reply, channel: "text", actions });

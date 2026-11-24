@@ -9,6 +9,7 @@
   import { store } from "../store.svelte";
   import type { ChatLine } from "../types";
   import ConfirmCard from "./ConfirmCard.svelte";
+  import Markdown from "./Markdown.svelte";
   import { ago } from "./when";
 
   let { lines, live = true }: { lines?: ChatLine[]; live?: boolean } = $props();
@@ -25,7 +26,11 @@
         {#if l.channel === "voice"}<span class="tag">{t.voice}</span>{/if}
         <time class="faint">{ago(l.at, store.now)}</time>
       </div>
-      <p class="text">{l.text}</p>
+      {#if l.from === "yoru" && !failed(l)}
+        <div class="text md"><Markdown text={l.text} /></div>
+      {:else}
+        <p class="text">{l.text}</p>
+      {/if}
       {#if l.actions?.length}
         <details class="tools">
           <summary>{t.used(l.actions.length)}</summary>
@@ -97,6 +102,9 @@
     line-height: 1.55;
     white-space: pre-wrap;
     user-select: text;
+  }
+  .text.md {
+    white-space: normal;
   }
   .you .text {
     display: inline-block;

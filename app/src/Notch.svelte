@@ -19,6 +19,7 @@
   import { store } from "./lib/store.svelte";
   import type { VoiceState } from "./lib/types";
   import AgentList from "./lib/ui/AgentList.svelte";
+  import Markdown from "./lib/ui/Markdown.svelte";
   import YoruBoard from "./lib/YoruBoard.svelte";
 
   type Geometry = { notch: boolean; width: number; height: number; window: number };
@@ -333,7 +334,7 @@
               {#if used.length > USED_SHOWN}<li class="more-tools">+{used.length - USED_SHOWN}</li>{/if}
             </ul>
           {/if}
-          {#if last.yoru}<p class="answer">{last.yoru.text}</p>{/if}
+          {#if last.yoru}<div class="answer"><Markdown text={last.yoru.text} dark /></div>{/if}
         </section>
       {:else}
         <p class="hint">{t.empty}</p>
@@ -628,7 +629,6 @@
   .answer {
     font-size: 15px;
     line-height: 1.5;
-    white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
   /* The tools the answer used: one quiet line each, above the words. */
