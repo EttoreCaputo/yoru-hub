@@ -27,7 +27,8 @@
     | { event: "level"; level: number }
     | { event: "react"; name: string }
     | { event: "fetch"; state: string; source: string; kind: string }
-    | { event: "error"; message: string };
+    | { event: "error"; message: string }
+    | { event: "summary_ready"; meeting: string; title: string | null; started_at: number };
 
   store.start();
   i18n.start();
@@ -39,6 +40,8 @@
   const HEARD_CHARS = 110;
   /** How long an answer stays open once Yoru is done, to be read. */
   const LINGER_MS = 6000;
+  /** How long a summary that's ready keeps the notch open on its own. */
+  const NOTICE_MS = 10_000;
   /** The pointer has to rest a moment to open it, and be away a moment to close it. */
   const ENTER_MS = 120;
   const LEAVE_MS = 350;
@@ -61,6 +64,9 @@
   /** The coding sessions at work are shown only once asked for, with the
    *  pointer on their count, and until the pointer leaves the notch. */
   let sessions = $state(false);
+  /** A meeting's summary written during a sync (a Pocket recording), shown
+   *  until opened or let go; it opens the notch on its own for a while. */
+  let notice = $state<{ meeting: string; title: string; until: number } | null>(null);
 
   /** Yoru's box: his black disc is lost on the notch's black, so only the
    *  white sphere in its middle (about 40% of it) shows. */
@@ -75,7 +81,7 @@
   const card = $derived(store.confirmations[0] ?? null);
   /** Open while in use, and on its own for a question waiting for an answer
    *  (a tool to allow, a meeting to record). */
-  const open = $derived(pointer || busy || held || typing || !!card || !!store.asking || store.now < lingerUntil);
+  const open = $derived(pointer || busy || held || typing || !!card || !!store.asking || store.now < lingerUntil || (!!notice && store.now < notice.until));
   const last = $derived.by(() => {
     const lastOf = (from: "you" | "yoru") => store.chat.map((l) => l.from).lastIndexOf(from);
     const yoru = lastOf("yoru");
@@ -131,7 +137,11 @@
     } else if (e.event === "level") level = e.level;
     else if (e.event === "react") reaction = { name: e.name, at: Date.now() };
     else if (e.event === "fetch") fetching = e.state === "start" ? e.source || t.fetching : null;
-    else if (e.event === "error") {
+    else if (e.event === "summary_ready") {
+      const title = e.title ?? i18n.t.meetings.untitled(`${i18n.date(e.started_at)} · ${i18n.time(e.started_at)}`);
+      notice = { meeting: e.meeting, title, until: Date.now() + NOTICE_MS };
+      reaction = { name: "happy", at: Date.now() };
+    } else if (e.event === "error") {
       error = e.message;
       voice = "error";
       void checkMic();
@@ -156,6 +166,12 @@
     report();
     return () => watch.disconnect();
   });
+
+  function openNotice() {
+    if (!notice) return;
+    void call("show_app", { meeting: notice.meeting }).catch(() => {});
+    notice = null;
+  }
 
   function talk(pressed: boolean) {
     if (pressed && mic !== "granted") return void allowMic();
@@ -274,6 +290,16 @@
           <p class="label"><span class="dot wait"></span>{mic === "unknown" ? t.micAsk : t.micDenied}</p>
           <div class="pills">
             <button class="pill light" onclick={allowMic}>{mic === "restricted" ? t.micSettings : t.micAllow}</button>
+          </div>
+        </section>
+      {/if}
+      {#if notice}
+        <section class="ask">
+          <p class="label ready"><span class="dot done"></span>{t.summaryReady}</p>
+          <p class="what">{notice.title}</p>
+          <div class="pills">
+            <button class="pill light" onclick={openNotice}>{t.openSummary}</button>
+            <button class="pill" onclick={() => (notice = null)}>{t.dismiss}</button>
           </div>
         </section>
       {/if}
@@ -499,6 +525,9 @@
   .dot.err {
     background: #ff4d4d;
   }
+  .dot.done {
+    background: #4ade80;
+  }
   .dot.wait {
     background: #ff9f43;
   }
@@ -531,6 +560,9 @@
   }
   .at-work {
     margin-top: 10px;
+  }
+  .label.ready {
+    color: #fff;
   }
   .at-work .label {
     color: rgba(255, 255, 255, 0.55);

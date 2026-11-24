@@ -4,12 +4,12 @@ The Pocket (Open Vision Engineering's PKT01, heypocket.com) is a clip-on voice
 recorder. Its own app syncs it over Bluetooth to a phone and sends the
 recordings to the vendor's cloud. Yoru Hub takes that app's place: it pairs
 with the Pocket with a key of its own, copies the recordings to this Mac over
-Bluetooth, and imports each as a meeting, which the meetings' pipeline
+Bluetooth (the long ones over the Pocket's WiFi), and imports each as a meeting, which the meetings' pipeline
 ([meetings.md](meetings.md)) transcribes and summarizes here. The Pocket's
 firmware stays as it is; nothing goes to the vendor.
 
 The code: `core/src/pocket.rs` (the thread, settings, sync), `core/src/pocket/link.rs`
-(Bluetooth, through btleplug), `core/src/pocket/protocol.rs` (the commands and
+(Bluetooth, through btleplug), `core/src/pocket/wifi.rs` (the WiFi copy), `core/src/pocket/protocol.rs` (the commands and
 answers, tested without a device), `app/src-tauri/src/pocket.rs` (the app's
 commands and the `pocket` event), `app/src/lib/ui/PocketDialog.svelte` (the
 dialog the sidebar's Pocket row opens), `app/src/lib/ui/PocketSettings.svelte`
@@ -49,9 +49,17 @@ seen on firmware 1.8.9:
   as it is, without re-encoding it (until 2026-11-20 it became a 24 kbps AAC).
   Over Bluetooth to a Mac about 55 KB/s: an hour in about four and a half
   minutes.
+- WiFi (pocket-libre's captures, firmware 1.7 and 1.8): `WIFIO` raises a
+  hidden access point of the Pocket's own (`MCU&WIFIO`), `WIFI` gives its
+  name and password (`MCU&WIFI&<ssid>&<password>`; the password is the
+  session key's first eight characters), `WIFIS` its state (0 off, 3 coming
+  up, 2 waiting, 1 a client joined), `WIFIC` turns it off. The file comes as
+  raw bytes on TCP `192.168.200.1:8475`: open the socket, `U&<date>&<name>`
+  for the size, `U&WIFI` (never without the socket open: the Pocket hangs
+  and shuts down), then exactly that many bytes, ten fixed ones after them.
+  The socket takes one or two connections per WiFi boot. About 1 MB/s.
 
-Not used: WiFi transfer (the Pocket raises its own access point, which would
-take the Mac off its network), USB mass storage, starting and stopping a
+Not used: USB mass storage, starting and stopping a
 recording from the Mac (`APP&STA`/`APP&STO` aren't confirmed to do that), and
 firmware updates.
 
@@ -73,7 +81,22 @@ A thread of its own (`Pocket::start`), with a tokio runtime:
    recording that stops is copied at once; battery and storage are read
    again every five minutes; the app's commands (sync now,
    copy these, delete one, settings, forget) are handled in between.
-5. A link that breaks is looked for again a second later. A download that
+5. A recording of 15 minutes or more is copied over WiFi
+   (`core/src/pocket/wifi.rs`) when the setting is on, the Pocket said its
+   WiFi firmware and has more than 10% battery: `WIFIC` then `WIFIO`, the
+   network's name, the Mac joins it (`networksetup -setairportnetwork`, Wi-Fi
+   turned on first if it was off) and waits for an address in
+   `192.168.200.x`, the socket, `U`, `U&WIFI`, the bytes; then, whatever
+   happened, `WIFIC`, the Pocket's network removed from the Mac's list (this
+   may need an administrator: harmless) and the Mac's Wi-Fi turned off and on,
+   so macOS joins its own network again (or left off, as it was). The Mac is
+   off its network for the copy: about half a minute plus a second per MB.
+   If the Pocket doesn't turn WiFi on, or the Mac has no Wi-Fi, WiFi is left
+   for the rest of the run; any other failure leaves it for the connection.
+   Either way that recording is copied over Bluetooth at once. Shorter
+   recordings always go over Bluetooth: setting WiFi up costs more than it
+   saves. Not yet tried on the user's Pocket (firmware 1.8.9, WiFi V12).
+6. A link that breaks is looked for again a second later. A download that
    ends short or stalls 15 s is skipped and tried again at the next
    connection, three times in all; after that, only when the user syncs.
 
@@ -102,6 +125,8 @@ dialog (Pair when it isn't paired), then:
   when one ends; off, only on Sync.
 - **Free the Pocket after copying** (off): delete a recording from the Pocket
   once it is a meeting.
+- **Copy over WiFi when possible** (on): long recordings over the Pocket's
+  WiFi, else Bluetooth (What Yoru does, 5).
 - **Set the Pocket's clock** (on): at each connection, in UTC.
 - **Forget this Pocket**: drop the key; pairing again needs a reset.
 
@@ -119,9 +144,10 @@ Meetings, each with Open and Delete from the Pocket. Unpaired, the three steps
 of the reset and the Pair button.
 
 While a sync copies, Home lists the recordings being copied at the top
-(From the Pocket): the one under way with its percentage, then those waiting,
-from the status's `transfer` (`name`, `bytes`, `total` and the names still
-`waiting`).
+(From the Pocket): the one under way with its percentage (and "over WiFi"
+when it is), then those waiting, from the status's `transfer` (`name`,
+`bytes`, `total`, `wifi` and the names still `waiting`). When one becomes
+a summary on its own, the notch says so (docs/notch.md, A summary ready).
 
 The app needs `NSBluetoothAlwaysUsageDescription` in `Info.plist`; a binary
 run outside the bundle (`cargo run`) doesn't start the Pocket's thread, since

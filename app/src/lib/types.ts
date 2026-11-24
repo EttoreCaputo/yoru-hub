@@ -395,7 +395,7 @@ export type Permissions = Record<PermissionKind, PermissionState>;
 export type BridgeEvent = { kind: string; target?: string | null; board?: string | null; [field: string]: unknown };
 
 /** The Pocket recorder's settings (`pocket_settings`). */
-export type PocketSettings = { enabled: boolean; auto_sync: boolean; delete_after_sync: boolean; set_clock: boolean };
+export type PocketSettings = { enabled: boolean; auto_sync: boolean; delete_after_sync: boolean; set_clock: boolean; wifi: boolean };
 /** A recording on the Pocket; `meeting` is the meeting it became. */
 export type PocketRecording = { date: string; name: string; seconds: number; started_at: number | null; meeting: string | null };
 /** The Pocket and its link (`pocket_status`, the `pocket` event). */
@@ -412,7 +412,7 @@ export type PocketStatus = {
   recordings: PocketRecording[];
   checking: boolean;
   /** The download under way, and the recordings waiting after it (by name). */
-  transfer: { name: string; bytes: number; total: number; waiting: string[] } | null;
+  transfer: { name: string; bytes: number; total: number; wifi: boolean; waiting: string[] } | null;
   synced_at: number | null;
   error: string | null;
 };

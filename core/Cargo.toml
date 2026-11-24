@@ -79,4 +79,4 @@ connectors = [
 ]
 # The Pocket voice recorder over Bluetooth (`pocket`): its session key lives
 # in the connectors' keychain vault.
-pocket = ["connectors", "dep:btleplug", "dep:uuid", "tokio/rt", "tokio/time", "tokio/sync", "tokio/macros"]
+pocket = ["connectors", "dep:btleplug", "dep:uuid", "tokio/rt", "tokio/time", "tokio/sync", "tokio/macros", "tokio/net", "tokio/io-util"]

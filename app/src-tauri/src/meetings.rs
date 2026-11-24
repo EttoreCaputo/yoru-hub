@@ -217,7 +217,7 @@ fn queue(app: &AppHandle, id: String) {
         let _ = app.emit("meeting", &event);
         drop(_turn);
         if transcribed && meetings::settings().auto_summary && summarizer(&app).is_ok() {
-            queue_summary(&app, id, None);
+            queue_summary(&app, id, None, true);
         } else {
             board(&app, if transcribed { "done" } else { "failed" }, None);
         }
@@ -225,8 +225,9 @@ fn queue(app: &AppHandle, id: String) {
 }
 
 /// Put meeting `id` in line for a summary, after any transcript being made,
-/// in `style` (`meetings::STYLES`), else the settings' style.
-fn queue_summary(app: &AppHandle, id: String, style: Option<String>) {
+/// in `style` (`meetings::STYLES`), else the settings' style. `on_its_own`:
+/// made because the settings say so, not asked for.
+fn queue_summary(app: &AppHandle, id: String, style: Option<String>, on_its_own: bool) {
     let key = format!("summary:{id}");
     if !app.state::<Meetings>().queued.lock().unwrap().insert(key.clone()) {
         return;
@@ -248,8 +249,21 @@ fn queue_summary(app: &AppHandle, id: String, style: Option<String>) {
             Err(message) => Event::SummaryFailed { id, message },
         };
         board(&app, if matches!(event, Event::Summarized { .. }) { "done" } else { "failed" }, None);
+        if let Event::Summarized { meeting, .. } = &event
+            && on_its_own
+            && announces(meeting, &meetings::settings())
+        {
+            yoru_core::notch::summary_ready(&meeting.id, meeting.title.clone(), meeting.started_at);
+        }
         let _ = app.emit("meeting", &event);
     });
+}
+
+/// A Pocket recording that became a summary all on its own (transcribed
+/// once it ends, summarized at once) is told in the notch: it came in
+/// unseen, during a sync.
+fn announces(meeting: &Meeting, settings: &Settings) -> bool {
+    meeting.origin.as_deref() == Some("pocket") && settings.transcribe == When::After && settings.auto_summary
 }
 
 /// Whether the agent can summarize: a brain with its key, or why not.
@@ -260,7 +274,7 @@ fn summarizer(app: &AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn meeting_summarize(app: AppHandle, id: String, style: Option<String>) {
-    queue_summary(&app, id, style);
+    queue_summary(&app, id, style, false);
 }
 
 /// Every summarized meeting's to-dos, for the To-do page.

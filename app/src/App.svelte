@@ -25,10 +25,13 @@
   import ActivityPanel from "./lib/ui/ActivityPanel.svelte";
   import PocketDialog from "./lib/ui/PocketDialog.svelte";
   import Icon from "./lib/ui/Icon.svelte";
+  import { on } from "./lib/api";
 
   store.start();
   i18n.start();
   look.start();
+  // The notch's Open on a summary that's ready.
+  on<string>("open-meeting", (id) => tabs.open({ kind: "meeting", id }));
 
   const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, todos: Todos, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);

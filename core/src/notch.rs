@@ -72,6 +72,15 @@ pub enum Event {
     Fetch { state: String, source: String, kind: String },
     /// Something went wrong with the Mac's audio.
     Error { message: String },
+    /// A meeting's summary was written on its own (a Pocket recording,
+    /// after a sync): the notch says so, with a way to open it.
+    SummaryReady { meeting: String, title: Option<String>, started_at: i64 },
+}
+
+/// Tell the notch a meeting's summary is ready.
+pub fn summary_ready(meeting: &str, title: Option<String>, started_at: i64) {
+    crate::hostlog::line(TARGET, &format!("summary ready: {meeting}"));
+    tell(Event::SummaryReady { meeting: meeting.to_string(), title, started_at });
 }
 
 /// Whether the manager should run the Yoru in the notch.

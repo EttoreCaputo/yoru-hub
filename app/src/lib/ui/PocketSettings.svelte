@@ -65,6 +65,10 @@
         <div class="what"><b>{t.deleteAfter}</b><span>{t.deleteAfterHint}</span></div>
         <div class="how"><Toggle checked={p.settings.delete_after_sync} label={t.deleteAfter} onchange={(on) => save({ delete_after_sync: on })} /></div>
       </div>
+      <div class="setting">
+        <div class="what"><b>{t.wifi}</b><span>{t.wifiHint}</span></div>
+        <div class="how"><Toggle checked={p.settings.wifi} label={t.wifi} onchange={(on) => save({ wifi: on })} /></div>
+      </div>
     </section>
 
     <h2 class="section-title">{t.stepDevice}</h2>

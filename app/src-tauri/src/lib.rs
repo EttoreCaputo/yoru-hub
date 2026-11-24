@@ -1403,10 +1403,14 @@ fn set_follow_pointer(state: State<AppState>, on: bool) {
     state.save_settings();
 }
 
-/// Bring the app's window up (from the notch).
+/// Bring the app's window up (from the notch), on a meeting's tab when
+/// one is given.
 #[tauri::command]
-fn show_app(app: AppHandle) {
+fn show_app(app: AppHandle, meeting: Option<String>) {
     show_main(&app);
+    if let Some(id) = meeting {
+        let _ = app.emit_to("main", "open-meeting", id);
+    }
 }
 
 /// Yoru in the Mac's notch, or not.

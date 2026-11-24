@@ -14,6 +14,7 @@
 
 mod link;
 pub mod protocol;
+mod wifi;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -49,6 +50,13 @@ const KEEP_ALIVE: Duration = Duration::from_secs(15);
 const TRIES: u32 = 3;
 /// Battery and storage are read again this often while connected.
 const REFRESH_EVERY: Duration = Duration::from_secs(5 * 60);
+/// Recordings at least this long are copied over WiFi when it can: WiFi
+/// takes about 30 s to set up and copies about 1 MB/s, Bluetooth 55 KB/s,
+/// so from here it saves minutes (and takes the Mac off its network only
+/// for a moment).
+const WIFI_FROM_SECONDS: u32 = 15 * 60;
+/// Below this battery the Pocket's WiFi isn't started (as the vendor app).
+const WIFI_MIN_BATTERY: u8 = 10;
 /// Long enough to mean "until something happens".
 const FOREVER: Duration = Duration::from_secs(365 * 24 * 3600);
 
@@ -65,11 +73,14 @@ pub struct Settings {
     /// Set the Pocket's clock at each connection, so its recordings are
     /// named and dated right.
     pub set_clock: bool,
+    /// Copy long recordings over the Pocket's WiFi when it can, else
+    /// over Bluetooth.
+    pub wifi: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: true, auto_sync: true, delete_after_sync: false, set_clock: true }
+        Settings { enabled: true, auto_sync: true, delete_after_sync: false, set_clock: true, wifi: true }
     }
 }
 
@@ -109,6 +120,8 @@ pub struct Transfer {
     pub name: String,
     pub bytes: u64,
     pub total: u64,
+    /// It comes over WiFi.
+    pub wifi: bool,
     /// The recordings still waiting after this one (by name), in order.
     pub waiting: Vec<String>,
 }
@@ -204,6 +217,9 @@ impl Pocket {
             bluetooth: None,
             pairing: false,
             failed: BTreeMap::new(),
+            key: String::new(),
+            wifi_unsupported: false,
+            wifi_failed: false,
         };
         std::thread::Builder::new().name("pocket".into()).spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a tokio runtime");
@@ -299,6 +315,12 @@ struct Worker {
     /// tried again on their own at the next connection (a link that broke
     /// halfway), up to `TRIES`; after that only when the user asks.
     failed: BTreeMap<String, u32>,
+    /// This connection's session key (the WiFi's password comes from it).
+    key: String,
+    /// WiFi copies are out: for the run when the Pocket or the Mac can't,
+    /// for the connection when one failed.
+    wifi_unsupported: bool,
+    wifi_failed: bool,
 }
 
 impl Worker {
@@ -489,6 +511,8 @@ impl Worker {
     /// One connection, from the key to the link's end.
     async fn session(&mut self, link: &mut Link, key: &str, fresh: bool) -> End {
         let name = link.name().to_string();
+        self.key = key.to_string();
+        self.wifi_failed = false;
         match link.request(&command::key(key), |m| matches!(m, Message::Key(_)), Duration::from_secs(5)).await {
             Ok(Message::Key(true)) if fresh => {
                 let _ = write_json("device.json", &Known { name: Some(name.clone()) });
@@ -615,20 +639,34 @@ impl Worker {
     /// ends the sync.
     async fn fetch(&mut self, link: &mut Link, recording: &Recording, waiting: &[String]) -> Result<(), LinkError> {
         let name = recording.name.clone();
-        self.update(|s| s.transfer = Some(Transfer { name: name.clone(), bytes: 0, total: recording.estimated_bytes(), waiting: waiting.to_vec() }));
-        crate::hostlog::line("pocket", &format!("{name}: copying ({} s)", recording.seconds));
-        let status = self.status.clone();
-        let on_event = &self.on_event;
-        let bytes = link
-            .download(&command::upload(&recording.date, &name), |got, total| {
-                let snapshot = {
-                    let mut s = status.lock().unwrap();
-                    s.transfer = Some(Transfer { name: name.clone(), bytes: got, total, waiting: waiting.to_vec() });
-                    s.clone()
-                };
-                on_event(Event::Status(Box::new(snapshot)));
-            })
-            .await;
+        let mut bytes = None;
+        if self.wifi_worth(recording) {
+            self.show_transfer(&name, 0, recording.estimated_bytes(), true, waiting);
+            crate::hostlog::line("pocket", &format!("{name}: copying over WiFi ({} s)", recording.seconds));
+            let key = self.key.clone();
+            match wifi::download(link, recording, &key, |got, total| self.show_transfer(&name, got, total, true, waiting)).await {
+                Ok(b) => bytes = Some(Ok(b)),
+                Err(wifi::WifiError::Link(e)) => {
+                    self.update(|s| s.transfer = None);
+                    return Err(e);
+                }
+                Err(e) => {
+                    crate::hostlog::line("pocket", &format!("{name}: WiFi: {e}; Bluetooth instead"));
+                    if matches!(e, wifi::WifiError::Unsupported(_)) {
+                        self.wifi_unsupported = true;
+                    }
+                    self.wifi_failed = true;
+                }
+            }
+        }
+        let bytes = match bytes {
+            Some(b) => b,
+            None => {
+                self.show_transfer(&name, 0, recording.estimated_bytes(), false, waiting);
+                crate::hostlog::line("pocket", &format!("{name}: copying ({} s)", recording.seconds));
+                link.download(&command::upload(&recording.date, &name), |got, total| self.show_transfer(&name, got, total, false, waiting)).await
+            }
+        };
         self.update(|s| s.transfer = None);
         let bytes = match bytes {
             Ok(bytes) => bytes,
@@ -657,6 +695,24 @@ impl Worker {
             }
         }
         Ok(())
+    }
+
+    /// Whether `recording` goes over WiFi: long enough to be worth it, the
+    /// Pocket has WiFi (it said its WiFi firmware) and battery for it, and
+    /// WiFi hasn't failed on this connection.
+    fn wifi_worth(&self, recording: &Recording) -> bool {
+        let s = self.status.lock().unwrap();
+        s.settings.wifi
+            && !self.wifi_unsupported
+            && !self.wifi_failed
+            && recording.seconds >= WIFI_FROM_SECONDS
+            && s.wifi_firmware.is_some()
+            && s.battery.is_none_or(|b| b > WIFI_MIN_BATTERY)
+    }
+
+    /// The download under way, into the status.
+    fn show_transfer(&self, name: &str, bytes: u64, total: u64, wifi: bool, waiting: &[String]) {
+        self.update(|s| s.transfer = Some(Transfer { name: name.to_string(), bytes, total, wifi, waiting: waiting.to_vec() }));
     }
 
     async fn delete(&mut self, link: &mut Link, recording: &Recording) -> Result<(), LinkError> {

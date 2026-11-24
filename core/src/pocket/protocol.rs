@@ -39,6 +39,16 @@ pub enum Message {
     Stopped,
     /// `MCU&D`: a deletion was done.
     Deleted,
+    /// `MCU&WIFIO`: its WiFi access point is coming up.
+    WifiOn,
+    /// `MCU&WIFIC`: its WiFi is off.
+    WifiOff,
+    /// `MCU&WIFIS&<n>`: 0 off, 3 coming up, 2 up and waiting, 1 a client joined.
+    WifiState(u8),
+    /// `MCU&WIFI&<ssid>&<password>`: how to join its access point.
+    WifiAccess { ssid: String, password: String },
+    /// `MCU&U&WIFI`: the download goes to the WiFi socket.
+    UploadWifi,
     /// Anything else, kept as it came.
     Other(String),
 }
@@ -119,7 +129,11 @@ pub fn parse(text: &str) -> Message {
             None => other(),
         },
         ["LIST", ..] => num(1).map_or_else(other, |n| Message::ListEnd(n as u32)),
-        ["U", "WIFI", ..] => other(),
+        ["U", "WIFI", ..] => Message::UploadWifi,
+        ["WIFIO", ..] => Message::WifiOn,
+        ["WIFIC", ..] => Message::WifiOff,
+        ["WIFIS", ..] => num(1).map_or_else(other, |n| Message::WifiState(n as u8)),
+        ["WIFI", ssid, password, ..] if !ssid.is_empty() => Message::WifiAccess { ssid: ssid.to_string(), password: password.to_string() },
         ["U", ..] => num(1).map_or_else(other, Message::Upload),
         ["OFF", ..] => Message::Off,
         ["STA", name, ..] => Message::Started(name.to_string()),
@@ -149,6 +163,13 @@ pub mod command {
     pub const DIRS: &str = "APP&LIST_DIRS";
     pub const START: &str = "APP&STA";
     pub const STOP: &str = "APP&STO";
+    /// Raise the WiFi access point, ask how to join it, how it stands,
+    /// send the download there, and close it.
+    pub const WIFI_ON: &str = "APP&WIFIO";
+    pub const WIFI_ACCESS: &str = "APP&WIFI";
+    pub const WIFI_STATE: &str = "APP&WIFIS";
+    pub const WIFI_UPLOAD: &str = "APP&U&WIFI";
+    pub const WIFI_OFF: &str = "APP&WIFIC";
     pub fn clock(now: chrono::DateTime<chrono::Utc>) -> String {
         format!("APP&T&{}", now.format("%Y%m%d%H%M%S"))
     }
@@ -201,7 +222,15 @@ mod tests {
         );
         assert_eq!(parse("MCU&U&167798"), Message::Upload(167798));
         assert_eq!(parse("MCU&U&167798&0"), Message::Upload(167798));
-        assert!(matches!(parse("MCU&U&WIFI"), Message::Other(_)));
+        assert_eq!(parse("MCU&U&WIFI"), Message::UploadWifi);
+        assert_eq!(parse("MCU&WIFIO"), Message::WifiOn);
+        assert_eq!(parse("MCU&WIFIC"), Message::WifiOff);
+        assert_eq!(parse("MCU&WIFIS&2"), Message::WifiState(2));
+        assert_eq!(
+            parse("MCU&WIFI&PKT01_GREY_26425893&AB12CD34"),
+            Message::WifiAccess { ssid: "PKT01_GREY_26425893".into(), password: "AB12CD34".into() }
+        );
+        assert!(matches!(parse("MCU&WIFI&&"), Message::Other(_)));
         assert_eq!(parse("MCU&OFF"), Message::Off);
         assert_eq!(parse("MCU&STA&20261009032636"), Message::Started("20261009032636".into()));
         assert_eq!(parse("MCU&STO"), Message::Stopped);

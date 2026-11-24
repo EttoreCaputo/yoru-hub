@@ -67,7 +67,7 @@
     return [tr.name, ...tr.waiting].map((name) => {
       const at = store.pocket?.recordings.find((r) => r.name === name)?.started_at ?? store.now;
       const progress = name === tr.name ? (tr.total ? Math.min(1, tr.bytes / tr.total) : 0) : null;
-      const note = progress === null ? t.copyWaiting : t.copying;
+      const note = progress === null ? t.copyWaiting : tr.wifi ? t.copyingWifi : t.copying;
       return { kind: "pocket", id: name, title: tm.untitled(`${i18n.date(at)} · ${i18n.time(at)}`), faint: false, note, at, now: true, progress };
     });
   });

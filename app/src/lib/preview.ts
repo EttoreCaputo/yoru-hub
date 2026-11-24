@@ -298,7 +298,7 @@ function todosNow() {
 const pocketDay = Date.UTC(2026, 10, 19, 9, 30);
 let pocket: PocketStatus = {
   phase: (params.get("pocket") as PocketStatus["phase"]) ?? "connected",
-  settings: { enabled: true, auto_sync: true, delete_after_sync: false, set_clock: true },
+  settings: { enabled: true, auto_sync: true, delete_after_sync: false, set_clock: true, wifi: true },
   name: "PKT01_GREY_26425893",
   battery: 86,
   firmware: "1.8.9",
@@ -328,7 +328,7 @@ function pocketDownload(names: string[]) {
     let bytes = 0;
     const tick = setInterval(() => {
       bytes = Math.min(total, bytes + total / 8);
-      pocket = { ...pocket, transfer: { name, bytes, total, waiting: names.slice(i + 1) } };
+      pocket = { ...pocket, transfer: { name, bytes, total, wifi: r.seconds >= 15 * 60, waiting: names.slice(i + 1) } };
       emitPocket();
       if (bytes >= total) {
         clearInterval(tick);
