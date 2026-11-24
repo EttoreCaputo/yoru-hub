@@ -4,7 +4,9 @@
 //! 20 MB a request can carry), `generateContent` answers with timed
 //! segments as JSON, and the file is deleted from Google at once (it would
 //! be after 48 hours anyway). Gemini hears the whole track, so it can tell
-//! the speakers apart itself; its times are to the second.
+//! the speakers apart itself; its times are to the second. A simple
+//! transcript is only the words, in paragraphs: what a model that only
+//! transcribes (`gemini-3.5-transcribe`) can give.
 
 use std::fs;
 use std::io;
@@ -32,11 +34,21 @@ fn agent() -> &'static ureq::Agent {
     AGENT.get_or_init(|| ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(TIMEOUT)).build()))
 }
 
-/// Transcribe the audio at `path` with Gemini `model`: segments as the
-/// helper gives them (`text`, `start_ms`, `end_ms`, `speaker`).
+/// A track's transcript as Gemini wrote it.
+pub(super) struct Answer {
+    /// Segments as the helper gives them (`text`, `start_ms`, `end_ms`,
+    /// `speaker`); untimed, only `text`, one per paragraph.
+    pub segments: Value,
+    /// Whether the segments carry times (and speakers, if asked for).
+    pub timed: bool,
+}
+
+/// Transcribe the audio at `path` with Gemini `model`, `detailed` (timed
+/// segments, the speakers told apart if `speakers`) or as plain paragraphs.
+/// A detailed answer written without times is kept as paragraphs.
 /// `on_progress` hears the phase (`load` while uploading, then
 /// `transcribe`) and how far it got.
-pub(super) fn transcribe(path: &Path, model: &str, language: Option<&str>, speakers: bool, mut on_progress: impl FnMut(&str, f64)) -> io::Result<Value> {
+pub(super) fn transcribe(path: &Path, model: &str, language: Option<&str>, speakers: bool, detailed: bool, mut on_progress: impl FnMut(&str, f64)) -> io::Result<Answer> {
     let key = GOOGLE.api_key().ok_or_else(|| io::Error::other("Google: no API key (add one in Settings)"))?;
     on_progress("load", 0.0);
     let audio = readable(path)?;
@@ -46,14 +58,14 @@ pub(super) fn transcribe(path: &Path, model: &str, language: Option<&str>, speak
     let name = file["name"].as_str().unwrap_or_default().to_string();
     let result = ready(&key, file).and_then(|file| {
         on_progress("transcribe", 0.5);
-        generate(&key, model, &file, mime, language, speakers)
+        generate(&key, model, &file, mime, language, speakers, detailed)
     });
     if !name.is_empty() {
         let _ = agent().delete(format!("{ROOT}/v1beta/{name}")).header("x-goog-api-key", &key).call();
     }
-    let segments = result?;
+    let answer = result?;
     on_progress("transcribe", 1.0);
-    Ok(segments)
+    Ok(answer)
 }
 
 /// A private temporary directory owns any converted audio and removes it even
@@ -133,23 +145,97 @@ fn ready(key: &str, mut file: Value) -> io::Result<Value> {
 }
 
 /// Ask `model` for the transcript of the uploaded `file`. It thinks a little
-/// if it can: a model that only transcribes refuses any thinking setting, so
-/// that refusal is asked again without one.
-fn generate(key: &str, model: &str, file: &Value, mime: &str, language: Option<&str>, speakers: bool) -> io::Result<Value> {
-    let mut request = request(file, mime, language, speakers);
-    match send(key, model, &request) {
-        Err(e) if refuses_thinking(&e.to_string()) => {
-            request["generationConfig"].as_object_mut().map(|c| c.remove("thinkingConfig"));
-            send(key, model, &request)
+/// and answers in JSON if it can: a model that only transcribes
+/// (`gemini-3.5-transcribe`) refuses a thinking setting or JSON mode, so
+/// each refusal is asked again without it; the prompt asks for the same JSON
+/// anyway.
+///
+/// A long recording's words don't fit one answer: a simple transcript is
+/// asked to go on from where the answer stopped, up to [`PARTS`] times.
+fn generate(key: &str, model: &str, file: &Value, mime: &str, language: Option<&str>, speakers: bool, detailed: bool) -> io::Result<Answer> {
+    let mut request = if detailed { request(file, mime, language, speakers) } else { plain_request(file, mime, language) };
+    let mut text = String::new();
+    let mut parts = 0;
+    let mut waits = 0;
+    loop {
+        let answer = send(key, model, &request);
+        let config = request["generationConfig"].as_object_mut().expect("the request's config");
+        match answer {
+            Ok((mut part, true)) if !detailed && parts + 1 < PARTS => {
+                parts += 1;
+                // A model stuck saying the same thing over goes on from where it began.
+                if let Some(from) = looping(&part) {
+                    part.truncate(from);
+                }
+                text.push_str(&part);
+                let turns = request["contents"].as_array_mut().expect("the request's turns");
+                turns.push(json!({"role": "model", "parts": [{"text": part}]}));
+                turns.push(json!({"role": "user", "parts": [{"text": GO_ON}]}));
+            }
+            Ok((_, true)) => {
+                return Err(io::Error::other("Gemini: the recording is too long for one answer"));
+            }
+            Ok((mut part, false)) => {
+                if let Some(from) = looping(&part).filter(|_| !detailed) {
+                    part.truncate(from);
+                }
+                text.push_str(&part);
+                return Ok(answer_of(&text, detailed));
+            }
+            Err(e) if refuses_thinking(&e.to_string()) && config.contains_key("thinkingConfig") => {
+                config.remove("thinkingConfig");
+            }
+            Err(e) if refuses_json(&e.to_string()) && config.contains_key("responseMimeType") => {
+                config.remove("responseMimeType");
+                config.remove("responseSchema");
+            }
+            // The free tier counts the audio again with every part: wait for the minute to pass.
+            Err(e) if parts > 0 && waits < 3 && e.to_string().contains("limit reached") => {
+                waits += 1;
+                thread::sleep(Duration::from_secs(65));
+            }
+            Err(e) => return Err(e),
         }
-        answer => answer,
     }
+}
+
+/// Where `text` starts saying the same thing over and over, if it does: a
+/// sentence of some length heard a fourth time within the last few, the
+/// loop starting at its second. Speech repeats short phrases, not that.
+fn looping(text: &str) -> Option<usize> {
+    let mut seen: Vec<(&str, usize)> = Vec::new();
+    let mut start = 0;
+    for (i, c) in text.char_indices() {
+        if !matches!(c, '.' | '?' | '!') {
+            continue;
+        }
+        let end = i + c.len_utf8();
+        let sentence = text[start..end].trim();
+        if sentence.chars().count() >= 20 {
+            let recent = &seen[seen.len().saturating_sub(40)..];
+            let again: Vec<usize> = recent.iter().filter(|(s, _)| *s == sentence).map(|(_, at)| *at).collect();
+            if again.len() >= 3 {
+                return Some(again[1]);
+            }
+        }
+        seen.push((sentence, start + (text[start..end].len() - text[start..end].trim_start().len())));
+        start = end;
+    }
+    None
 }
 
 /// Google's 400 for a thinking setting the model doesn't have.
 fn refuses_thinking(error: &str) -> bool {
     let error = error.to_lowercase();
     error.contains("thinking") && error.contains("not supported")
+}
+
+/// Google's 400 for JSON mode on a model without it ("JSON mode is not
+/// enabled for this model").
+fn refuses_json(error: &str) -> bool {
+    let error = error.to_lowercase();
+    (error.contains("json mode") || error.contains("response_mime_type") || error.contains("responsemimetype") || error.contains("response schema"))
+        && (error.contains("not enabled") || error.contains("not supported"))
 }
 
 fn request(file: &Value, mime: &str, language: Option<&str>, speakers: bool) -> Value {
@@ -167,7 +253,35 @@ fn request(file: &Value, mime: &str, language: Option<&str>, speakers: bool) -> 
     })
 }
 
-fn send(key: &str, model: &str, request: &Value) -> io::Result<Value> {
+/// Just the words, in paragraphs: no JSON mode or thinking, which a model
+/// that only transcribes doesn't have.
+fn plain_request(file: &Value, mime: &str, language: Option<&str>) -> Value {
+    json!({
+        "contents": [{"role": "user", "parts": [
+            {"fileData": {"mimeType": mime, "fileUri": file["uri"]}},
+            {"text": plain_prompt(language)},
+        ]}],
+        "generationConfig": {"maxOutputTokens": 65_536},
+    })
+}
+
+/// How many answers a simple transcript may take.
+const PARTS: usize = 12;
+/// What asks for the rest of a simple transcript.
+const GO_ON: &str = "Go on with the transcript from the exact word where you stopped, without repeating anything, until the end of the recording. Same rules.";
+
+/// The transcript in `text`: timed segments if `detailed` and they're
+/// there, else paragraphs.
+fn answer_of(text: &str, detailed: bool) -> Answer {
+    match read_answer(text).filter(|s| detailed && s.as_array().is_some_and(|a| !a.is_empty())) {
+        Some(segments) => Answer { segments, timed: true },
+        None => Answer { segments: paragraphs(text), timed: false },
+    }
+}
+
+/// Send `request`: the answer's text, and whether it was cut off at the
+/// most it may write.
+fn send(key: &str, model: &str, request: &Value) -> io::Result<(String, bool)> {
     let sent = agent()
         .post(format!("{ROOT}/v1beta/models/{model}:generateContent"))
         .header("x-goog-api-key", key)
@@ -176,16 +290,86 @@ fn send(key: &str, model: &str, request: &Value) -> io::Result<Value> {
         .map_err(network)?;
     let reply = body(checked(sent)?)?;
     let candidate = &reply["candidates"][0];
-    if candidate["finishReason"] == "MAX_TOKENS" {
-        return Err(io::Error::other("Gemini: the recording is too long for one answer"));
-    }
+    let cut = candidate["finishReason"] == "MAX_TOKENS";
     let text: String = candidate["content"]["parts"].as_array().into_iter().flatten().filter(|p| p["thought"] != true).filter_map(|p| p["text"].as_str()).collect();
-    if text.trim().is_empty() {
+    if text.trim().is_empty() && !cut {
         let why = candidate["finishReason"].as_str().or(reply.pointer("/promptFeedback/blockReason").and_then(Value::as_str)).unwrap_or("no answer");
         return Err(io::Error::other(format!("Gemini didn't transcribe it ({why})")));
     }
-    let segments: Value = serde_json::from_str(&text).map_err(|e| io::Error::other(format!("Gemini: unreadable answer ({e})")))?;
-    Ok(segments_of(&segments))
+    Ok((text, cut))
+}
+
+/// Plain text as untimed segments, one per paragraph (or line).
+fn paragraphs(text: &str) -> Value {
+    let text = text.trim().trim_start_matches("```").trim_end_matches("```");
+    let parts: Vec<Value> = text.lines().map(str::trim).filter(|l| !l.is_empty() && *l != "```").map(|l| json!({"text": l})).collect();
+    Value::Array(parts)
+}
+
+/// The segments in an answer: JSON as asked (in JSON mode, or written out
+/// with a code fence around it), else one line per segment that starts with
+/// its time (`[00:12 - 00:18] Speaker 1: text`), as a model without JSON
+/// mode may write.
+fn read_answer(text: &str) -> Option<Value> {
+    let text = text.trim();
+    let json = serde_json::from_str::<Value>(text).ok().or_else(|| {
+        let (from, to) = (text.find('[')?, text.rfind(']')?);
+        serde_json::from_str::<Value>(text.get(from..=to)?).ok()
+    });
+    if let Some(answer) = json.filter(Value::is_array) {
+        return Some(segments_of(&answer));
+    }
+    let mut lines: Vec<Value> = text.lines().filter_map(timed_line).collect();
+    // Speakers counted from 1 (no "Speaker 0") are counted from 0, as asked.
+    if !lines.iter().any(|l| l["speaker"] == 0) {
+        for line in lines.iter_mut().filter(|l| l["speaker"].is_u64()) {
+            line["speaker"] = json!(line["speaker"].as_u64().unwrap_or(1).saturating_sub(1));
+        }
+    }
+    (!lines.is_empty()).then(|| segments_of(&Value::Array(lines)))
+}
+
+/// `[00:12 - 00:18] Speaker 1: text`, `00:12 Speaker 2: text`, `(01:02:03) text`…
+/// as a segment in the JSON's shape, the speaker's number as written.
+fn timed_line(line: &str) -> Option<Value> {
+    let line = line.trim().trim_start_matches(['-', '*', ' ']);
+    let is_time = |c: char| c.is_ascii_digit() || c == ':' || c == '.';
+    let rest = line.trim_start_matches(['[', '(']);
+    let start_len = rest.find(|c: char| !is_time(c)).unwrap_or(rest.len());
+    let start = &rest[..start_len];
+    if !start.contains(':') {
+        return None;
+    }
+    let mut rest = rest[start_len..].trim_start();
+    let mut end = None;
+    if let Some(after) = rest.strip_prefix(['-', '–']).map(str::trim_start) {
+        let len = after.find(|c: char| !is_time(c)).unwrap_or(after.len());
+        if after[..len].contains(':') {
+            end = Some(after[..len].to_string());
+            rest = after[len..].trim_start();
+        }
+    }
+    let mut rest = rest.trim_start_matches([']', ')', ' ', '-', '–']).trim_start();
+    let mut speaker = None;
+    if let Some((who, said)) = rest.split_once(':') {
+        let who = who.trim().to_lowercase();
+        let number = who.strip_prefix("speaker").or_else(|| who.strip_prefix("parlante")).map(str::trim).and_then(|n| n.parse::<u64>().ok());
+        if let Some(n) = number {
+            speaker = Some(n);
+            rest = said.trim_start();
+        }
+    }
+    if rest.is_empty() {
+        return None;
+    }
+    let mut segment = json!({"start": start, "text": rest});
+    if let Some(end) = end {
+        segment["end"] = json!(end);
+    }
+    if let Some(n) = speaker {
+        segment["speaker"] = json!(n);
+    }
+    Some(segment)
 }
 
 fn prompt(language: Option<&str>, speakers: bool) -> String {
@@ -201,7 +385,21 @@ fn prompt(language: Option<&str>, speakers: bool) -> String {
     format!(
         "Transcribe this recording word for word. {language} Split it into segments, each one speaker's sentence or few sentences, at most about 30 seconds. \
          `start` and `end` are times from the start of the recording as MM:SS (minutes go past 59 in a long recording).{speaker} \
-         `text` is exactly what is said, with punctuation. Leave out silence, music and noise. Don't summarize, translate or correct anything."
+         `text` is exactly what is said, with punctuation. Leave out silence, music and noise. Don't summarize, translate or correct anything. \
+         Answer with only a JSON array of these segments, objects with `start`, `end`{}, `text`.",
+        if speakers { ", `speaker`" } else { "" }
+    )
+}
+
+fn plain_prompt(language: Option<&str>) -> String {
+    let language = match language {
+        Some(l) => format!("The speech is in the language whose ISO 639-1 code is `{l}`; write it in that language."),
+        None => "Write it in the language spoken.".into(),
+    };
+    format!(
+        "Transcribe this recording word for word, from start to end. {language} Write plain text with punctuation, in paragraphs: \
+         a new paragraph whenever someone else speaks or the subject changes. No times, speaker names, headings or comments. \
+         Leave out silence, music and noise. Don't summarize, translate or correct anything."
     )
 }
 
@@ -274,6 +472,42 @@ mod tests {
     fn a_model_without_thinking_is_told_apart() {
         assert!(refuses_thinking("Google (400): Thinking level is not supported for this model"));
         assert!(!refuses_thinking("Google (400): Request contains an invalid argument"));
+    }
+
+    #[test]
+    fn a_model_without_json_mode_is_told_apart() {
+        assert!(refuses_json("Google (400): JSON mode is not enabled for this model"));
+        assert!(!refuses_json("Google (400): Thinking level is not supported for this model"));
+        assert!(!refuses_json("Google (400): Request contains an invalid argument"));
+    }
+
+    #[test]
+    fn reads_an_answer_written_without_json_mode() {
+        let fenced = "```json\n[{\"start\": \"00:01\", \"end\": \"00:04\", \"speaker\": 0, \"text\": \"Ciao.\"}]\n```";
+        assert_eq!(read_answer(fenced).unwrap(), json!([{"text": "Ciao.", "start_ms": 1000, "end_ms": 4000, "speaker": 0}]));
+        let lines = "[00:01 - 00:04] Speaker 1: Ciao.\n00:05 Speaker 2: Buongiorno a tutti.\nNote: nothing else.";
+        assert_eq!(
+            read_answer(lines).unwrap(),
+            json!([
+                {"text": "Ciao.", "start_ms": 1000, "end_ms": 4000, "speaker": 0},
+                {"text": "Buongiorno a tutti.", "start_ms": 5000, "end_ms": 5000, "speaker": 1},
+            ])
+        );
+        assert_eq!(read_answer("Just words, no times."), None);
+    }
+
+    #[test]
+    fn a_looping_answer_is_cut_where_the_loop_begins() {
+        let said = "Partiamo dal budget. Ciao, ciao. Ciao, ciao. Ciao, ciao. Ciao, ciao. Fine.";
+        assert_eq!(looping(said), None);
+        let stuck = "Partiamo dal budget. Poi vediamo i negozi di Roma. Poi vediamo i negozi di Roma. Poi vediamo i negozi di Roma. Poi vediamo i negozi di Roma.";
+        let from = looping(stuck).unwrap();
+        assert_eq!(&stuck[..from], "Partiamo dal budget. Poi vediamo i negozi di Roma. ");
+    }
+
+    #[test]
+    fn plain_text_becomes_paragraphs() {
+        assert_eq!(paragraphs("Ciao a tutti.\n\n  Iniziamo.  \n"), json!([{"text": "Ciao a tutti."}, {"text": "Iniziamo."}]));
     }
 
     #[test]
@@ -371,8 +605,9 @@ mod live {
         let path = std::env::var("GEMINI_TRY").expect("GEMINI_TRY");
         let model = std::env::var("GEMINI_MODEL").unwrap_or("gemini-3.8-flash".into());
         let started = std::time::Instant::now();
-        let segments = super::transcribe(path.as_ref(), &model, None, true, |p, f| eprintln!("{p} {f}")).unwrap();
-        eprintln!("{:?}", started.elapsed());
-        println!("{}", serde_json::to_string_pretty(&segments).unwrap());
+        let detailed = std::env::var("GEMINI_SIMPLE").is_err();
+        let answer = super::transcribe(path.as_ref(), &model, None, true, detailed, |p, f| eprintln!("{p} {f}")).unwrap();
+        eprintln!("{:?}, timed: {}", started.elapsed(), answer.timed);
+        println!("{}", serde_json::to_string_pretty(&answer.segments).unwrap());
     }
 }

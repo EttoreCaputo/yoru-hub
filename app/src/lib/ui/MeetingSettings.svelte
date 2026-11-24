@@ -49,8 +49,24 @@
   }
 
   const described = (m: Summarizers["models"][number]): Choice => ({ value: m.id, label: m.note.split(":")[0] || m.model, note: m.note.split(":").slice(1).join(":").trim(), group: i18n.t.picker.suggested });
-  /** A transcript: Parakeet here, or a Gemini model that hears a whole recording (not a Live one). */
-  const transcribers = $derived<Choice[]>([{ value: "local", label: t.parakeet, note: t.simpleLocal }, ...(summarizers?.models ?? []).filter((m) => m.id.startsWith("google:")).map(described)]);
+  /** A Gemini model that only writes the words down: it can't make a detailed transcript. */
+  const wordsOnly = (model: string) => model.includes("-transcribe");
+  const simple = $derived(settings?.detail === "simple");
+  /** A transcript: Parakeet here (detailed only), or a Gemini model that hears a whole recording (not a Live one). */
+  const transcribers = $derived<Choice[]>([
+    ...(simple ? [] : [{ value: "local", label: t.parakeet, note: t.simpleLocal }]),
+    ...(summarizers?.models ?? []).filter((m) => m.id.startsWith("google:") && (simple || !wordsOnly(m.model))).map(described),
+  ]);
+  const geminis = $derived((summarizers?.models ?? []).filter((m) => m.id.startsWith("google:")));
+
+  /** Switch the kind of transcript, and the model with it when it can't make that kind. */
+  function setDetail(detail: MeetingSettings["detail"]) {
+    if (!settings || settings.detail === detail) return;
+    const by = settings.transcribe_by;
+    if (detail === "simple" && by === "local") save({ detail, transcribe_by: geminis[0]?.id ?? by });
+    else if (detail === "detailed" && wordsOnly(by)) save({ detail, transcribe_by: geminis.find((m) => !wordsOnly(m.model))?.id ?? "local" });
+    else save({ detail });
+  }
   const parakeet = $derived(settings?.transcribe_by === "local");
   const percent = (f: number) => Math.round(f * 100);
   const LANGUAGES = ["", "it", "en", "es", "fr", "de", "pt"];
@@ -66,7 +82,24 @@
     <div class="setting">
       <div class="what"><b>{t.simpleTranscript}</b><span>{t.transcribeByHint}</span></div>
       <div class="how">
-        <ModelPicker value={settings.transcribe_by} choices={transcribers} providers={store.info?.google_key ? [{ id: "google", name: "Google" }] : []} need="stt" accept={(m) => !m.model.includes("-live")} label={t.simpleTranscript} onchange={(v) => save({ transcribe_by: v })} />
+        <ModelPicker value={settings.transcribe_by} choices={transcribers} providers={store.info?.google_key ? [{ id: "google", name: "Google" }] : []} need="stt" accept={(m) => !m.model.includes("-live") && (simple || !wordsOnly(m.model))} label={t.simpleTranscript} onchange={(v) => save({ transcribe_by: v })} />
+      </div>
+    </div>
+    <div class="setting stack">
+      <div class="what"><b>{t.detail}</b><span>{t.detailHint}</span></div>
+      <div class="kinds" role="radiogroup" aria-label={t.detail}>
+        <button class="kind" class:on={!simple} role="radio" aria-checked={!simple} onclick={() => setDetail("detailed")}>
+          <b>{t.detailed}</b>
+          <span class="sample timed">
+            {#each t.detailedExample as [at, who, said] (at)}<span class="mono faint">{at}</span><span class="who">{who}</span><span>{said}</span>{/each}
+          </span>
+          <span class="dim small">{t.detailedHint}</span>
+        </button>
+        <button class="kind" class:on={simple} role="radio" aria-checked={simple} disabled={!simple && !geminis.length} title={!geminis.length ? t.simpleNeedsGemini : undefined} onclick={() => setDetail("simple")}>
+          <b>{t.simple}</b>
+          <span class="sample">{t.simpleExample}</span>
+          <span class="dim small">{t.simpleHint}</span>
+        </button>
       </div>
     </div>
     {#if settings.transcribe_by.startsWith("google:") && !store.info?.google_key}<div class="setting"><p class="error-text">{t.noGoogleKey}</p></div>{/if}
@@ -121,7 +154,7 @@
         </select>
       </div>
     </div>
-    <div class="setting">
+    <div class="setting" class:off={simple && !parakeet}>
       <div class="what"><b>{t.speakers}</b><span>{t.speakersHint}</span></div>
       <div class="how"><Toggle checked={settings.speakers} label={t.speakers} onchange={(on) => save({ speakers: on })} /></div>
     </div>
@@ -173,6 +206,53 @@
   }
   .stack .how {
     flex-wrap: wrap;
+  }
+  .kinds {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+  .kind {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    padding: 12px 14px;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    background: transparent;
+    border: 1px solid var(--rim);
+    border-radius: var(--r-md);
+    cursor: pointer;
+  }
+  .kind:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  .kind.on {
+    border-color: var(--pearl);
+    box-shadow: inset 0 0 0 1px var(--pearl);
+  }
+  .kind:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .sample {
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    background: var(--hover);
+    font-size: var(--fs-meta);
+    line-height: 1.45;
+  }
+  .sample.timed {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 2px 8px;
+  }
+  .sample .who {
+    font-weight: 600;
+  }
+  .off {
+    opacity: 0.5;
   }
   .section-title + .panel,
   .note + .panel {

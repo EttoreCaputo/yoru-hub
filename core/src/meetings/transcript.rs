@@ -30,6 +30,18 @@ pub enum When {
     Manual,
 }
 
+/// How much a transcript holds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Detail {
+    /// Who speaks when: timed lines, each playable from its time.
+    #[default]
+    Detailed,
+    /// Only the words, in paragraphs: quicker and cheaper, and the only
+    /// kind a model that just transcribes (`gemini-3.5-transcribe`) writes.
+    Simple,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -44,6 +56,9 @@ pub struct Settings {
     pub speakers: bool,
     /// How summaries are laid out unless one is asked for (`summary::STYLES`).
     pub summary_style: String,
+    /// What a Gemini transcript holds: everything (times, speakers) or
+    /// only the words. Parakeet's are always detailed.
+    pub detail: Detail,
     /// Summarize a meeting once its transcript is made.
     pub auto_summary: bool,
     /// Notice a meeting starting (the calendar, a call app taking the
@@ -53,7 +68,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, summary_style: "auto".into(), auto_summary: true, detect: false }
+        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, detail: Detail::Detailed, summary_style: "auto".into(), auto_summary: true, detect: false }
     }
 }
 
@@ -62,7 +77,8 @@ fn settings_file() -> io::Result<PathBuf> {
 }
 
 pub fn settings() -> Settings {
-    settings_file().ok().and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    let settings: Settings = settings_file().ok().and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    settings.fitted()
 }
 
 pub fn set_settings(settings: &Settings) -> io::Result<()> {
@@ -105,6 +121,10 @@ pub struct Transcript {
     pub language: Option<String>,
     /// Every track's lines, in time order.
     pub lines: Vec<Line>,
+    /// Whether the lines have times and speakers; a simple transcript's
+    /// are paragraphs, track after track, all at 0.
+    #[serde(default = "timed")]
+    pub timed: bool,
     /// The people heard, in the order they first speak; filled when read.
     /// Always serialized: the app reads it (the copy in the file is ignored).
     #[serde(default)]
@@ -123,9 +143,17 @@ pub struct Speaker {
     pub name: Option<String>,
 }
 
-/// The people heard in `transcript`, numbered as [`Speaker::number`] says.
+fn timed() -> bool {
+    true
+}
+
+/// The people heard in `transcript`, numbered as [`Speaker::number`] says;
+/// none in a simple transcript, which doesn't tell them apart.
 fn speakers_of(meeting: &Meeting, transcript: &Transcript) -> Vec<Speaker> {
     let mut out: Vec<Speaker> = Vec::new();
+    if !transcript.timed {
+        return out;
+    }
     for line in &transcript.lines {
         let key = line.who();
         if out.iter().any(|s| s.key == key) {
@@ -234,6 +262,15 @@ pub fn download_model(mut on_progress: impl FnMut(f64)) -> io::Result<()> {
 }
 
 impl Settings {
+    /// A model that only writes the words down makes simple transcripts,
+    /// whatever was chosen before the choice existed.
+    fn fitted(mut self) -> Self {
+        if self.gemini().is_some_and(|m| m.contains("-transcribe")) {
+            self.detail = Detail::Simple;
+        }
+        self
+    }
+
     /// The Gemini model the transcripts are made with, if one is chosen.
     pub fn gemini(&self) -> Option<&str> {
         self.transcribe_by.strip_prefix("google:").filter(|m| !m.is_empty())
@@ -241,10 +278,10 @@ impl Settings {
 }
 
 /// Transcribe every track of meeting `id` and keep the transcript, with
-/// Parakeet or, when `gemini` names a model, with Google's Gemini.
-/// `on_progress` hears the track, the phase and how far it got.
-/// With `speakers`, who speaks is told apart within each track.
-pub fn transcribe(id: &str, gemini: Option<&str>, language: Option<&str>, speakers: bool, mut on_progress: impl FnMut(&str, &str, f64)) -> io::Result<Meeting> {
+/// Parakeet or, when `gemini` names a model, with Google's Gemini (as
+/// `detail` says). `on_progress` hears the track, the phase and how far it
+/// got. With `speakers`, who speaks is told apart within each track.
+pub fn transcribe(id: &str, gemini: Option<&str>, detail: Detail, language: Option<&str>, speakers: bool, mut on_progress: impl FnMut(&str, &str, f64)) -> io::Result<Meeting> {
     let mut meeting = get(id)?;
     if meeting.state == State::Recording {
         return Err(io::Error::new(io::ErrorKind::ResourceBusy, "still recording"));
@@ -252,13 +289,18 @@ pub fn transcribe(id: &str, gemini: Option<&str>, language: Option<&str>, speake
     if let Some(model) = gemini {
         let folder = folder(id)?;
         let mut lines = Vec::new();
+        let mut timed = true;
         for track in &meeting.tracks {
             let Some(file) = track.file.as_deref() else { continue };
             let path = folder.join(checked(file)?);
-            let segments = super::gemini::transcribe(&path, model, language, speakers, |phase, f| on_progress(&track.name, phase, f))?;
-            lines.extend(lines_of(track, &segments));
+            let answer = super::gemini::transcribe(&path, model, language, speakers, detail == Detail::Detailed, |phase, f| on_progress(&track.name, phase, f))?;
+            timed &= answer.timed;
+            lines.extend(lines_of(track, &answer.segments));
         }
-        return keep(&mut meeting, &folder, format!("gemini:{model}"), language, lines);
+        if !timed {
+            lines.iter_mut().for_each(|l| (l.start_ms, l.end_ms, l.speaker) = (0, 0, None));
+        }
+        return keep(&mut meeting, &folder, format!("gemini:{model}"), language, lines, timed);
     }
     let model = model_dir()?;
     let diarizer = speakers_dir()?;
@@ -278,13 +320,13 @@ pub fn transcribe(id: &str, gemini: Option<&str>, language: Option<&str>, speake
         let done = run(&args, |phase, f| on_progress(&track.name, phase, f))?;
         lines.extend(lines_of(track, &done["segments"]));
     }
-    keep(&mut meeting, &folder, ENGINE.into(), language, lines)
+    keep(&mut meeting, &folder, ENGINE.into(), language, lines, true)
 }
 
 /// Write the transcript of `lines` and mark the meeting transcribed.
-fn keep(meeting: &mut Meeting, folder: &Path, engine: String, language: Option<&str>, mut lines: Vec<Line>) -> io::Result<Meeting> {
+fn keep(meeting: &mut Meeting, folder: &Path, engine: String, language: Option<&str>, mut lines: Vec<Line>, timed: bool) -> io::Result<Meeting> {
     lines.sort_by_key(|l| l.start_ms);
-    let transcript = Transcript { engine, language: language.map(str::to_string), lines, speakers: Vec::new() };
+    let transcript = Transcript { engine, language: language.map(str::to_string), lines, timed, speakers: Vec::new() };
     fs::write(folder.join("transcript.json"), serde_json::to_vec_pretty(&transcript)?)?;
     meeting.transcribed_at = Some(chrono::Local::now().timestamp_millis());
     save(folder, meeting)?;
@@ -403,6 +445,18 @@ fn render(transcript: &Transcript, format: Format, title: &str, labels: &BTreeMa
     let who = |l: &Line| labels.get(&l.who()).map_or("?", String::as_str);
     let mut out = String::new();
     match format {
+        _ if !transcript.timed => {
+            if format == Format::Markdown {
+                out.push_str(&format!("# {title}\n\n"));
+            }
+            for l in &transcript.lines {
+                out.push_str(&format!("{}\n\n", l.text));
+            }
+            if format == Format::Srt {
+                // Subtitles need times: one cue for the whole text.
+                return format!("1\n00:00:00,000 --> 00:00:05,000\n{}\n", out.trim());
+            }
+        }
         Format::Markdown => {
             out.push_str(&format!("# {title}\n\n"));
             for l in &transcript.lines {
@@ -444,7 +498,7 @@ mod tests {
 
     #[test]
     fn sends_the_speakers() {
-        let transcript = Transcript { engine: "parakeet-ultra".into(), language: None, lines: vec![], speakers: vec![] };
+        let transcript = Transcript { engine: "parakeet-ultra".into(), language: None, lines: vec![], timed: true, speakers: vec![] };
         assert!(serde_json::to_value(&transcript).unwrap().get("speakers").is_some());
     }
 
@@ -454,7 +508,7 @@ mod tests {
 
     #[test]
     fn writes_each_format() {
-        let mut t = Transcript { engine: ENGINE.into(), language: None, lines: vec![line("mic", Some(0), 0, "Ciao."), line("others", Some(0), 3_725_000, "Ciao a te.")], speakers: vec![] };
+        let mut t = Transcript { engine: ENGINE.into(), language: None, lines: vec![line("mic", Some(0), 0, "Ciao."), line("others", Some(0), 3_725_000, "Ciao a te.")], timed: true, speakers: vec![] };
         t.speakers = speakers_of(&meeting(), &t);
         let labels = labels(&t.speakers, "You", "Person");
         assert_eq!(render(&t, Format::Text, "T", &labels), "[0:00] You: Ciao.\n[1:02:05] Person 1: Ciao a te.\n");
@@ -463,11 +517,23 @@ mod tests {
     }
 
     #[test]
+    fn a_simple_transcript_is_written_without_times_or_people() {
+        let mut t = Transcript { engine: "gemini:m".into(), language: None, lines: vec![line("others", None, 0, "Ciao."), line("others", None, 0, "Iniziamo.")], timed: false, speakers: vec![] };
+        t.speakers = speakers_of(&meeting(), &t);
+        assert!(t.speakers.is_empty());
+        assert_eq!(render(&t, Format::Text, "T", &BTreeMap::new()), "Ciao.\n\nIniziamo.\n\n");
+        assert!(render(&t, Format::Markdown, "T", &BTreeMap::new()).starts_with("# T\n\nCiao.\n\n"));
+        let old: Transcript = serde_json::from_str(r#"{"engine": "parakeet-ultra", "lines": []}"#).unwrap();
+        assert!(old.timed);
+    }
+
+    #[test]
     fn numbers_people_as_they_first_speak_and_keeps_names() {
         let t = Transcript {
             engine: ENGINE.into(),
             language: None,
             lines: vec![line("others", Some(1), 0, "a"), line("mic", None, 1000, "b"), line("others", Some(0), 2000, "c"), line("mic", Some(1), 3000, "d")],
+            timed: true,
             speakers: vec![],
         };
         let mut m = meeting();
@@ -497,5 +563,8 @@ mod tests {
         assert_eq!((s.transcribe_by.as_str(), s.gemini()), ("local", None));
         let s = Settings { transcribe_by: "google:gemini-3.8-flash".into(), ..s };
         assert_eq!(s.gemini(), Some("gemini-3.8-flash"));
+        assert_eq!(s.clone().fitted().detail, Detail::Detailed);
+        let s = Settings { transcribe_by: "google:gemini-3.5-transcribe".into(), ..s };
+        assert_eq!(s.fitted().detail, Detail::Simple);
     }
 }

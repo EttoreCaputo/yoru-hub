@@ -341,7 +341,7 @@ function pocketDownload(names: string[]) {
   next();
 }
 
-let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, summary_style: "auto", auto_summary: true, detect: false };
+let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, detail: "detailed", summary_style: "auto", auto_summary: true, detect: false };
 let meters: ReturnType<typeof setInterval> | undefined;
 
 function startMeeting(a: Record<string, any>): Meeting {
@@ -792,6 +792,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   meeting_transcript: () => ({
     engine: "parakeet-ultra",
     language: null,
+    timed: true,
     lines: [
       { track: "others", kind: "others", start_ms: 0, end_ms: 4200, text: "Ciao, mi senti? Partiamo dalla scadenza di venerdì.", speaker: 0 },
       { track: "mic", kind: "mic", start_ms: 4600, end_ms: 9100, text: "Sì, ti sento. Per venerdì manca solo la revisione del firmware.", speaker: 0 },
@@ -813,6 +814,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
       { id: "openai:gpt-6-luna", provider: "OpenAI", model: "gpt-6-luna", note: "GPT-6 Luna: fast and cheap" },
       { id: "groq:openai/gpt-oss-120b", provider: "Groq", model: "openai/gpt-oss-120b", note: "" },
       { id: "google:gemini-3.8-flash", provider: "Google", model: "gemini-3.8-flash", note: "Gemini 3.8 Flash: smarter, good with tools" },
+      { id: "google:gemini-3.5-transcribe", provider: "Google", model: "gemini-3.5-transcribe", note: "" },
     ],
   }),
   meeting_summary: (a) =>

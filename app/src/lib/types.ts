@@ -363,9 +363,10 @@ export type Summarizers = { brain: string | null; models: { id: string; provider
 export type TranscriptLine = { track: string; kind: "mic" | "others"; start_ms: number; end_ms: number; text: string; speaker: number | null };
 /** Someone heard: `key` is `<track>/<speaker or ->`; `number` 0 is the user, then 1, 2… as they first speak. */
 export type Speaker = { key: string; number: number; name: string | null };
-export type Transcript = { engine: string; language: string | null; lines: TranscriptLine[]; speakers: Speaker[] };
+/** `timed` false: a simple transcript, paragraphs without times or speakers. */
+export type Transcript = { engine: string; language: string | null; lines: TranscriptLine[]; timed: boolean; speakers: Speaker[] };
 /** `meeting_settings`: when to transcribe, the language (empty: Parakeet finds it), whether to tell the speakers apart, and whether to notice meetings on their own (`detect`). */
-export type MeetingSettings = { transcribe: "after" | "live" | "manual"; /** `local` (Parakeet) or a Gemini model (`google:gemini-3.8-flash`). */ transcribe_by: string; language: string; speakers: boolean; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; detect: boolean };
+export type MeetingSettings = { transcribe: "after" | "live" | "manual"; /** `local` (Parakeet) or a Gemini model (`google:gemini-3.8-flash`). */ transcribe_by: string; language: string; speakers: boolean; /** Gemini's transcript: timed lines and speakers, or only the words. */ detail: "detailed" | "simple"; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; detect: boolean };
 /** What can be recorded right now (`meeting_sources`). */
 export type MeetingSources = { apps: { id: string; name: string; playing: boolean; icon?: string }[]; microphones: { id: string; name: string; default: boolean }[] };
 /** What to record (`meeting_start`): everything played, or one app's sound, and microphones. */

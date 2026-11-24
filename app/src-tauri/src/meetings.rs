@@ -200,7 +200,7 @@ fn queue(app: &AppHandle, id: String) {
         let result = if settings.transcribe_by != "local" && settings.gemini().is_none() {
             Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported meeting transcription service"))
         } else {
-            meetings::transcribe(&id, settings.gemini(), language, settings.speakers, |track, phase, fraction| {
+            meetings::transcribe(&id, settings.gemini(), settings.detail, language, settings.speakers, |track, phase, fraction| {
                 let event = Event::Progress { id: id.clone(), track: track.into(), phase: phase.into(), fraction };
                 let _ = app.emit("meeting", &event);
             })
@@ -381,7 +381,7 @@ pub fn meeting_settings() -> Settings {
 #[tauri::command]
 pub fn set_meeting_settings(settings: Settings) -> Result<Settings, String> {
     meetings::set_settings(&settings).map_err(|e| e.to_string())?;
-    Ok(settings)
+    Ok(meetings::settings())
 }
 
 /// Whether the transcription model is downloaded.

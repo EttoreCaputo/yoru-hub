@@ -228,16 +228,21 @@ fn read(meeting: &Meeting, transcript: &Transcript, from: usize, part: usize, yo
     if from == 0 {
         let people: Vec<String> = transcript.speakers.iter().map(|s| format!("{} ({})", labels[&s.key], s.key)).collect();
         out.push_str(&format!(
-            "{} — {}, {} lines. Speakers: {}. \"{you}\" is the user.\n\n",
+            "{} — {}, {} lines. Speakers: {}. \"{you}\" is the user.{}\n\n",
             meeting.title.as_deref().unwrap_or("untitled"),
             when(meeting.started_at),
             transcript.lines.len(),
-            people.join(", ")
+            people.join(", "),
+            if transcript.timed { "" } else { " A simple transcript: paragraphs without times or speakers." }
         ));
     }
     let mut next = None;
     for (i, line) in transcript.lines.iter().enumerate().skip(from) {
-        let text = format!("#{i} [{}] {}: {}\n", clock(line.start_ms), labels.get(&line.who()).map_or("?", String::as_str), line.text.trim());
+        let text = if transcript.timed {
+            format!("#{i} [{}] {}: {}\n", clock(line.start_ms), labels.get(&line.who()).map_or("?", String::as_str), line.text.trim())
+        } else {
+            format!("#{i} {}\n", line.text.trim())
+        };
         if out.len() + text.len() > part && i > from {
             next = Some(i);
             break;
@@ -410,6 +415,7 @@ mod tests {
             engine: "test".into(),
             language: None,
             lines: (0..lines).map(line).collect(),
+            timed: true,
             speakers: vec![
                 Speaker { key: "mic/0".into(), number: 0, name: None },
                 Speaker { key: "others/0".into(), number: 1, name: Some("Marco".into()) },

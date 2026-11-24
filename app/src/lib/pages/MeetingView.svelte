@@ -356,6 +356,10 @@
                 <span class="faint small">{t.nameHint}</span>
               </div>
             {/if}
+            {#if !transcript.timed}
+              <p class="faint small">{t.simpleNote}</p>
+              {#each transcript.lines as line, i (i)}<p class="paragraph">{line.text}</p>{/each}
+            {:else}
             {#each transcript.lines as line, i (i)}
               {@const s = speakerOf(transcript, line)}
               {@const same = i > 0 && speakerOf(transcript, transcript.lines[i - 1]) === s}
@@ -365,6 +369,7 @@
                 <p>{line.text}</p>
               </div>
             {/each}
+            {/if}
           {:else if transcript}
             <p class="faint">{t.noSpeech}</p>
           {/if}
@@ -544,6 +549,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .paragraph {
+    margin: 0 0 12px;
+    color: var(--pearl);
+    font-size: var(--fs-body);
+    line-height: 1.6;
+    user-select: text;
   }
   .line p {
     color: var(--pearl);
