@@ -105,6 +105,8 @@
   const LOCAL = "local";
   const SAME = "same";
   const BRAINS: Brain[] = ["anthropic", "openai", "google", "groq", "ollama"];
+  /** The brains whose models write a meeting's summary (core's SUMMARY_BRAINS: Groq's free limit is too small). */
+  const SUMMARY_BRAINS: Brain[] = ["anthropic", "openai", "google", "ollama"];
   const LANGS = ["it", "en"];
   /** A service's logo: a letter on its colour. */
   const LOGOS: Record<string, [string, string]> = {
@@ -171,6 +173,8 @@
   const turns = $derived(voice?.models.filter((m) => m.kind === "turn") ?? []);
   const dl = $derived(voice?.download ?? null);
 
+  // A summarizer's `provider` is the service's name (OpenAI), not its id: the id is in `id`, before the colon.
+
   // ---- The brain's models ----
 
   const MODEL_FIELD = { anthropic: "model", openai: "openai_model", google: "google_model", groq: "groq_model", ollama: "ollama_model" } as const;
@@ -214,7 +218,7 @@
     if (job === "think" || job === "memory") return brain;
     if (job === "speak") return spoken;
     if (job === "transcribe") return !meet ? null : meet.transcribe_by === "local" ? LOCAL : serviceOf(meet.transcribe_by);
-    if (job === "summarize") return !meet ? null : meet.summarize_by ? (engines?.models.find((m) => m.id === meet!.summarize_by)?.provider ?? serviceOf(meet.summarize_by)) : SAME;
+    if (job === "summarize") return !meet ? null : meet.summarize_by ? (serviceOf(meet.summarize_by)) : SAME;
     if (job === "web") return brain === "anthropic" && s?.web_search ? "anthropic" : keyOf("tavily") ? "tavily" : null;
     return null;
   }
@@ -226,7 +230,8 @@
     if (job === "think") return BRAINS;
     if (job === "speak") return speaking;
     if (job === "transcribe") return uniq((engines?.transcribers ?? []).map((x) => (x.local ? LOCAL : serviceOf(x.id))));
-    if (job === "summarize") return [SAME, ...uniq((engines?.models ?? []).map((m) => m.provider))];
+    // Like Thinks, every service that writes summaries shows, a key sign on those without one (the backend only lists models with a key).
+    if (job === "summarize") return [SAME, ...uniq([...SUMMARY_BRAINS, ...(engines?.models ?? []).map((m) => serviceOf(m.id))])];
     return [];
   }
 
@@ -274,7 +279,7 @@
           };
         });
     if (job === "summarize")
-      return (engines?.models ?? []).filter((m) => m.provider === svc).map((m) => ({ id: m.id, name: m.note.split(":")[0] || m.model, note: m.note.split(":").slice(1).join(":").trim() }));
+      return (engines?.models ?? []).filter((m) => serviceOf(m.id) === svc).map((m) => ({ id: m.id, name: m.note.split(":")[0] || m.model, note: m.note.split(":").slice(1).join(":").trim() }));
     return [];
   }
 

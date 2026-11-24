@@ -361,7 +361,7 @@ export type Summary = {
 export type ActionItem = { text: string; owner: string; due: string; date: string; kind: "task" | "reminder" | "message" | "email"; draft: string };
 /** A meeting's to-do on the To-do page (`meeting_todos`): the meeting it came from, and whether it's ticked off. */
 export type Todo = { meeting: string; title: string; started_at: number; item: ActionItem; done: boolean };
-/** `meeting_summarizers`: the brain's name (Yoru writes the summaries with it), and every model of a provider with a key, for the transcriber. */
+/** `meeting_summarizers`: the brain's name (Yoru writes the summaries with it), and every model of a provider with a key (`provider` is the service's name, its id is before the colon of `id`), and the transcribers. */
 /** A way to make transcripts the app offers (`meetings::TRANSCRIBERS`): `ready` when its service's key is there. */
 export type Transcriber = { id: string; detailed: boolean; speakers: boolean; local: boolean; ready: boolean };
 /** What can write summaries and make transcripts: only what was tried and works. */

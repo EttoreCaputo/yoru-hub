@@ -1,7 +1,7 @@
 <!--
   Settings, sorted by what you want done rather than by how Yoru is built.
-  On top what's wrong right now, each with the button that leads to the fix,
-  or that all is well; then the rest as rows in four groups: Yoru,
+  Rows in four groups, each with what it holds now and a dot when
+  something is wrong there: Yoru,
   Devices, Accounts and services, General. Every setting lives in one place
   only: every model and key, with whether Yoru listens and answers aloud
   and how meetings are transcribed and summarized, in Intelligence
@@ -15,14 +15,12 @@
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store, type Page } from "../store.svelte";
-  import type { Brain, McpInfo, MeetingSettings, Summarizers, VoiceInfo } from "../types";
-  import YoruBoard from "../YoruBoard.svelte";
+  import type { Brain, McpInfo } from "../types";
   import Board from "../ui/Board.svelte";
   import PermissionList from "../ui/PermissionList.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import PocketSettingsPage from "../ui/PocketSettings.svelte";
   import Intelligence, { type Job } from "../ui/Intelligence.svelte";
-  import { serviceOf, transcriptionRequirement } from "../meeting-readiness";
   import { PAGE_ICONS } from "../icons/pages";
   import Icon from "../ui/Icon.svelte";
   import type { IconName } from "../icons/icons";
@@ -44,20 +42,12 @@
   const modelOf = (b: Brain) => (s ? s[MODEL_FIELD[b]] : "");
 
 
-  let voice = $state<VoiceInfo | null>(null);
   let mcp = $state<McpInfo | null>(null);
   let notch = $state(false);
-  let meetings = $state<{ settings: MeetingSettings; model: boolean; engines: Summarizers | null } | null>(null);
   let error = $state("");
 
   async function readAll() {
-    [voice, mcp] = await Promise.all([call<VoiceInfo>("voice_info").catch(() => null), call<McpInfo>("mcp_info").catch(() => null)]);
-    const [ms, model, engines] = await Promise.all([
-      call<MeetingSettings>("meeting_settings").catch(() => null),
-      call<boolean>("meeting_model").catch(() => true),
-      call<Summarizers>("meeting_summarizers").catch(() => null),
-    ]);
-    meetings = ms ? { settings: ms, model, engines } : null;
+    mcp = await call<McpInfo>("mcp_info").catch(() => null);
     notch = (await call<{ notch?: boolean }>("status").catch(() => null))?.notch ?? false;
   }
   $effect(() => {
@@ -104,7 +94,6 @@
   const brainModelName = $derived(brain === "anthropic" ? (CLAUDE_MODELS.find(([m]) => m === brainModel)?.[1].split(" — ")[0] ?? brainModel) : brainModel);
   const firmware = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   const via = $derived(onWifi(store.port) ? i18n.t.link.wifi : store.port ? i18n.t.link.usb : "");
-  const vs = $derived(voice?.settings);
   const brainProblem = $derived(brain === "ollama" ? t.ollamaNoModel : brain ? t.brainNoKey(BRAIN_NAMES[brain]) : t.noBrain);
   const pocketSummary = $derived.by(() => {
     const p = store.pocket;
@@ -114,13 +103,6 @@
     const dot = p.phase === "connected" ? "done" : p.phase === "refused" || p.phase === "no_bluetooth" ? "wrong" : p.phase === "unpaired" ? "" : "think";
     return { text: [tp.phases[p.phase], p.phase === "connected" && p.battery !== null ? `${p.battery}%` : ""].filter(Boolean).join(" · "), dot };
   });
-  const meetingProblem = $derived(
-    meetings && transcriptionRequirement(meetings.settings.transcribe_by, meetings.model, meetings.engines?.transcribers ?? null) === "local"
-      ? t.meetingsNoModel
-      : meetings && transcriptionRequirement(meetings.settings.transcribe_by, meetings.model, meetings.engines?.transcribers ?? null) === "key"
-        ? i18n.t.meetings.missingKey(serviceOf(meetings.settings.transcribe_by))
-        : null,
-  );
   const summary = $derived<Record<Part, { text: string; dot: string }>>({
     brain: !store.info?.ready
       ? { text: brainProblem, dot: "wrong" }
@@ -139,28 +121,6 @@
   /** A tag at the end of a row: an update for the board, a login for the apps. */
   const badge = (r: Row): { text: string; tone: string } | null =>
     "part" in r && r.part === "board" && store.update ? { text: t.updateBadge, tone: "think" } : "page" in r && r.page === "connectors" && loginNeeded ? { text: t.needsLogin, tone: "wait" } : null;
-
-  // What's wrong right now, each with where it's fixed. Only what stops
-  // Yoru from doing something: an update is good news, a tag on its row.
-  type Issue = { text: string; tone: "wrong" | "wait"; to: Part | Page; row?: Job };
-  const issues = $derived.by<Issue[]>(() => {
-    const list: Issue[] = [];
-    if (store.info && !store.info.ready) list.push({ text: brainProblem, tone: "wrong", to: "brain" });
-    else if (store.info?.limited) list.push({ text: store.info.limited, tone: "wait", to: "brain" });
-    if (vs && !vs.live && vs.enabled && voice?.stt_error) list.push({ text: t.issueVoice(voice.stt_error), tone: "wait", to: "brain", row: "hear" });
-    if (vs && !vs.live && vs.speak && voice?.tts_error) list.push({ text: t.issueVoice(voice.tts_error), tone: "wait", to: "brain", row: "speak" });
-    if (meetingProblem) list.push({ text: meetingProblem, tone: "wait", to: "brain", row: "transcribe" });
-    if (loginNeeded) list.push({ text: t.issueConnectors(loginNeeded), tone: "wait", to: "connectors" });
-    return list;
-  });
-  const PARTS: Part[] = Object.keys(PART_ICONS) as Part[];
-  function goTo(to: Part | Page, e: Event, job: Job | null = null) {
-    if ((PARTS as string[]).includes(to)) pick(to as Part, e, job);
-    else store.go(to as Page);
-  }
-  const voiceLine = $derived(!vs ? "" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "));
-  const okLine = $derived([summary.brain.text, voiceLine, summary.board.text].filter((x) => x && x !== "—").join(" · "));
-
 </script>
 
 <div class="page">
@@ -188,24 +148,6 @@
         <h1>{t.title}</h1>
       </div>
     </div>
-
-    <!-- What's wrong, or that all is well: Yoru's face says it first. -->
-    <section class="status panel" class:bad={issues.length} aria-live="polite">
-      <div class="face">
-        <YoruBoard board={store.boardState === "off" ? "off" : "live"} size={64} voice={store.voice} gaze={store.gaze} />
-      </div>
-      <div class="status-text">
-        <h2>{issues.length ? t.statusIssues(issues.length) : t.statusOk}</h2>
-        {#if !issues.length}<p class="dim">{okLine}</p>{/if}
-        {#each issues as issue, i (i)}
-          <div class="issue">
-            <span class="dot {issue.tone}"></span>
-            <span class="issue-text">{issue.text}</span>
-            <button class="btn small" class:primary={i === 0} onclick={(e) => goTo(issue.to, e, issue.row)}>{t.fix}</button>
-          </div>
-        {/each}
-      </div>
-    </section>
 
     {#each GROUPS as g (g.id)}
       <h2 class="section-title">{t.groups[g.id]}</h2>
@@ -318,40 +260,6 @@
 
 
 <style>
-  /* What's wrong, or all is well. */
-  .status {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    padding: 16px 20px;
-    margin-bottom: 8px;
-  }
-  .status.bad {
-    border-color: color-mix(in srgb, var(--wait) 45%, transparent);
-    background: color-mix(in srgb, var(--wait) 6%, var(--ink));
-  }
-  .face {
-    flex-shrink: 0;
-  }
-  .status-text {
-    display: grid;
-    gap: 6px;
-    flex: 1;
-    min-width: 0;
-  }
-  .status-text h2 {
-    font: 600 var(--fs-head)/1.3 var(--display);
-  }
-  .issue {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .issue-text {
-    flex: 1;
-    min-width: 0;
-  }
-
   /* The groups' rows. */
   .menu {
     display: grid;
