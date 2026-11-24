@@ -1,8 +1,7 @@
 <!--
   Settings, sorted by what you want done rather than by how Yoru is built.
   On top what's wrong right now, each with the button that leads to the fix,
-  or that all is well; then four quick settings (his voice, the language,
-  the brain, do not disturb); then the rest as rows in four groups: Yoru,
+  or that all is well; then the rest as rows in four groups: Yoru,
   Devices, Accounts and services, General. Every setting lives in one place
   only: every model and key, with whether Yoru listens and answers aloud
   and how meetings are transcribed and summarized, in Intelligence
@@ -135,7 +134,6 @@
   });
   const loginNeeded = $derived(store.connectors.filter((c) => c.enabled && (c.state === "needs_login" || c.state === "error")).length);
   const connectorsOn = $derived(store.connectors.filter((c) => c.enabled).length);
-  const routines = $derived(s?.routines);
   const pageSummary = (p: Page) =>
     p === "connectors" ? (connectorsOn ? t.connectorsOn(connectorsOn) : t.moreNotes.connectors) : p === "routines" || p === "tasks" || p === "spoken" || p === "animations" ? t.moreNotes[p] : "";
   /** A tag at the end of a row: an update for the board, a login for the apps. */
@@ -163,26 +161,6 @@
   const voiceLine = $derived(!vs ? "" : [vs.enabled ? t.listening : t.notListening, vs.live ? i18n.t.board.live : vs.speak ? "" : t.silent].filter(Boolean).join(" · "));
   const okLine = $derived([summary.brain.text, voiceLine, summary.board.text].filter((x) => x && x !== "—").join(" · "));
 
-  // The quick settings: his voice in the app's language, and do not disturb.
-  const voiceName = $derived.by(() => {
-    if (!vs) return "—";
-    if (vs.live) return `Gemini Live · ${vs.live}`;
-    if (!vs.speak) return t.silent;
-    const id = vs.voices[i18n.lang] ?? Object.values(vs.voices).find(Boolean) ?? "";
-    // Piper's ids read it_IT-paola-medium: the name is the middle part.
-    const piper = /^[a-z]{2}_[A-Z]{2}-([a-z]+)-/.exec(id);
-    if (piper) return piper[1][0].toUpperCase() + piper[1].slice(1);
-    const note = voice?.models.find((m) => m.id === id)?.note;
-    return note?.split(/[,—·]/)[0].trim() || id.replace(/^[^:]+:(voice\/)?/, "") || "—";
-  });
-  const canTry = $derived(!!vs?.speak && voice?.tts === "ready" && store.boardState === "live");
-  let trying = $state(false);
-  async function tryVoice() {
-    trying = true;
-    await run(() => call("test_voice", { board: null, language: i18n.lang }), () => {});
-    trying = false;
-  }
-  const setQuiet = (on: boolean) => store.saveSettings((x) => (x.routines.quiet = on));
 </script>
 
 <div class="page">
@@ -229,41 +207,6 @@
       </div>
     </section>
 
-    <h2 class="section-title">{t.quick}</h2>
-    <div class="quick">
-      <div class="panel q">
-        <button class="q-open" onclick={(e) => pick("brain", e, "speak")}>
-          <span class="q-label">{t.quickVoice}</span>
-          <b>{voiceName}</b>
-        </button>
-        {#if canTry}
-          <button class="btn small" disabled={trying} onclick={tryVoice}><Icon name="play" size={14} />{t.tryVoice}</button>
-        {/if}
-      </div>
-      <div class="panel q">
-        <label class="q-open">
-          <span class="q-label">{t.quickLanguage}</span>
-          <select value={i18n.choice ?? ""} onchange={(e) => i18n.set((e.currentTarget.value || null) as Lang | null)} aria-label={t.quickLanguage}>
-            <option value="">{t.system} · {langName(i18n.lang)}</option>
-            {#each LANGUAGES as l (l.id)}<option value={l.id}>{l.name}</option>{/each}
-          </select>
-        </label>
-      </div>
-      <div class="panel q" class:bad={!store.info?.ready}>
-        <button class="q-open" onclick={(e) => pick("brain", e)}>
-          <span class="q-label">{t.provider}</span>
-          <b class:error-text={!store.info?.ready}>{summary.brain.text}</b>
-        </button>
-      </div>
-      <div class="panel q">
-        <button class="q-open" onclick={() => store.go("routines")}>
-          <span class="q-label">{t.quickQuiet}</span>
-          <b>{routines?.quiet ? `${routines.quiet_from} – ${routines.quiet_to}` : t.quietOff}</b>
-        </button>
-        {#if routines}<Toggle checked={routines.quiet} label={t.quickQuiet} onchange={setQuiet} />{/if}
-      </div>
-    </div>
-
     {#each GROUPS as g (g.id)}
       <h2 class="section-title">{t.groups[g.id]}</h2>
       <nav class="menu panel" aria-label={t.groups[g.id]}>
@@ -303,6 +246,15 @@
           {#each THEMES as th (th)}
             <button role="radio" aria-checked={look.theme === th} class:on={look.theme === th} onclick={() => look.setTheme(th)}>{t.themes[th]}</button>
           {/each}
+        </div>
+      </div>
+      <div class="setting">
+        <div class="what"><b>{t.quickLanguage}</b></div>
+        <div class="how">
+          <select value={i18n.choice ?? ""} onchange={(e) => i18n.set((e.currentTarget.value || null) as Lang | null)} aria-label={t.quickLanguage}>
+            <option value="">{t.system} · {langName(i18n.lang)}</option>
+            {#each LANGUAGES as l (l.id)}<option value={l.id}>{l.name}</option>{/each}
+          </select>
         </div>
       </div>
       <div class="setting">
@@ -398,51 +350,6 @@
   .issue-text {
     flex: 1;
     min-width: 0;
-  }
-
-  /* The quick settings: two by two. */
-  .quick {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-  .q {
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
-  }
-  .q.bad {
-    border-color: color-mix(in srgb, var(--wrong) 40%, transparent);
-  }
-  .q-open {
-    display: grid;
-    gap: 4px;
-    flex: 1;
-    min-width: 0;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--pearl);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .q-open b {
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .q-open select {
-    justify-self: stretch;
-    width: 100%;
-    min-width: 0;
-  }
-  .q-label {
-    color: var(--haze);
-    font-size: var(--fs-meta);
   }
 
   /* The groups' rows. */
