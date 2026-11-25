@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Build the macOS app signed with your own Apple certificate, so the keychain
 # knows it from one build to the next: after one "Always Allow" it stops
-# asking for the login password. The release workflow signs ad hoc ("-" in
-# tauri.conf.json), and an ad-hoc signature changes with every build.
+# asking for the login password. The release workflow signs with the
+# Developer ID certificate when its secrets are set, ad hoc otherwise.
 #
 #   tools/build_app.sh [tauri build arguments...]
 #
 # e.g. tools/build_app.sh --config src-tauri/tauri.sidecars.conf.json
-# The first "Apple Development" or "Developer ID Application" identity in
-# the keychain is used; pick another with APPLE_SIGNING_IDENTITY (a name or
-# a SHA-1 hash).
+# The first "Apple Development" identity in the keychain is used, since the
+# iCloud profile (docs/icloud.md) is a development one; a "Developer ID
+# Application" one only when there's none. Pick another with
+# APPLE_SIGNING_IDENTITY (a name or a SHA-1 hash).
 
 set -euo pipefail
 
@@ -17,8 +18,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [[ -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
     # By hash: two certificates with the same name make codesign refuse it.
-    APPLE_SIGNING_IDENTITY="$(security find-identity -v -p codesigning |
-        awk '/"(Apple Development|Developer ID Application):/ {print $2; exit}')"
+    identities="$(security find-identity -v -p codesigning)"
+    APPLE_SIGNING_IDENTITY="$(awk '/"Apple Development:/ {print $2; exit}' <<< "$identities")"
+    [[ -n "$APPLE_SIGNING_IDENTITY" ]] ||
+        APPLE_SIGNING_IDENTITY="$(awk '/"Developer ID Application:/ {print $2; exit}' <<< "$identities")"
 fi
 if [[ -z "$APPLE_SIGNING_IDENTITY" ]]; then
     echo "yoru: no Apple Development or Developer ID certificate in the keychain" >&2

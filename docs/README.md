@@ -73,7 +73,7 @@ npm run tauri dev           # the real app, hot reload on UI changes
 npm run tauri build         # release build + installers, in target/release/bundle/
 ```
 
-On a Mac, build with `tools/build_app.sh` instead (same arguments): it signs the app with your Apple Development certificate. The keychain then recognises it from one build to the next and stops asking for the login password after one "Always Allow"; a build signed ad hoc (as the release workflow's) is a new app to it every time.
+On a Mac, build with `tools/build_app.sh` instead (same arguments): it signs the app with your Apple Development certificate. The keychain then recognises it from one build to the next and stops asking for the login password after one "Always Allow"; a build signed ad hoc is a new app to it every time.
 
 The voice sidecars (whisper.cpp's and llama.cpp's servers) are built by `tools/build_sidecars.sh` and bundled with `--config src-tauri/tauri.sidecars.conf.json`.
 
@@ -87,6 +87,8 @@ cd app && npm run check && npm run build
 ## Releases
 
 Every push to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml): it builds Yoru's firmware with ESP-IDF 6.1, then the app for macOS (Apple Silicon and Intel; the only platform Yoru supports) with that image and the voice helpers inside, and uploads everything, plus the bare firmware image, to the GitHub release `v<version>` from `app/src-tauri/tauri.conf.json`. A push to `develop` does the same for the pre-release `v<version>-develop`.
+
+The release signs the app with the Developer ID Application certificate of team `79AC9KV62T` and has Apple notarize it, so macOS opens the downloaded app without asking. The workflow reads it from the repository secrets `APPLE_CERTIFICATE` (the .p12 in base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, and for notarization `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`. `tools/set_signing_secrets.sh <DeveloperID.p12>` sets them all; its header says how to make the certificate and the password. Without them the app is signed ad hoc and not notarized, and the release notes say how to open it anyway. A release build has no iCloud: the profile is a development one, for this Mac's `tools/build_app.sh` builds (see [icloud.md](icloud.md)).
 
 ## Protocol
 

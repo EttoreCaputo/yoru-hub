@@ -121,6 +121,8 @@ jobs:
 
       - name: Create or refresh the release
         id: release
+        env:
+          NOTARIZED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_ID != '' }}
         run: |
           for d in firmware/firmware-*; do mv "$d" "firmware/${d#firmware/firmware-}"; done
           app="$(jq -r .version app/src-tauri/tauri.conf.json)"
@@ -144,7 +146,9 @@ jobs:
             echo "### Downloads"
             echo "- **macOS Apple Silicon** (M1 and later): \`Yoru_${app}_macos-apple-silicon.dmg\`."
             echo "- **macOS Intel**: \`Yoru_${app}_macos-intel.dmg\`."
-            echo "  The app isn't notarized: the first time, open it, then allow it in System Settings → Privacy & Security (Open Anyway), or run \`xattr -cr \"/Applications/Yoru.app\"\`."
+            if [ "$NOTARIZED" != true ]; then
+              echo "  The app isn't notarized: the first time, open it, then allow it in System Settings → Privacy & Security (Open Anyway), or run \`xattr -cr \"/Applications/Yoru.app\"\`."
+            fi
             echo "- \`yoru-firmware-$yoru.bin\`: the merged image alone, to flash at 0x0 with esptool."
             echo
             echo "Voice: the app ships whisper.cpp and llama.cpp (MIT); it downloads the models, and installs Piper (GPL-3.0) when you ask."
@@ -242,6 +246,41 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
         working-directory: app
+
+      # With the secrets tools/set_signing_secrets.sh sets, Tauri signs the
+      # app and its sidecars with the Developer ID certificate of team
+      # 79AC9KV62T (it overrides the "-" of tauri.conf.json), then has Apple
+      # notarize it and staples the ticket: macOS opens it without asking.
+      # Without them the app is signed ad hoc, as before.
+      - name: Use the Developer ID certificate
+        shell: bash
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          NOTARY_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$CERTIFICATE" ]; then
+            echo "No APPLE_CERTIFICATE secret: the app is signed ad hoc"
+            exit 0
+          fi
+          {
+            echo "APPLE_CERTIFICATE=$CERTIFICATE"
+            echo "APPLE_CERTIFICATE_PASSWORD=$CERTIFICATE_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY"
+          } >> "$GITHUB_ENV"
+          if [ -n "$NOTARY_ID" ]; then
+            {
+              echo "APPLE_ID=$NOTARY_ID"
+              echo "APPLE_PASSWORD=$NOTARY_PASSWORD"
+              echo "APPLE_TEAM_ID=${TEAM_ID:-79AC9KV62T}"
+            } >> "$GITHUB_ENV"
+            echo "Signed with the Developer ID certificate and notarized"
+          else
+            echo "Signed with the Developer ID certificate, not notarized (no APPLE_ID secret)"
+          fi
 
       - uses: tauri-apps/tauri-action@v0
         id: bundle
