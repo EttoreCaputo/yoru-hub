@@ -1,6 +1,6 @@
 [package]
 name = "yoru-core"
-version = "0.1.2"
+version = "2.0.0"
 edition = "2024"
 description = "Host side of Yoru, the personal assistant with a body on the desk: link, voice, agent, connectors"
 authors = ["Ettore Caputo <ettore.caputo27@gmail.com>"]

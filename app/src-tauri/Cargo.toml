@@ -1,6 +1,6 @@
 [package]
 name = "yoru-app"
-version = "0.1.2"
+version = "2.0.0"
 edition = "2024"
 description = "Yoru, the personal assistant with a body on the desk: the desktop app"
 authors = ["Ettore Caputo <ettore.caputo27@gmail.com>"]
@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 ctrlc = { version = "3", features = ["termination"] }
-yoru-core = { version = "0.1.2", path = "../../core", features = ["provision", "mcp", "connectors", "pocket"] }
+yoru-core = { path = "../../core", features = ["provision", "mcp", "connectors", "pocket"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }

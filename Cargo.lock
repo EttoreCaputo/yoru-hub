@@ -7296,7 +7296,7 @@ dependencies = [
 
 [[package]]
 name = "yoru-app"
-version = "0.1.2"
+version = "2.0.0"
 dependencies = [
  "block2",
  "ctrlc",
@@ -7319,7 +7319,7 @@ dependencies = [
 
 [[package]]
 name = "yoru-cli"
-version = "0.1.2"
+version = "2.0.0"
 dependencies = [
  "clap",
  "ctrlc",
@@ -7329,7 +7329,7 @@ dependencies = [
 
 [[package]]
 name = "yoru-core"
-version = "0.1.2"
+version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
