@@ -8,8 +8,7 @@ export const PAGE_ICONS: Record<Page, IconName> = {
   home: "house",
   inbox: "bell",
   connectors: "plug",
-  tasks: "list-checks",
-  routines: "alarm-clock",
+  tasks: "alarm-clock",
   memory: "brain",
   meetings: "users",
   todos: "list-todo",
@@ -19,4 +18,4 @@ export const PAGE_ICONS: Record<Page, IconName> = {
 };
 
 /** The pages Settings opens from its menu, not the sidebar. */
-export const SETTINGS_PAGES = ["tasks", "routines", "connectors", "spoken", "animations"] as const satisfies readonly Page[];
+export const SETTINGS_PAGES = ["connectors", "spoken", "animations"] as const satisfies readonly Page[];

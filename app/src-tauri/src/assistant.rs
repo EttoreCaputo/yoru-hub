@@ -1,4 +1,4 @@
-//! The assistant's side of the app: Yoru's answers, inbox, memory, routines,
+//! The assistant's side of the app: Yoru's answers, inbox, memory, watchers,
 //! watchers and connectors, as commands for the UI and the events that keep
 //! it current (`inbox`, `chat`, `tasks`, `schedule`, `connectors`).
 //!
@@ -609,7 +609,7 @@ pub fn memory_forget_voice(state: State<AppState>, id: i64) {
     state.assistant.memory.forget_voice(id);
 }
 
-// Watchers and routines.
+// Watchers.
 
 #[tauri::command]
 pub fn watchers(state: State<AppState>) -> Vec<WatchEntry> {
@@ -640,19 +640,6 @@ pub async fn run_watcher(app: AppHandle, id: String) -> Result<ScheduleEvent, St
     .await?;
     let _ = emitter.emit("schedule", &event);
     Ok(event)
-}
-
-/// The morning recap, now.
-#[tauri::command]
-pub async fn recap_now(app: AppHandle) -> Result<Reply, String> {
-    let emitter = app.clone();
-    let result = blocking(app, |state| {
-        let task = state.assistant.settings().routines.recap_task().to_string();
-        state.assistant.run_task(&task, &TaskHost)
-    })
-    .await;
-    let _ = emitter.emit("schedule", ScheduleEvent::Recap { error: result.as_ref().err().cloned() });
-    result
 }
 
 // Connectors.

@@ -123,12 +123,12 @@ pub fn tools() -> Vec<ExternalTool> {
         ),
         tool(
             "settings_read",
-            "Yoru's settings: the assistant's (name, brain and models, effort, web search, the morning recap and quiet hours under routines) and the meetings' (when to transcribe, language, speakers, summary style, meeting detection).",
+            "Yoru's settings: the assistant's (name, brain and models, effort, web search, quiet hours under quiet_hours; the morning recap is a task, changed with the tasks tool) and the meetings' (when to transcribe, language, speakers, summary style, meeting detection).",
             json!({"type": "object", "properties": {}}),
         ),
         tool(
             "settings_change",
-            "Change some of Yoru's settings, as settings_read shows them: `area` assistant or meetings, `changes` only the fields that change (routines' fields inside \"routines\"). The user is asked to allow it first.",
+            "Change some of Yoru's settings, as settings_read shows them: `area` assistant or meetings, `changes` only the fields that change (the quiet hours' inside \"quiet_hours\"). The user is asked to allow it first.",
             json!({"type": "object", "properties": {
                 "area": {"type": "string", "enum": ["assistant", "meetings"]},
                 "changes": {"type": "object"},
@@ -468,9 +468,9 @@ mod tests {
                 Some(true)
             }
         }
-        call(&a, &Yes, "settings_change", &json!({"area": "assistant", "changes": {"routines": {"recap_at": "07:45"}}})).unwrap().unwrap();
+        call(&a, &Yes, "settings_change", &json!({"area": "assistant", "changes": {"quiet_hours": {"from": "23:15"}}})).unwrap().unwrap();
         let s = a.settings();
-        assert_eq!((s.routines.recap_at.as_str(), s.routines.quiet), ("07:45", true), "the other fields stay");
+        assert_eq!((s.quiet_hours.from.as_str(), s.quiet_hours.on), ("23:15", true), "the other fields stay");
     }
 
     #[test]

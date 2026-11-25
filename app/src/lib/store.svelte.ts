@@ -61,7 +61,7 @@ type MacEvent =
   | { event: "fetch"; state: string; source: string; kind: string }
   | { event: "error"; message: string };
 
-export type Page = "home" | "inbox" | "connectors" | "tasks" | "routines" | "memory" | "meetings" | "todos" | "spoken" | "animations" | "settings";
+export type Page = "home" | "inbox" | "connectors" | "tasks" | "memory" | "meetings" | "todos" | "spoken" | "animations" | "settings";
 
 /** Opening the port resets the S3: it's up again after about this long. */
 const BOOT_MS = 1100;

@@ -1,5 +1,5 @@
 //! Watchers: what Yoru keeps an eye on for you, every so often, and the
-//! scheduler that runs them, the morning recap and the tasks ([`super::tasks`]).
+//! scheduler that runs them and the tasks ([`super::tasks`]).
 //!
 //! A watcher is one of two kinds:
 //! - **tool**: a connector's read tool with fixed arguments ("unread mail
@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use chrono::{Local, NaiveDate};
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -105,9 +105,6 @@ pub struct WatchEntry {
 struct Saved {
     #[serde(default)]
     watchers: Vec<WatchEntry>,
-    /// The day the recap was last given.
-    #[serde(default)]
-    recap_day: Option<NaiveDate>,
 }
 
 pub struct Watchers {
@@ -182,16 +179,6 @@ impl Watchers {
         self.save(&saved);
     }
 
-    fn recap_day(&self) -> Option<NaiveDate> {
-        self.saved.lock().unwrap().recap_day
-    }
-
-    fn set_recap_day(&self, day: NaiveDate) {
-        let mut saved = self.saved.lock().unwrap();
-        saved.recap_day = Some(day);
-        self.save(&saved);
-    }
-
     fn save(&self, saved: &Saved) {
         let Some(file) = &self.file else { return };
         if let Some(dir) = file.parent() {
@@ -211,13 +198,12 @@ impl Watchers {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScheduleEvent {
     Watched { id: String, told: u32, error: Option<String> },
-    Recap { error: Option<String> },
     /// A task done (or tried).
     Task { id: String, error: Option<String> },
 }
 
-/// Run the watchers, the recap and the tasks until `stop`, on the current
-/// thread. `host` is what the watchers and the recap may use (nothing that
+/// Run the watchers and the tasks until `stop`, on the current
+/// thread. `host` is what the watchers may use (nothing that
 /// acts: nobody asked them to); `live` makes the host of a task, the board
 /// and the app's cards as they are when it runs, which [`tasks::host`]
 /// narrows to what the task may do.
@@ -232,13 +218,6 @@ pub fn run_scheduler(
     while !stop.load(Ordering::Relaxed) {
         // With several Macs, only the doer runs them (docs/icloud.md).
         if assistant.is_ready() && crate::doer::is_doer() {
-            let routines = assistant.settings().routines;
-            let now = Local::now();
-            if routines.recap_due(now, watchers.recap_day()) {
-                watchers.set_recap_day(now.date_naive());
-                let error = assistant.run_task(routines.recap_task(), host).err();
-                on_event(ScheduleEvent::Recap { error });
-            }
             for watcher in watchers.due(now_ms()) {
                 if stop.load(Ordering::Relaxed) {
                     return;

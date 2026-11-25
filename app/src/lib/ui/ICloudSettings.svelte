@@ -1,7 +1,7 @@
 <!--
   Settings > iCloud (docs/icloud.md): sync between this user's Macs on or
   off, meetings with or without audio, and what the engine is doing: the
-  account, this Mac, which Mac fires timers and routines (the doer), the
+  account, this Mac, which Mac fires timers and scheduled tasks (the doer), the
   last records sent and received, errors.
 -->
 <script lang="ts">

@@ -32,7 +32,7 @@ impl Memory {
         });
     }
 
-    /// The newest verdicts on what `by` (a watcher or routine) told, or,
+    /// The newest verdicts on what `by` (a watcher or task) told, or,
     /// without one, on what came from `source`.
     pub fn verdicts(&self, by: Option<&str>, source: &str) -> Vec<Verdict> {
         let (column, key) = by.map_or(("source", source), |by| ("by", by));

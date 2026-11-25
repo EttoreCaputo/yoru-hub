@@ -92,7 +92,9 @@ impl Items for SettingsItems {
                 None => map.remove(&key),
             };
         }
-        if let Ok(settings) = serde_json::from_value(Value::Object(map)) {
+        if let Ok(mut settings) = serde_json::from_value::<super::Settings>(Value::Object(map)) {
+            // The routines not adopted yet are this Mac's to adopt.
+            settings.old_routines = self.0.settings().old_routines;
             let _ = self.0.set_settings(settings);
         }
     }

@@ -207,7 +207,7 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Give the morning recap now
+    /// Give the morning recap now (the `morning-recap` scheduled task)
     Recap,
     /// Yoru's connectors to your services (MCP servers): list, presets, add,
     /// login, tools, call…
@@ -405,6 +405,7 @@ fn main() -> ExitCode {
     // Lets `yoru mcp` and `yoru call` use the board while this runs.
     let timers = Arc::new(Timers::open(timers::default_file()));
     let the_assistant = Arc::new(Assistant::open(assistant::default_dir(), timers.clone()));
+    the_assistant.adopt_routines(yoru_core::intents::system_language());
     let _connectors = start_connectors(&the_assistant, None);
     let hub = Hub::start().inspect_err(|e| eprintln!("not sharing the board with other processes: {e}")).ok();
     let config = BridgeConfig {
@@ -434,15 +435,13 @@ fn main() -> ExitCode {
     if !the_assistant.is_ready() {
         eprintln!("no brain: Yoru can't think or watch anything yet (yoru cloud key groq, free, yoru cloud key anthropic or openai, or yoru settings provider ollama)");
     }
-    // The watchers and the morning recap, on their own thread.
+    // The watchers and the scheduled tasks, on their own thread.
     let scheduler = {
         let (assistant, watchers, stop) = (the_assistant.clone(), Arc::new(Watchers::open(watchers_file())), stop.clone());
         thread::spawn(move || {
             watchers::run_scheduler(&assistant, &watchers, &TaskHost, &|| Box::new(TaskHost), &stop, &|e| match e {
                 watchers::ScheduleEvent::Watched { id, told, error: None } if told > 0 => println!("watcher {id}: {told} new"),
                 watchers::ScheduleEvent::Watched { id, error: Some(e), .. } => eprintln!("watcher {id}: {e}"),
-                watchers::ScheduleEvent::Recap { error: None } => println!("recap given"),
-                watchers::ScheduleEvent::Recap { error: Some(e) } => eprintln!("recap: {e}"),
                 watchers::ScheduleEvent::Task { id, error: None } => println!("task {id} done"),
                 watchers::ScheduleEvent::Task { id, error: Some(e) } => eprintln!("task {id}: {e}"),
                 _ => {}
@@ -757,7 +756,9 @@ impl assistant::Host for CliHost {
 }
 
 fn open_assistant() -> Assistant {
-    Assistant::open(assistant::default_dir(), Arc::new(Timers::open(timers::default_file())))
+    let assistant = Assistant::open(assistant::default_dir(), Arc::new(Timers::open(timers::default_file())));
+    assistant.adopt_routines(yoru_core::intents::system_language());
+    assistant
 }
 
 /// Start the connectors and hand their tools to `assistant`; with `wait`,
@@ -911,13 +912,16 @@ fn watch_command(args: &[String]) -> ExitCode {
 fn recap() -> ExitCode {
     let assistant = open_assistant();
     let _connectors = start_connectors(&assistant, Some(Duration::from_secs(10)));
-    let task = assistant.settings().routines.recap_task().to_string();
-    match assistant.run_task(&task, &TaskHost) {
+    let Some(task) = assistant.tasks.get(assistant::tasks::RECAP_ID) else {
+        eprintln!("there is no morning recap: it was removed from the scheduled tasks");
+        return ExitCode::FAILURE;
+    };
+    match assistant::tasks::run(&assistant, &task, &TaskHost) {
         Ok(reply) => {
             if let Some(n) = assistant.inbox.list().first() {
                 println!("{}: {}\n{}", n.source, n.title, n.text);
             }
-            eprintln!("{}", reply.text);
+            eprintln!("{reply}");
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -961,7 +965,7 @@ fn settings_command(key: Option<&str>, value: Option<&str>) -> ExitCode {
     }
     // `auto`: the brain that has a key, Claude first.
     let value: Value = if key == "provider" && value == "auto" { Value::Null } else { serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.into())) };
-    let slot = if settings.get(key).is_some() { settings.get_mut(key) } else { settings["routines"].get_mut(key) };
+    let slot = if settings.get(key).is_some() { settings.get_mut(key) } else { settings["quiet_hours"].get_mut(key) };
     let Some(slot) = slot else {
         eprintln!("no setting {key}");
         return ExitCode::FAILURE;

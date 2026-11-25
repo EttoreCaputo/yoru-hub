@@ -68,7 +68,7 @@ pub struct Notification {
     pub at: u64,
     #[serde(default)]
     pub read: bool,
-    /// The watcher or routine that made it.
+    /// The watcher or task that made it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<String>,
 }
@@ -144,7 +144,7 @@ impl Inbox {
         id
     }
 
-    /// Say which watcher or routine made `ids`.
+    /// Say which watcher or task made `ids`.
     pub fn tag(&self, ids: &[String], by: &str) {
         self.update(|items| {
             let mut any = false;

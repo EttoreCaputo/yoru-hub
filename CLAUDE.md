@@ -2,7 +2,7 @@
 
 The host program of Yoru (`../yoru`): Rust core, CLI, Tauri + Svelte app. The folder is `yoru-hub`; it was Companion Hub until 2026-10-19. It came out of DualEye's `host/`.
 
-Since 2026-10-19 it is Yoru's personal assistant, for Yoru only: MCP connectors with OAuth (`core/src/connectors/`), the assistant on four brains (`core/src/assistant/`: Claude in `core/src/cloud/anthropic.rs`, Groq, OpenAI and Ollama in `assistant/compat.rs`), voice, watchers, notifications, memory, routines. The plan is `docs/assistant.md`. DualEye is gone from here (it keeps its own `host/`); `docs/multiboard.md` is history.
+Since 2026-10-19 it is Yoru's personal assistant, for Yoru only: MCP connectors with OAuth (`core/src/connectors/`), the assistant on four brains (`core/src/assistant/`: Claude in `core/src/cloud/anthropic.rs`, Groq, OpenAI and Ollama in `assistant/compat.rs`), voice, watchers, scheduled tasks, notifications, memory. The plan is `docs/assistant.md`. DualEye is gone from here (it keeps its own `host/`); `docs/multiboard.md` is history.
 
 ## Rule: Claude commits, the user pushes
 

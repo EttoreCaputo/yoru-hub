@@ -49,15 +49,8 @@ export type FolderView = { folders: Folder[]; places: FolderPlace[] };
 export type SavedChat = { id: string; title: ChatTitle; lines: ChatLine[] };
 export type Reply = { text: string; actions: Action[]; model: string; elapsed_ms: number };
 
-export type Routines = {
-  recap: boolean;
-  recap_at: string;
-  recap_weekdays_only: boolean;
-  recap_task: string;
-  quiet: boolean;
-  quiet_from: string;
-  quiet_to: string;
-};
+/** Notifications arrive without a sound, except the urgent ones; `HH:MM`, may run past midnight. */
+export type QuietHours = { on: boolean; from: string; to: string };
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -78,7 +71,7 @@ export type AssistantSettings = {
   web_search: boolean;
   /** Ollama: let a model that can think do it, as long as it likes. */
   think: boolean;
-  routines: Routines;
+  quiet_hours: QuietHours;
 };
 
 export type KeySource = "env" | "saved";
@@ -120,7 +113,6 @@ export type WatchEntry = { watcher: Watcher; state: WatchState };
 
 export type ScheduleEvent =
   | { kind: "watched"; id: string; told: number; error: string | null }
-  | { kind: "recap"; error: string | null }
   | { kind: "task"; id: string; error: string | null };
 
 /** When a task runs (`assistant/tasks.rs`): days are 1 (Monday) to 7, none for every day. */

@@ -21,8 +21,8 @@
   const t = $derived(i18n.t);
 
   // Notifications and Settings are icons in the window bar; Settings opens
-  // Tasks, Routines, Services, Spoken and Animations.
-  const MAIN: Page[] = ["home", "memory", "meetings", "todos"];
+  // Services, Spoken and Animations.
+  const MAIN: Page[] = ["home", "tasks", "memory", "meetings", "todos"];
 
   // The board and the Pocket, alike: a dot, connected or not, and the icon
   // of what it's connected by.

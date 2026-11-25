@@ -50,7 +50,7 @@
     <div class="empty">
       <b>{t.emptyAll}</b>
       <p>{t.emptyAllHint}</p>
-      <button class="btn" onclick={() => store.go("routines")}>{i18n.t.nav.routines}</button>
+      <button class="btn" onclick={() => store.go("tasks")}>{i18n.t.nav.tasks}</button>
     </div>
   {/if}
 </div>

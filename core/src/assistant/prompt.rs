@@ -43,7 +43,7 @@ saying when and where it was said. Don't answer from memory what the transcripts
 - The user can give you tasks to do on your own, once or on a schedule (the tasks tool): when they ask you to do something later or \
 regularly (\"every Monday at 9 sum up my issues\", \"tomorrow at 6 pm check whether Marco answered\"), add it as a task, with the job \
 in their words. A reminder that only rings is a timer; a task is work you do. Your board's Tasks app shows them.
-- Some requests come with no one in the chat: a task, a routine, a watcher that found something. Do the job with your tools and \
+- Some requests come with no one in the chat: a scheduled task, a watcher that found something. Do the job with your tools and \
 report with notify when the user should know.
 
 # Notifying

@@ -15,7 +15,7 @@
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store, type Page } from "../store.svelte";
-  import type { Brain, McpInfo } from "../types";
+  import type { Brain, McpInfo, QuietHours } from "../types";
   import Board from "../ui/Board.svelte";
   import PermissionList from "../ui/PermissionList.svelte";
   import Toggle from "../ui/Toggle.svelte";
@@ -65,6 +65,10 @@
   }
   const registerMcp = (connect: boolean) => run(() => call<McpInfo>("claude_mcp", { connect }), (v) => (mcp = v));
 
+  // Quiet hours: notifications without a sound, except the urgent ones.
+  const quiet = $derived(store.info?.settings.quiet_hours);
+  const setQuiet = (change: Partial<QuietHours>) => store.saveSettings((s) => Object.assign(s.quiet_hours, change));
+
   async function setupAgain() {
     await call("set_onboarding", { done: false, tourVersion: null });
     store.onboarding = { done: false, tour_version: store.onboarding?.tour_version ?? 0 };
@@ -75,7 +79,7 @@
   const PART_ICONS: Record<Part, IconName> = { brain: "sparkles", mac: "laptop", board: "cpu", pocket: "mic", icloud: "cloud" };
   type Row = { part: Part } | { page: Page };
   const GROUPS: { id: string; rows: Row[] }[] = [
-    { id: "yoru", rows: [{ part: "brain" }, { page: "routines" }, { page: "tasks" }] },
+    { id: "yoru", rows: [{ part: "brain" }] },
     { id: "devices", rows: [{ part: "board" }, { part: "pocket" }, { part: "mac" }] },
     { id: "accounts", rows: [{ page: "connectors" }, { part: "icloud" }] },
   ];
@@ -140,7 +144,7 @@
   const loginNeeded = $derived(store.connectors.filter((c) => c.enabled && (c.state === "needs_login" || c.state === "error")).length);
   const connectorsOn = $derived(store.connectors.filter((c) => c.enabled).length);
   const pageSummary = (p: Page) =>
-    p === "connectors" ? (connectorsOn ? t.connectorsOn(connectorsOn) : t.moreNotes.connectors) : p === "routines" || p === "tasks" || p === "spoken" || p === "animations" ? t.moreNotes[p] : "";
+    p === "connectors" ? (connectorsOn ? t.connectorsOn(connectorsOn) : t.moreNotes.connectors) : p === "spoken" || p === "animations" ? t.moreNotes[p] : "";
   /** A tag at the end of a row: an update for the board, a login for the apps. */
   const badge = (r: Row): { text: string; tone: string } | null =>
     "part" in r && r.part === "board" && store.update ? { text: t.updateBadge, tone: "think" } : "page" in r && r.page === "connectors" && loginNeeded ? { text: t.needsLogin, tone: "wait" } : null;
@@ -223,6 +227,23 @@
           </select>
         </div>
       </div>
+      {#if quiet}
+        <div class="setting">
+          <div class="what"><b>{t.quiet}</b><span>{t.quietHint}</span></div>
+          <div class="how"><Toggle checked={quiet.on} label={t.quiet} onchange={(on) => setQuiet({ on })} /></div>
+        </div>
+        {#if quiet.on}
+          <div class="setting">
+            <div class="what"><b>{t.quietWhen}</b></div>
+            <div class="how">
+              <span class="dim">{t.quietFrom}</span>
+              <input type="time" value={quiet.from} onchange={(e) => setQuiet({ from: e.currentTarget.value })} aria-label={t.quietFrom} />
+              <span class="dim">{t.quietTo}</span>
+              <input type="time" value={quiet.to} onchange={(e) => setQuiet({ to: e.currentTarget.value })} aria-label={t.quietTo} />
+            </div>
+          </div>
+        {/if}
+      {/if}
       <div class="setting">
         <div class="what"><b>{t.advancedToggle}</b><span>{t.advancedToggleHint}</span></div>
         <div class="how"><Toggle checked={look.advanced} label={t.advancedToggle} onchange={(on) => look.setAdvanced(on)} /></div>

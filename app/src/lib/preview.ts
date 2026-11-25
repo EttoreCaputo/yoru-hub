@@ -226,6 +226,12 @@ function openChat(id: string) {
 
 let tasks: TaskEntry[] = [
   {
+    task: { id: "morning-recap", name: "Morning recap", what: "Prepare the user's morning recap: today's calendar, the mail that matters, what's due.", repeat: "daily", at: "08:30", days: [1, 2, 3, 4, 5], enabled: true, acting: "never" },
+    state: { last_run: now() - 7 * HOUR, last_error: null, last_result: "Told you about two meetings and YOR-142, due Friday.", runs: 21, missed: 0 },
+    next: now() + 17 * HOUR,
+    running: false,
+  },
+  {
     task: { id: "weekly-issues", name: "Weekly issues", what: "Sum up my open GitHub issues and tell me which ones have been stuck for more than a week.", repeat: "daily", at: "09:00", days: [1], enabled: true, acting: "never" },
     state: { last_run: now() - 26 * HOUR, last_error: null, last_result: "Told you about 6 open issues, 2 stuck: YOR-131 and YOR-140.", runs: 4, missed: 0 },
     next: now() + 5 * 24 * HOUR,
@@ -485,7 +491,7 @@ const info: AssistantInfo = {
     task_effort: "low",
     web_search: true,
     think: true,
-    routines: { recap: true, recap_at: "08:30", recap_weekdays_only: true, recap_task: "", quiet: true, quiet_from: "22:30", quiet_to: "07:30" },
+    quiet_hours: { on: true, from: "22:30", to: "07:30" },
   },
   ready: !noKey,
   brain: onGroq ? "groq" : noKey ? null : "anthropic",
@@ -986,13 +992,6 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
     const event = { kind: "watched", id: a.id, told: 0, error: null };
     emit("schedule", event);
     return event;
-  },
-  recap_now: async () => {
-    await sleep(2500);
-    inbox = [{ id: `n${now()}`, source: "Yoru", title: "Good morning", text: "One meeting left today, at 16:00. YOR-142 is due Friday.", urgency: "normal", at: now(), read: false }, ...inbox];
-    emitInbox();
-    emit("schedule", { kind: "recap", error: null });
-    return { text: "Recap given.", actions: [], model: info.settings.model, elapsed_ms: 2500 };
   },
   connectors: () => connectors,
   connector_presets: () => presets,

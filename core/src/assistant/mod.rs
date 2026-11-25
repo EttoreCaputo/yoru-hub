@@ -8,8 +8,8 @@
 //! app, in one conversation that is forgotten after a quiet while (the
 //! memory carries what matters across them). [`Assistant::run_task`] does a
 //! job on its own, outside the conversation: a watcher that found something
-//! new ([`watchers`]), the morning recap ([`routines`]), a task the user gave
-//! it ([`tasks`]).
+//! new ([`watchers`]), a task the user gave it or the morning recap
+//! ([`tasks`]).
 //!
 //! How a turn goes: the model gets Yoru's own tools (`notify`, the notes'
 //! `brain_*`, `history_search`, `get_inbox`, the timers), the board's, web search (a server
@@ -49,7 +49,7 @@ mod live;
 pub mod memory;
 pub mod prompt;
 pub mod skills;
-pub mod routines;
+pub mod quiet;
 pub mod select;
 pub mod tasks;
 pub mod chats;
@@ -183,7 +183,7 @@ pub struct Settings {
     pub ollama_model: String,
     /// `low`, `medium`, `high`, `xhigh` or `max`.
     pub effort: String,
-    /// The effort of the jobs it does on its own (watchers, recap): they run
+    /// The effort of the jobs it does on its own (watchers): they run
     /// often, and are simple.
     pub task_effort: String,
     /// Search the web when a question needs it.
@@ -192,7 +192,11 @@ pub struct Settings {
     /// one that thinks anyway (lfm2.5) still does, inside its answer, and
     /// its thoughts are cut out.
     pub think: bool,
-    pub routines: routines::Routines,
+    pub quiet_hours: quiet::QuietHours,
+    /// The routines of before 2026-11, read once to become a task and the
+    /// quiet hours ([`Assistant::adopt_routines`]); never written back.
+    #[serde(rename = "routines", skip_serializing)]
+    pub old_routines: Option<Value>,
 }
 
 impl Settings {
@@ -239,7 +243,8 @@ impl Default for Settings {
             task_effort: "low".into(),
             web_search: true,
             think: true,
-            routines: routines::Routines::default(),
+            quiet_hours: quiet::QuietHours::default(),
+            old_routines: None,
         }
     }
 }
@@ -407,7 +412,12 @@ impl Assistant {
     /// The assistant with its files in `dir` (`None`: in memory only).
     pub fn open(dir: Option<PathBuf>, timers: Arc<Timers>) -> Self {
         let file = |name: &str| dir.as_ref().map(|d| d.join(name));
-        let settings = file("assistant.json").and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let settings = match file("assistant.json").map(|f| fs::read(f).ok()) {
+            Some(Some(bytes)) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            // A new install gets the morning recap the routines gave by default.
+            Some(None) => Settings { old_routines: Some(json!({})), ..Default::default() },
+            None => Settings::default(),
+        };
         let log = file("conversation.json").and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let inbox = Arc::new(Inbox::open(file("inbox.json")));
         Self {
@@ -500,7 +510,37 @@ impl Assistant {
 
     /// Quiet now: the quiet hours, or "do not disturb".
     pub fn quiet_now(&self) -> bool {
-        self.quiet_until().is_some() || self.settings().routines.quiet_now()
+        self.quiet_until().is_some() || self.settings().quiet_hours.quiet_now()
+    }
+
+    /// Turn the routines of before 2026-11 into what replaced them: the
+    /// morning recap becomes a task (named in `language`, `it` or `en`), the
+    /// quiet hours a setting of their own. Once; nothing the user set is lost.
+    pub fn adopt_routines(&self, language: &str) {
+        let mut settings = self.settings();
+        let Some(old) = settings.old_routines.take() else { return };
+        let text = |k: &str, default: &str| old[k].as_str().filter(|s| !s.trim().is_empty()).unwrap_or(default).to_string();
+        let defaults = quiet::QuietHours::default();
+        settings.quiet_hours = quiet::QuietHours {
+            on: old["quiet"].as_bool().unwrap_or(defaults.on),
+            from: text("quiet_from", &defaults.from),
+            to: text("quiet_to", &defaults.to),
+        };
+        let weekdays = old["recap_weekdays_only"].as_bool().unwrap_or(false);
+        let recap = tasks::Task {
+            id: tasks::RECAP_ID.into(),
+            name: if language == "it" { "Riepilogo del mattino" } else { "Morning recap" }.into(),
+            what: text("recap_task", tasks::RECAP_TASK),
+            schedule: tasks::Schedule::Daily { at: text("recap_at", "08:30"), days: if weekdays { vec![1, 2, 3, 4, 5] } else { vec![] } },
+            enabled: old["recap"].as_bool().unwrap_or(true),
+            acting: tasks::Acting::Never,
+        };
+        if let Err(e) = self.tasks.adopt(recap) {
+            eprintln!("the morning recap: {e}");
+        }
+        if let Err(e) = self.set_settings(settings) {
+            eprintln!("the quiet hours: {e}");
+        }
     }
 
     /// Whether it can think: its brain has a key, and a model (Ollama's is
@@ -945,7 +985,7 @@ impl Assistant {
     }
 
     /// Do `task` on its own, outside the conversation: the job of a watcher
-    /// or a routine. It tells you what it found with `notify`.
+    /// or a scheduled task. It tells you what it found with `notify`.
     pub fn run_task(&self, task: &str, host: &dyn Host) -> Result<Reply, String> {
         let settings = self.settings();
         let prompt = format!(
@@ -1659,9 +1699,37 @@ mod tests {
     }
 
     #[test]
+    fn the_routines_become_a_task_and_the_quiet_hours() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = json!({"name": "Kuro", "routines": {"recap": false, "recap_at": "07:15", "recap_weekdays_only": true, "recap_task": "Just the calendar", "quiet": true, "quiet_from": "23:00", "quiet_to": "06:45"}});
+        fs::write(dir.path().join("assistant.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        let open = || Assistant::open(Some(dir.path().to_path_buf()), Arc::new(Timers::open(None)));
+        let a = open();
+        a.adopt_routines("it");
+        let recap = a.tasks.get(tasks::RECAP_ID).unwrap();
+        assert_eq!((recap.name.as_str(), recap.what.as_str(), recap.enabled), ("Riepilogo del mattino", "Just the calendar", false));
+        assert_eq!(recap.schedule, tasks::Schedule::Daily { at: "07:15".into(), days: vec![1, 2, 3, 4, 5] });
+        let s = a.settings();
+        assert_eq!((s.name.as_str(), s.quiet_hours.from.as_str(), s.quiet_hours.to.as_str()), ("Kuro", "23:00", "06:45"));
+        let saved: Value = serde_json::from_slice(&fs::read(dir.path().join("assistant.json")).unwrap()).unwrap();
+        assert!(saved.get("routines").is_none() && saved["quiet_hours"]["on"] == true);
+        // Once: a recap the user removed stays removed.
+        a.tasks.remove(tasks::RECAP_ID).unwrap();
+        let again = open();
+        again.adopt_routines("it");
+        assert!(again.tasks.get(tasks::RECAP_ID).is_none());
+        // A new install gets the recap, on by default.
+        let fresh = tempfile::tempdir().unwrap();
+        let b = Assistant::open(Some(fresh.path().to_path_buf()), Arc::new(Timers::open(None)));
+        b.adopt_routines("en");
+        let recap = b.tasks.get(tasks::RECAP_ID).unwrap();
+        assert_eq!((recap.name.as_str(), recap.what.as_str(), recap.enabled, recap.acting), ("Morning recap", tasks::RECAP_TASK, true, tasks::Acting::Never));
+    }
+
+    #[test]
     fn do_not_disturb_ends_on_its_own() {
         let a = assistant();
-        a.set_settings(Settings { routines: routines::Routines { quiet: false, ..Default::default() }, ..Default::default() }).unwrap();
+        a.set_settings(Settings { quiet_hours: quiet::QuietHours { on: false, ..Default::default() }, ..Default::default() }).unwrap();
         assert!(!a.quiet_now());
         a.set_quiet_until(Some(inbox::now_ms() + 60_000));
         assert!(a.quiet_now() && a.quiet_until().is_some());

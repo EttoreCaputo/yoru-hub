@@ -2,8 +2,8 @@
   The window's right side on every page, on the frame next to the page and
   only as tall as what it lists; the window bar's button folds it away
   entirely (App.svelte shows it). It lists the coding agents at work, the
-  tasks Yoru does on his own and his routines (the morning recap, the
-  watchers), each a line with what it is and how it stands. A line opens
+  scheduled tasks Yoru does on his own (the morning recap among them) and
+  the watchers, each a line with what it is and how it stands. A line opens
   its detail in a dialog in the middle of the window.
 -->
 <script lang="ts">
@@ -35,15 +35,13 @@
   const taskLine = (e: TaskEntry) =>
     e.running ? tt.running : e.next ? tt.next(when(e.next)) : e.state.last_run ? t.ran(ago(e.state.last_run, store.now)) : t.notYet;
 
-  const routines = $derived(store.info?.settings.routines ?? null);
   const watchers = $derived(store.watchers.filter((w) => w.watcher.enabled));
   const watcherDot = (w: WatchEntry) => (w.state.last_error ? "wrong" : w.state.last_run ? "done" : "");
   const watcherLine = (w: WatchEntry) =>
-    `${i18n.t.routines.every(w.watcher.every_min)} · ${w.state.last_run ? t.ran(ago(w.state.last_run, store.now)) : t.notYet}`;
-  const recapLine = $derived(routines ? (routines.recap_weekdays_only ? t.weekdaysAt(routines.recap_at) : t.daily(routines.recap_at)) : "");
+    `${i18n.t.watching.every(w.watcher.every_min)} · ${w.state.last_run ? t.ran(ago(w.state.last_run, store.now)) : t.notYet}`;
 
   // The detail open in the dialog, looked up again so it stays current.
-  type Detail = { kind: "agent"; key: string } | { kind: "task"; id: string } | { kind: "watcher"; id: string } | { kind: "recap" };
+  type Detail = { kind: "agent"; key: string } | { kind: "task"; id: string } | { kind: "watcher"; id: string };
   let detail = $state<Detail | null>(null);
   let busy = $state(false);
   let error = $state("");
@@ -63,9 +61,9 @@
       busy = false;
     }
   }
-  function goTo(page: "tasks" | "routines") {
+  function goToScheduled() {
     detail = null;
-    store.go(page);
+    store.go("tasks");
   }
 </script>
 
@@ -112,17 +110,9 @@
       </section>
 
       <section>
-        <h3 class="section-title">{t.routines}</h3>
-        {#if routines?.recap || watchers.length}
+        <h3 class="section-title">{t.watchers}</h3>
+        {#if watchers.length}
           <ul>
-            {#if routines?.recap}
-              <li>
-                <button class="nav-row" onclick={() => show({ kind: "recap" })}>
-                  <span class="dot done"></span>
-                  <span class="words"><b>{t.recapName}</b><span>{recapLine}</span></span>
-                </button>
-              </li>
-            {/if}
             {#each watchers.slice(0, 6) as w (w.watcher.id)}
               <li>
                 <button class="nav-row" onclick={() => show({ kind: "watcher", id: w.watcher.id })}>
@@ -133,7 +123,7 @@
             {/each}
           </ul>
         {:else}
-          <p class="none">{t.noRoutines}</p>
+          <p class="none">{t.noWatchers}</p>
         {/if}
       </section>
   </div>
@@ -172,7 +162,7 @@
     </dl>
     {#if error}<p class="error-text">{error}</p>{/if}
     {#snippet actions()}
-      <button class="btn quiet" onclick={() => goTo("tasks")}>{t.open(i18n.t.nav.tasks)}</button>
+      <button class="btn quiet" onclick={goToScheduled}>{t.open(i18n.t.nav.tasks)}</button>
       <button class="btn primary" disabled={busy || e.running} onclick={() => act(() => store.runTask(e.task.id))}>{e.running ? tt.running : tt.runNow}</button>
     {/snippet}
   </Dialog>
@@ -182,26 +172,14 @@
     <dl>
       <dt>{t.what}</dt><dd class="long">{w.watcher.kind === "task" ? w.watcher.task : w.watcher.tool}</dd>
       {#if w.watcher.instructions}<dt>{t.instructions}</dt><dd class="long">{w.watcher.instructions}</dd>{/if}
-      <dt>{t.every}</dt><dd>{i18n.t.routines.every(w.watcher.every_min)}</dd>
+      <dt>{t.every}</dt><dd>{i18n.t.watching.every(w.watcher.every_min)}</dd>
       <dt>{t.last}</dt><dd>{w.state.last_run ? `${when(w.state.last_run)} · ${t.told(w.state.told)}` : t.notYet}</dd>
       {#if w.state.last_error}<dt>{t.error}</dt><dd class="long error-text">{w.state.last_error}</dd>{/if}
     </dl>
     {#if error}<p class="error-text">{error}</p>{/if}
     {#snippet actions()}
-      <button class="btn quiet" onclick={() => goTo("routines")}>{t.open(i18n.t.nav.routines)}</button>
-      <button class="btn primary" disabled={busy} onclick={() => act(() => call("run_watcher", { id: w.watcher.id }).then(() => store.refreshWatchers()))}>{i18n.t.routines.runNow}</button>
-    {/snippet}
-  </Dialog>
-{:else if detail?.kind === "recap" && routines}
-  <Dialog title={t.recapName} onclose={() => (detail = null)}>
-    <dl>
-      <dt>{t.when}</dt><dd>{recapLine}</dd>
-      <dt>{t.what}</dt><dd class="long">{routines.recap_task || i18n.t.routines.recapHint}</dd>
-    </dl>
-    {#if error}<p class="error-text">{error}</p>{/if}
-    {#snippet actions()}
-      <button class="btn quiet" onclick={() => goTo("routines")}>{t.open(i18n.t.nav.routines)}</button>
-      <button class="btn primary" disabled={busy} onclick={() => act(() => call("recap_now"))}>{busy ? i18n.t.routines.giving : i18n.t.routines.giveNow}</button>
+      <button class="btn quiet" onclick={goToScheduled}>{t.open(i18n.t.nav.tasks)}</button>
+      <button class="btn primary" disabled={busy} onclick={() => act(() => call("run_watcher", { id: w.watcher.id }).then(() => store.refreshWatchers()))}>{i18n.t.watching.runNow}</button>
     {/snippet}
   </Dialog>
 {/if}

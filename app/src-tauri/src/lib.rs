@@ -7,7 +7,7 @@
 //! The assistant ([`Assistant`]) answers what the board hears and what is
 //! typed in the window, and keeps the inbox (sent to the UI as `inbox`), the
 //! conversation (`chat`) and the memory; the scheduler runs the watchers and
-//! the morning recap on a thread of its own (`schedule` events). The
+//! the scheduled tasks on a thread of its own (`schedule` events). The
 //! connectors (the user's services, over MCP with OAuth) give it tools.
 //!
 //! Closing the window only hides it; the tray icon brings it back or quits, and
@@ -1973,6 +1973,7 @@ pub fn run() {
             let timers = Arc::new(Timers::open(timers::default_file()));
             let dir = assistant_mod::default_dir();
             let the_assistant = Arc::new(Assistant::open(dir.clone(), timers.clone()));
+            the_assistant.adopt_routines(&settings.ui_language.clone().unwrap_or_else(|| yoru_core::intents::system_language().into()));
             let watchers = Arc::new(Watchers::open(dir.map(|d| d.join("watchers.json"))));
             let (hub, hub_error) = match Hub::start() {
                 Ok(hub) => (Some(hub), None),
@@ -2090,7 +2091,7 @@ pub fn run() {
             assistant::notes_views, assistant::note_text, assistant::note_write, assistant::note_new, assistant::note_archive,
             assistant::note_changes, assistant::notes_open, assistant::has_obsidian,
             assistant::tasks, assistant::put_task, assistant::remove_task, assistant::run_task_now,
-            assistant::watchers, assistant::put_watcher, assistant::remove_watcher, assistant::run_watcher, assistant::recap_now,
+            assistant::watchers, assistant::put_watcher, assistant::remove_watcher, assistant::run_watcher,
             assistant::connectors, assistant::connector_presets, assistant::add_connector, assistant::remove_connector, assistant::set_connector_enabled,
             assistant::set_tool_policy, assistant::login_connector, assistant::cancel_login, assistant::logout_connector, assistant::set_connector_secret,
         ])

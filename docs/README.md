@@ -16,7 +16,7 @@ Platform: **macOS only** for now (Apple Silicon and Intel). Some code still buil
 
 - **Answers**: with a brain you pick: a model on [Groq](https://console.groq.com/keys) (free, with daily limits: a good start), GPT (OpenAI's API, paid, cheap), Gemini ([Google AI Studio](https://aistudio.google.com/apikey): a free tier with daily limits, or paid), a model on this computer through [Ollama](https://ollama.com) (free and private) or Claude (Anthropic's API, paid, the best, with web search), with your connectors' tools, the board's tools and the timers. Anything that changes something (sending a mail, creating an issue) asks first, on the board and in the app.
 - **Talks live, if you like**: with Gemini Live (free tier, a Google key) Yoru hears, thinks and speaks in one model, answering in about a second, with Google's voices and without the connectors' tools.
-- **Watches**: watchers check a connector's tool or do a task every so often, and only what's new and matters becomes a notification. A morning recap, quiet hours and do-not-disturb.
+- **Watches**: watchers check a connector's tool or do a task every so often, and only what's new and matters becomes a notification. Scheduled tasks, the morning recap among them, quiet hours and do-not-disturb.
 - **Does what you give it to do**: tasks you assign Yoru in words, once or on a schedule (every day or some weekdays, every month, every few hours), done on his own when it's time; each one reads and tells only, asks before acting, or acts without asking, as you choose. The board's Tasks app shows them, with "Do it now".
 - **Works your coding agents**: tell him to continue a conversation you had with Claude Code, Codex or OpenCode, or to start a new one in one of your projects or in a fresh folder, and he sends your words to the agent, which works on its own; its answer comes to the inbox when it's done. Today's page and the notch show which agents are working right now, his and yours.
 - **Keeps time**: timers, a pomodoro and reminders, shown and handled in the board's Timers app.
@@ -29,7 +29,7 @@ Platform: **macOS only** for now (Apple Silicon and Intel). Some code still buil
 ## Repository layout
 
 ```
-core/            library: the assistant (inbox, memory, routines, watchers), connectors (MCP client,
+core/            library: the assistant (inbox, memory, tasks, watchers), connectors (MCP client,
                  OAuth, keychain), link (protocol v2 over USB and WiFi), bridge and hub, voice
                  (STT, TTS), MCP server, timers, flasher
 cli/             `yoru` command line

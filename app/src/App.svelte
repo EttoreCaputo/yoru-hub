@@ -9,7 +9,6 @@
   import Meetings from "./lib/pages/Meetings.svelte";
   import Todos from "./lib/pages/Todos.svelte";
   import Memory from "./lib/pages/Memory.svelte";
-  import Routines from "./lib/pages/Routines.svelte";
   import Tasks from "./lib/pages/Tasks.svelte";
   import Settings from "./lib/pages/Settings.svelte";
   import Spoken from "./lib/pages/Spoken.svelte";
@@ -33,9 +32,9 @@
   // The notch's Open on a summary that's ready.
   on<string>("open-meeting", (id) => tabs.open({ kind: "meeting", id }));
 
-  const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, routines: Routines, memory: Memory, meetings: Meetings, todos: Todos, spoken: Spoken, animations: Animations, settings: Settings };
+  const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, memory: Memory, meetings: Meetings, todos: Todos, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
-  // Tasks, Routines, Services, Spoken and Animations are opened from Settings, and lead back to it.
+  // Services, Spoken and Animations are opened from Settings, and lead back to it.
   const fromSettings = $derived(!tabs.shown && (SETTINGS_PAGES as readonly string[]).includes(store.page));
   // The Home, Memory and a conversation fill the card and scroll inside; the other pages scroll here.
   const fill = $derived(tabs.shown ? tabs.shown.kind === "chat" : store.page === "home" || store.page === "memory");

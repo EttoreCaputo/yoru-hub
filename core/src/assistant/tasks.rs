@@ -4,7 +4,10 @@
 //! status"). Unlike a watcher, a task always runs when its time comes and
 //! may act, as far as the user allowed it ([`Acting`]).
 //!
-//! Kept in `tasks.json` in the data folder; set in the app (the Tasks page)
+//! The morning recap is one of them ([`RECAP_ID`]), made from the routines
+//! of before ([`super::Assistant::adopt_routines`]).
+//!
+//! Kept in `tasks.json` in the data folder; set in the app (the Scheduled page)
 //! or by voice (the `tasks` tool, [`Tasks::call_tool`]). The scheduler
 //! ([`super::watchers::run_scheduler`]) runs the due ones with [`run`], and
 //! the ones the board asked for ("Do it now", `task_run`). The board's Tasks
@@ -40,6 +43,15 @@ pub const BOARD_MAX: usize = 8;
 /// The board's fields: its name, and what to do and what was done.
 const BOARD_NAME: usize = 32;
 const BOARD_TEXT: usize = 100;
+
+/// The morning recap's id: the same on every Mac, so iCloud keeps one.
+pub const RECAP_ID: &str = "morning-recap";
+/// What the morning recap does.
+pub const RECAP_TASK: &str = "Prepare the user's morning recap. Look at what their connected services hold for today: \
+the calendar (today's events and the first one coming), the unread mail that matters (from people, not newsletters), \
+anything pending or due in their tasks and issues, and what the memory says they care about. \
+Then notify once, urgency normal, title \"Good morning\" (in the user's language): a text of at most five short sentences \
+with what matters today, the most important first. If a service isn't connected, leave it out without saying so.";
 
 /// When a task runs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -367,6 +379,19 @@ impl Tasks {
         self.list_at(now).into_iter().find(|e| e.task.id == entry).ok_or_else(|| "the task went missing".into())
     }
 
+    /// Add `task` with its own id, unless there is one with that id already.
+    pub fn adopt(&self, task: Task) -> Result<(), String> {
+        if self.get(&task.id).is_some() {
+            return Ok(());
+        }
+        task.schedule.check()?;
+        let now = now_ms();
+        self.change(|items| {
+            items.push(TaskEntry { task, state: TaskState { from: now, since: now, ..Default::default() }, next: None, running: false });
+            Ok(())
+        })
+    }
+
     /// Remove the task `which` names (its id or name); its name.
     pub fn remove(&self, which: &str) -> Result<String, String> {
         self.change(|items| {
@@ -475,7 +500,8 @@ impl Tasks {
 \"tomorrow at 18 check whether Marco answered\"). Not for ringing at a time (that's a timer) nor for the user's own to-dos. \
 list them; add one: what (the job, in the user's words), name (a few words), repeat (once: date and at; daily: at, days to limit it; \
 monthly: day and at; hourly: every); disable one by name to stop it while keeping it, enable it to turn it back on; \
-remove one by name only when the user wants it gone for good.",
+remove one by name only when the user wants it gone for good. The morning recap is one of them: change its time by removing \
+and adding it again, or disable it.",
             "input_schema": {
                 "type": "object",
                 "properties": {
