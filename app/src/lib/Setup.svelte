@@ -861,8 +861,14 @@
       transform 0.3s var(--spring),
       box-shadow 0.3s;
   }
-  .go:hover:not(:disabled) {
+  /* The light theme's primary button turns dark on hover; here it only
+     brightens, whatever the theme. */
+  .onboard .btn.primary.go {
+    background: radial-gradient(120% 140% at 30% 20%, #faf9fd 0%, var(--pearl) 45%, var(--pearl-mid) 100%);
+  }
+  .onboard .btn.primary.go:hover:not(:disabled) {
     transform: translateY(-2px) scale(1.03);
+    background: radial-gradient(120% 140% at 30% 20%, #fff 0%, #f6f4fb 50%, #dcd8ec 100%);
     box-shadow: 0 12px 36px -8px rgba(185, 176, 255, 0.9);
   }
   .go::after {
