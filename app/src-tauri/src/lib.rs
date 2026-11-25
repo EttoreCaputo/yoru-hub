@@ -30,6 +30,8 @@
 
 mod assistant;
 mod folders;
+#[cfg(target_os = "macos")]
+mod icloud;
 mod instances;
 mod meeting_watch;
 mod meetings;
@@ -118,6 +120,10 @@ struct Settings {
     /// Yoru in the Mac's notch too (docs/notch.md).
     #[serde(default)]
     notch: bool,
+    /// Sync with the other Macs through iCloud (docs/icloud.md); off until
+    /// the user turns it on.
+    #[serde(default)]
+    icloud: bool,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -1430,6 +1436,37 @@ fn set_notch(app: AppHandle, state: State<AppState>, on: bool) {
     notch::apply(&app, on);
 }
 
+/// Whether this Mac syncs through iCloud, and how it's going.
+#[tauri::command]
+fn icloud_status(state: State<AppState>) -> serde_json::Value {
+    let on = state.settings.lock().unwrap().icloud;
+    #[cfg(target_os = "macos")]
+    let status = serde_json::to_value(icloud::status()).unwrap_or_default();
+    #[cfg(not(target_os = "macos"))]
+    let status = serde_json::json!({});
+    serde_json::json!({ "on": on, "status": status })
+}
+
+/// Turn iCloud sync on or off on this Mac.
+#[tauri::command]
+fn set_icloud(app: AppHandle, state: State<AppState>, on: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if on && !icloud::entitled() {
+            return Err("this build of Yoru can't use iCloud".into());
+        }
+        icloud::set_paused(!on);
+        if on {
+            icloud::start(&app);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
+    state.settings.lock().unwrap().icloud = on;
+    state.save_settings();
+    Ok(())
+}
+
 /// The app's language: `None` follows the system's.
 #[tauri::command]
 fn ui_language(state: State<AppState>) -> Option<String> {
@@ -1974,10 +2011,19 @@ pub fn run() {
             meetings::start(handle);
             pocket::start(handle);
             meeting_watch::start(handle);
+            #[cfg(target_os = "macos")]
+            if app.state::<AppState>().settings.lock().unwrap().icloud {
+                icloud::start(handle);
+            }
             build_tray(handle)?;
             Ok(())
         })
         .on_window_event(|window, event| {
+            // The window came forward: see what the other Macs did.
+            #[cfg(target_os = "macos")]
+            if let WindowEvent::Focused(true) = event {
+                icloud::fetch_now();
+            }
             // Keep streaming to the board when the window is closed.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
@@ -1996,6 +2042,8 @@ pub fn run() {
             permissions::request_permission,
             permissions::open_privacy,
             set_notch,
+            icloud_status,
+            set_icloud,
             show_app,
             status, list_ports, set_port, set_transport, boards, show_board, set_primary, rename_board,
             wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair,

@@ -258,7 +258,7 @@ pub struct AssistantInfo {
     quiet_now: bool,
 }
 
-fn info_of(a: &Assistant) -> AssistantInfo {
+pub(crate) fn info_of(a: &Assistant) -> AssistantInfo {
     AssistantInfo {
         settings: a.settings(),
         ready: a.is_ready(),

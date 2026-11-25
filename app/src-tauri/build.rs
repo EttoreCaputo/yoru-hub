@@ -54,7 +54,7 @@ fn build_audio_helper() {
             .output()
             .unwrap_or_else(|e| panic!("yoru-audio: can't run swift ({e}); install Xcode or its command line tools"))
     };
-    let built = swift(&[]);
+    let built = swift(&["--product", "yoru-audio"]);
     if !built.status.success() {
         panic!("yoru-audio: swift build failed\n{}{}", String::from_utf8_lossy(&built.stdout), String::from_utf8_lossy(&built.stderr));
     }
@@ -62,4 +62,30 @@ fn build_audio_helper() {
     let dest = manifest.join("binaries");
     fs::create_dir_all(&dest).unwrap();
     fs::copy(&bin, dest.join(format!("yoru-audio-{target}"))).unwrap_or_else(|e| panic!("yoru-audio: copying {}: {e}", bin.display()));
+    link_sync_engine(&swift);
+}
+
+/// YoruSync, the iCloud engine (docs/icloud.md), from the same package: a
+/// static library linked into the app, with the Swift runtime it needs
+/// (the system's, in /usr/lib/swift) and CloudKit.
+fn link_sync_engine(swift: &dyn Fn(&[&str]) -> std::process::Output) {
+    let built = swift(&["--product", "YoruSync"]);
+    if !built.status.success() {
+        panic!("YoruSync: swift build failed\n{}{}", String::from_utf8_lossy(&built.stdout), String::from_utf8_lossy(&built.stderr));
+    }
+    let lib = PathBuf::from(String::from_utf8_lossy(&swift(&["--show-bin-path"]).stdout).trim());
+    println!("cargo:rustc-link-search=native={}", lib.display());
+    println!("cargo:rustc-link-lib=static=YoruSync");
+    // The toolchain's copies, for linking; at run time the system's.
+    let found = Command::new("xcrun").args(["--find", "swift"]).output().expect("xcrun");
+    let toolchain = PathBuf::from(String::from_utf8_lossy(&found.stdout).trim());
+    if let Some(usr) = toolchain.parent().and_then(Path::parent) {
+        println!("cargo:rustc-link-search=native={}", usr.join("lib/swift/macosx").display());
+    }
+    let sdk = Command::new("xcrun").args(["--sdk", "macosx", "--show-sdk-path"]).output().expect("xcrun");
+    println!("cargo:rustc-link-search=native={}/usr/lib/swift", String::from_utf8_lossy(&sdk.stdout).trim());
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+    println!("cargo:rustc-link-lib=framework=CloudKit");
+    println!("cargo:rustc-link-lib=framework=Security");
+    println!("cargo:rustc-link-lib=framework=Foundation");
 }
