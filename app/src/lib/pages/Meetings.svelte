@@ -303,10 +303,11 @@
 
 <style>
   .meetings {
+    position: relative;
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 26px 32px 0;
+    padding: 26px 32px 20px;
     box-sizing: border-box;
   }
   .head {
@@ -444,6 +445,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    padding-bottom: 72px;
   }
   .grid {
     position: relative;
@@ -572,6 +574,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    padding-bottom: 72px;
   }
   .row {
     display: grid;
@@ -620,10 +623,14 @@
   .none {
     padding: 20px 8px;
   }
+  /* The field floats over the calendar's bottom, which scrolls on under it. */
   .dock {
-    width: min(560px, calc(100% - 48px));
-    margin: 0 auto;
-    padding: 12px 0 20px;
+    position: absolute;
+    left: 50%;
+    bottom: 32px;
+    z-index: 4;
+    transform: translateX(-50%);
+    width: min(560px, calc(100% - 112px));
   }
   .drop {
     position: fixed;

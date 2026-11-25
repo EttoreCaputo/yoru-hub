@@ -315,7 +315,8 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 24px 0 8px;
+    /* Room to scroll the last line above the floating field. */
+    padding: 24px 0 104px;
     mask-image: linear-gradient(transparent, #000 24px);
   }
   .suggestions {
@@ -330,7 +331,15 @@
     font-size: var(--fs-meta);
     text-align: center;
   }
+  /* The field floats over the conversation, which scrolls on under it. */
   .dock {
-    padding: 8px 0 20px;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 20px;
+    pointer-events: none;
+  }
+  .dock .column {
+    pointer-events: auto;
   }
 </style>

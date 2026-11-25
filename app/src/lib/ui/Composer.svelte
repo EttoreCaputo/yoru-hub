@@ -112,7 +112,10 @@
     gap: 8px;
     padding: 6px 6px 6px 16px;
     border-radius: 22px;
-    background: var(--field);
+    /* It floats over the page: what scrolls under it shows, lightly blurred. */
+    background: color-mix(in srgb, var(--field) 72%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    backdrop-filter: blur(14px) saturate(1.4);
     border: 1px solid var(--rim);
     box-shadow: var(--lift);
     transition: border-color 200ms;

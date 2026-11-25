@@ -332,6 +332,7 @@
 
 <style>
   .home {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -342,8 +343,9 @@
     min-height: 0;
     overflow-y: auto;
   }
+  /* Room to scroll the last lines above the floating field. */
   .page {
-    padding-bottom: 24px;
+    padding-bottom: 96px;
   }
   .cards {
     display: grid;
@@ -630,9 +632,12 @@
   .mascot > .btn {
     margin-top: 14px;
   }
+  /* The field floats over the page, with nothing behind it but the page. */
   .dock {
+    position: absolute;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
     width: min(560px, calc(100% - 48px));
-    margin: 0 auto;
-    padding: 8px 0 20px;
   }
 </style>
