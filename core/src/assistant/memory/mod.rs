@@ -18,6 +18,7 @@
 
 pub mod kin;
 mod search;
+pub mod sync;
 pub mod verdicts;
 pub mod voice;
 
@@ -220,6 +221,9 @@ impl Memory {
         let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
         if let Err(e) = conn.execute_batch(SCHEMA) {
             eprintln!("memory.db schema: {e}");
+        }
+        if let Err(e) = sync::install(&conn) {
+            eprintln!("memory.db sync: {e}");
         }
         let memory = Self { db: Mutex::new(conn), embedder: Mutex::default() };
         memory.user();

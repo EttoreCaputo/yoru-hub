@@ -10,7 +10,7 @@ Yoru Hub on two or more Macs signed in to the same Apple ID shares one Yoru: the
 
 | Data | Synced as | Notes |
 |---|---|---|
-| Memory (`memory.db`: entities, facts, relations, episodes, verdicts) | one record per row, zone `Memory` | rows get a global id (below); embeddings and voice prints travel as bytes |
+| Memory (`memory.db`: entities, facts, relations, episodes, verdicts) | one record per row, zone `Memory` | rows get a global id (below); voice prints travel as bytes, embeddings don't (each Mac makes its own) |
 | Conversations (`conversations/*.json`, titles) | one record per conversation, zone `Chats` | the JSON as an asset; last writer wins, the conversation in progress is only written by the Mac it's on |
 | Meetings (`meetings/<id>/`) | one record per meeting, zone `Meetings` | `meeting.json`, `transcript.json`, `summary.json` as fields; `mic.m4a` and `others.m4a` as assets (setting: text only, or with audio) |
 | Spoken (`spoken/`) | one record per clip, zone `Spoken` | the audio as an asset |
@@ -23,7 +23,7 @@ Yoru Hub on two or more Macs signed in to the same Apple ID shares one Yoru: the
 
 ## The hard parts
 
-**Ids.** The memory uses `INTEGER PRIMARY KEY` and the brain sees facts as `f12`. Two Macs would both make an `f12`. Each row gets a `uid TEXT UNIQUE` (a UUIDv7, so it sorts by time); references between rows (`facts.about`, `relations.a/b`, `episode`) travel as uids and are mapped to local integers on arrival. Local ids stay what the prompts and the app use, so nothing above the store changes.
+**Ids.** The memory uses `INTEGER PRIMARY KEY` and the brain sees facts as `f12`. Two Macs would both make an `f12`. Each row gets a `uid TEXT UNIQUE` (128 random bits; the user's node is `user` on every Mac, so the two Users made at first start are one node); references between rows (`facts.about`, `relations.a/b`, `episode`) travel as uids and are mapped to local integers on arrival. Local ids stay what the prompts and the app use, so nothing above the store changes.
 
 **Conflicts.** Every record carries `updated` (ms) and the Mac that wrote it. Last writer wins per record: facts are almost always appended and closed (`valid_to`), not edited, so a real clash is rare. A deletion is a tombstone record, kept 30 days, so a Mac that was off doesn't bring the row back.
 
@@ -34,7 +34,8 @@ Yoru Hub on two or more Macs signed in to the same Apple ID shares one Yoru: the
 ## How it's built
 
 - **CKSyncEngine** (macOS 14+) does the bookkeeping: change tokens, batching, retries, account changes. It needs the entitlements on the process that calls it, so it runs **inside the app** (not in `yoru-audio`, a bare helper that can't carry a provisioning profile): a small Swift static library in `audio/` (`YoruSync`, built by `app/src-tauri/build.rs` like the helper) exposing a C interface, or `objc2-cloud-kit` if it covers CKSyncEngine well enough. To be checked at step 2.
-- **Core side** (`core/src/sync/`): a trait each store implements (`changes since`, `apply record`, `delete`), so the core knows nothing about CloudKit and the CLI keeps working without it. A local outbox table in each store records what changed and hasn't been sent.
+- **Core side** (`core/src/sync.rs`): `Record` (zone, kind, uid, `changed`, `by`, `deleted`, fields; bytes as base64) and the `Store` trait each store implements (`changes`, `sent`, `apply`), so the core knows nothing about CloudKit and the CLI keeps working without it. A local outbox table in each store records what changed and hasn't been sent.
+- **The memory** (`core/src/assistant/memory/sync.rs`, since 2026-11-25): triggers on `entities`, `episodes`, `verdicts`, `facts` and `relations` keep `uid`, `changed` and `changed_by` (the Mac's id, `device` in `meta`), queue every change in `sync_outbox` and leave a tombstone (`sync_tombstones`, 30 days) for every deletion, so every writer of `memory.db` is covered without knowing about sync. While records from another Mac are applied a row in `sync_quiet` holds the triggers still, so nothing echoes back. A record that refers to a row not here yet waits in `sync_pending` and is tried again with the next ones. The first start with sync gives the old rows a uid and queues them all. A revision closes the fact and makes a new one, so two Macs revising the same fact at once keep both new facts; an edit in place (the Memory page) is last writer wins.
 - **Settings → Accounts and services → iCloud**: on/off (off by default), meetings with or without audio, the Macs seen, which one is the doer, last sync and errors.
 
 ## Signing
@@ -54,7 +55,7 @@ It is a development profile: the app runs only on the Macs listed in it and talk
 
 ## Steps
 
-1. **Global ids** in `memory.db` (uid columns, backfill, refs by uid) and per-item `updated` stamps in the JSON stores; tombstones; the outbox. No CloudKit yet: tested with two data folders exchanging records in memory.
+1. **Global ids** in `memory.db` (uid columns, backfill, refs by uid), tombstones, the outbox: done 2026-11-25, tested with two memories exchanging records (`memory::sync` tests). Still to do in this step: per-item `changed` stamps and tombstones in the JSON stores (tasks, timers, inbox, watchers, routines, skills, folders, conversations).
 2. **The engine**: `YoruSync` with CKSyncEngine, the profile embedded, the zones; Settings and the memory first.
 3. **Doer lease**: timers, routines, watchers and consolidation fire only on the doer.
 4. **Conversations, meetings, Spoken**, with assets and the audio setting.
