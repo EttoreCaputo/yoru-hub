@@ -398,27 +398,6 @@
   .month::first-letter {
     text-transform: uppercase;
   }
-  .seg {
-    display: flex;
-    padding: 2px;
-    border-radius: var(--r-sm);
-    background: var(--ink-2);
-    box-shadow: 0 0 0 1px var(--rim);
-  }
-  .seg button {
-    padding: 4px 12px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: var(--haze);
-    font: inherit;
-    font-size: var(--fs-meta);
-    cursor: pointer;
-  }
-  .seg button.on {
-    background: var(--ink-3);
-    color: var(--pearl);
-  }
   .note-line {
     display: flex;
     align-items: center;
