@@ -53,6 +53,7 @@ pub mod routines;
 pub mod select;
 pub mod tasks;
 pub mod chats;
+pub mod synced;
 pub mod title;
 pub mod watchers;
 mod written_calls;

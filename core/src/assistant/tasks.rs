@@ -762,3 +762,39 @@ mod tests {
         assert!(again.list()[0].next.is_some());
     }
 }
+
+/// Tasks travel between Macs by id, with what they did; `next` and
+/// `running` are this Mac's.
+impl crate::sync::Items for Tasks {
+    fn items(&self) -> Vec<(String, serde_json::Value)> {
+        let items = self.items.lock().unwrap();
+        items
+            .iter()
+            .map(|e| {
+                let mut v = serde_json::to_value(e).unwrap_or_default();
+                if let Some(o) = v.as_object_mut() {
+                    o.remove("next");
+                    o.remove("running");
+                }
+                (e.task.id.clone(), v)
+            })
+            .collect()
+    }
+
+    fn put(&self, changes: Vec<(String, Option<serde_json::Value>)>) {
+        let _ = self.change(|items| {
+            for (id, value) in changes {
+                let at = items.iter().position(|e| e.task.id == id);
+                match (value.and_then(|v| serde_json::from_value::<TaskEntry>(v).ok()), at) {
+                    (Some(entry), Some(at)) => items[at] = entry,
+                    (Some(entry), None) => items.push(entry),
+                    (None, Some(at)) => {
+                        items.remove(at);
+                    }
+                    (None, None) => {}
+                }
+            }
+            Ok(())
+        });
+    }
+}

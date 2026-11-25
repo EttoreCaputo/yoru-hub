@@ -222,7 +222,7 @@ impl Memory {
         if let Err(e) = conn.execute_batch(SCHEMA) {
             eprintln!("memory.db schema: {e}");
         }
-        if let Err(e) = sync::install(&conn) {
+        if let Err(e) = sync::install(&conn, dir.map(|d| crate::sync::device(Some(d))).as_deref()) {
             eprintln!("memory.db sync: {e}");
         }
         let memory = Self { db: Mutex::new(conn), embedder: Mutex::default() };

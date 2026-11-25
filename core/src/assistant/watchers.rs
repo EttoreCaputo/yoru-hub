@@ -489,3 +489,27 @@ mod tests {
         assert_eq!(slug("Mail da Marco!"), "mail-da-marco");
     }
 }
+
+/// Watchers travel between Macs by id, with what they saw.
+impl crate::sync::Items for Watchers {
+    fn items(&self) -> Vec<(String, serde_json::Value)> {
+        let saved = self.saved.lock().unwrap();
+        saved.watchers.iter().map(|e| (e.watcher.id.clone(), serde_json::to_value(e).unwrap_or_default())).collect()
+    }
+
+    fn put(&self, changes: Vec<(String, Option<serde_json::Value>)>) {
+        let mut saved = self.saved.lock().unwrap();
+        for (id, value) in changes {
+            let at = saved.watchers.iter().position(|e| e.watcher.id == id);
+            match (value.and_then(|v| serde_json::from_value::<WatchEntry>(v).ok()), at) {
+                (Some(e), Some(at)) => saved.watchers[at] = e,
+                (Some(e), None) => saved.watchers.push(e),
+                (None, Some(at)) => {
+                    saved.watchers.remove(at);
+                }
+                (None, None) => {}
+            }
+        }
+        self.save(&saved);
+    }
+}

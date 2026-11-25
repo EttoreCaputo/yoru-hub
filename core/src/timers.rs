@@ -95,6 +95,9 @@ pub struct Timer {
     /// over (`timer_new`); the board's list says it back as `was`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub was: Option<String>,
+    /// The same timer on every Mac (docs/icloud.md): `id` is this Mac's own.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub uid: String,
 }
 
 impl Timer {
@@ -276,7 +279,7 @@ struct State {
 impl State {
     fn add(&mut self, kind: Kind, label: Option<String>, total_s: u64, ends_at: i64, language: &str) -> Timer {
         self.next_id = self.next_id.wrapping_add(1).max(1);
-        let timer = Timer { id: self.next_id, kind, label, total_s, ends_at: Some(ends_at), paused_left_ms: 0, ringing_since: None, language: language.into(), board: None, was: None };
+        let timer = Timer { id: self.next_id, kind, label, total_s, ends_at: Some(ends_at), paused_left_ms: 0, ringing_since: None, language: language.into(), board: None, was: None, uid: new_uid() };
         self.timers.push(timer.clone());
         timer
     }
@@ -313,6 +316,62 @@ pub fn now_ms() -> i64 {
     Local::now().timestamp_millis()
 }
 
+fn new_uid() -> String {
+    static N: AtomicU64 = AtomicU64::new(0);
+    format!("t{:x}{:x}", now_ms(), N.fetch_add(1, Ordering::Relaxed) ^ (std::process::id() as u64) << 16)
+}
+
+/// Timers travel between Macs by `uid`, without this Mac's `id`.
+impl crate::sync::Items for Timers {
+    fn items(&self) -> Vec<(String, Value)> {
+        let state = self.state.lock().unwrap();
+        state
+            .timers
+            .iter()
+            .map(|t| {
+                let mut v = serde_json::to_value(t).unwrap_or_default();
+                if let Some(o) = v.as_object_mut() {
+                    o.remove("id");
+                }
+                (t.uid.clone(), v)
+            })
+            .collect()
+    }
+
+    fn put(&self, changes: Vec<(String, Option<Value>)>) {
+        self.change(|state| {
+            for (uid, value) in changes {
+                let at = state.timers.iter().position(|t| t.uid == uid);
+                let Some(mut value) = value else {
+                    if let Some(at) = at {
+                        state.timers.remove(at);
+                    }
+                    continue;
+                };
+                if let Some(o) = value.as_object_mut() {
+                    o.insert("id".into(), Value::from(0));
+                }
+                let Ok(mut timer) = serde_json::from_value::<Timer>(value) else { continue };
+                timer.uid = uid;
+                match at {
+                    Some(at) => {
+                        timer.id = state.timers[at].id;
+                        state.timers[at] = timer;
+                    }
+                    None => {
+                        state.next_id = state.next_id.wrapping_add(1).max(1);
+                        timer.id = state.next_id;
+                        state.timers.push(timer);
+                    }
+                }
+            }
+            if !state.timers.iter().any(|t| t.kind.is_pomodoro()) {
+                state.pomodoro = None;
+            }
+        });
+    }
+}
+
 fn clean_label(label: Option<&str>) -> Option<String> {
     let l = label?.trim().trim_end_matches(['.', '!', '?']).trim();
     (!l.is_empty()).then(|| l.chars().take(80).collect())
@@ -331,6 +390,9 @@ impl Timers {
         });
         if !state.timers.iter().any(|t| t.kind.is_pomodoro()) {
             state.pomodoro = None;
+        }
+        for t in state.timers.iter_mut().filter(|t| t.uid.is_empty()) {
+            t.uid = new_uid();
         }
         let timers = Self { state: Mutex::new(state), file, dismissed: Mutex::default(), revision: AtomicU64::new(0) };
         timers.save(&timers.state.lock().unwrap());

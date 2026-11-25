@@ -283,3 +283,30 @@ mod tests {
         assert_eq!(clip("abcdef", 4), "abc…");
     }
 }
+
+/// Notifications travel between Macs by id, read or not.
+impl crate::sync::Items for Inbox {
+    fn items(&self) -> Vec<(String, serde_json::Value)> {
+        self.list().into_iter().map(|n| (n.id.clone(), serde_json::to_value(&n).unwrap_or_default())).collect()
+    }
+
+    fn put(&self, changes: Vec<(String, Option<serde_json::Value>)>) {
+        self.update(|items| {
+            for (id, value) in changes {
+                let at = items.iter().position(|n| n.id == id);
+                match (value.and_then(|v| serde_json::from_value::<Notification>(v).ok()), at) {
+                    (Some(n), Some(at)) => items[at] = n,
+                    (Some(n), None) => {
+                        let at = items.iter().position(|x| x.at < n.at).unwrap_or(items.len());
+                        items.insert(at, n);
+                    }
+                    (None, Some(at)) => {
+                        items.remove(at);
+                    }
+                    (None, None) => {}
+                }
+            }
+            true
+        });
+    }
+}

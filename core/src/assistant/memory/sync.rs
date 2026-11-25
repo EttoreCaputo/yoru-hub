@@ -78,7 +78,9 @@ fn has_column(db: &Connection, table: &str, column: &str) -> bool {
 
 /// Add the sync columns, tables and triggers; give the rows made before
 /// them a uid and queue them all, so the first sync sends everything.
-pub(super) fn install(db: &Connection) -> rusqlite::Result<()> {
+/// `device` is this Mac's id ([`crate::sync::device`]), shared by every
+/// store; `None` (no data folder) keeps a random one.
+pub(super) fn install(db: &Connection, device: Option<&str>) -> rusqlite::Result<()> {
     db.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS sync_outbox(kind TEXT NOT NULL, uid TEXT NOT NULL, changed INTEGER NOT NULL, PRIMARY KEY(kind, uid));
          CREATE TABLE IF NOT EXISTS sync_tombstones(kind TEXT NOT NULL, uid TEXT NOT NULL, changed INTEGER NOT NULL, changed_by TEXT NOT NULL, PRIMARY KEY(kind, uid));
@@ -88,6 +90,9 @@ pub(super) fn install(db: &Connection) -> rusqlite::Result<()> {
          INSERT OR IGNORE INTO meta(key, value) VALUES ('device', {RANDOM_UID});
          DELETE FROM sync_tombstones WHERE changed < {NOW} - {TOMBSTONE_DAYS} * 86400000;"
     ))?;
+    if let Some(device) = device {
+        db.execute("UPDATE meta SET value = ?1 WHERE key = 'device'", [device])?;
+    }
     for t in &TABLES {
         if !has_column(db, t.name, "uid") {
             db.execute_batch(&format!(

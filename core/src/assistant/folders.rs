@@ -302,3 +302,49 @@ mod tests {
         let _ = fs::remove_dir_all(file.parent().unwrap());
     }
 }
+
+impl Folders {
+    /// Every folder and place as it travels (`folder:<id>`, `place:<kind>:<id>`).
+    pub fn sync_items(&self) -> Vec<(String, serde_json::Value)> {
+        let s = self.store.lock().unwrap();
+        let folders = s.folders.iter().map(|f| (format!("folder:{}", f.id), serde_json::to_value(f).unwrap_or_default()));
+        let places = s.places.iter().map(|p| (place_uid(p.kind, &p.id), serde_json::to_value(p).unwrap_or_default()));
+        folders.chain(places).collect()
+    }
+
+    /// Folders and places from another Mac.
+    pub fn sync_put(&self, changes: Vec<(String, Option<serde_json::Value>)>) {
+        let mut store = self.store.lock().unwrap();
+        let mut next = store.clone();
+        for (uid, value) in changes {
+            if uid.starts_with("folder:") {
+                let at = next.folders.iter().position(|f| format!("folder:{}", f.id) == uid);
+                match (value.and_then(|v| serde_json::from_value::<Folder>(v).ok()), at) {
+                    (Some(f), Some(at)) => next.folders[at] = f,
+                    (Some(f), None) => next.folders.push(f),
+                    (None, Some(at)) => {
+                        next.folders.remove(at);
+                    }
+                    (None, None) => {}
+                }
+            } else {
+                let at = next.places.iter().position(|p| place_uid(p.kind, &p.id) == uid);
+                match (value.and_then(|v| serde_json::from_value::<Place>(v).ok()), at) {
+                    (Some(p), Some(at)) => next.places[at] = p,
+                    (Some(p), None) => next.places.push(p),
+                    (None, Some(at)) => {
+                        next.places.remove(at);
+                    }
+                    (None, None) => {}
+                }
+            }
+        }
+        if self.save(&next).is_ok() {
+            *store = next;
+        }
+    }
+}
+
+fn place_uid(kind: Kind, id: &str) -> String {
+    format!("place:{}:{id}", if kind == Kind::Chat { "chat" } else { "meeting" })
+}
