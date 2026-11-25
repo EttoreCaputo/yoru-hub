@@ -45,14 +45,11 @@ CloudKit needs entitlements Apple only grants with a provisioning profile:
 - `com.apple.developer.aps-environment` (push)
 - `com.apple.application-identifier`, `com.apple.developer.team-identifier`
 
-The profile is embedded as `Contents/embedded.provisionprofile` (`bundle.macOS.files` in `tauri.conf.json`). With the Apple Development certificate `tools/build_app.sh` uses today, it's a **macOS App Development** profile: it runs only on the Macs listed in it and talks to CloudKit's *Development* environment. A build for others needs a Developer ID Application certificate, a Developer ID profile and the schema deployed to *Production*. The CI's ad-hoc build can't carry the profile: there iCloud is simply off.
+Since 2026-11-25 the profile exists. Xcode made it with automatic signing on the user's account (team `79AC9KV62T`, the one of the Apple Development certificate `tools/build_app.sh` signs with): the App ID `it.bytebusters.yoru.hub` with iCloud (CloudKit) and Push, the container `iCloud.it.bytebusters.yoru.hub` and a "Mac Team Provisioning Profile" for this Mac, valid until 2027-11-25. It lives in `app/src-tauri/yoru.provisionprofile` (not committed). To make it again, or after adding a Mac: a throwaway Xcode project (`xcodegen`) with that bundle id, team and entitlements, built with `xcodebuild -allowProvisioningUpdates`; the new profile is in `~/Library/Developer/Xcode/UserData/Provisioning Profiles`. A second Mac is added by building the same throwaway project on it, signed in to the same account in Xcode.
 
-What the user does once, at developer.apple.com (team `29H6RWQA4V`):
+When the profile is there, `tools/build_app.sh` adds `tauri.icloud.conf.json`: it embeds the profile as `Contents/embedded.provisionprofile` and signs with `Entitlements.icloud.plist` (the usual ones plus the identifiers above). Tauri signs the sidecars with the same entitlements, and a bare helper can't carry the profile that grants iCloud, so the script signs them again with the plain `Entitlements.plist` and seals the app again. Without the profile (the CI's ad-hoc build) nothing changes and iCloud is simply off.
 
-1. Identifiers → iCloud Containers → new: `iCloud.it.bytebusters.yoru.hub`.
-2. Identifiers → App IDs → `it.bytebusters.yoru.hub` (create it if missing, macOS): tick iCloud (CloudKit, with the container above) and Push Notifications.
-3. Devices: add each Mac (its Provisioning UDID: System Information → Hardware).
-4. Profiles → new → macOS App Development, that App ID, the Apple Development certificate, the Macs; download it to `app/src-tauri/yoru.provisionprofile` (not committed).
+It is a development profile: the app runs only on the Macs listed in it and talks to CloudKit's *Development* environment. A build for other people needs a Developer ID Application certificate, a Developer ID profile and the schema deployed to *Production*.
 
 ## Steps
 

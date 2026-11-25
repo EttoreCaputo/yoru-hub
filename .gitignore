@@ -11,3 +11,5 @@ firmware/
 *.env
 # yoru-audio's SwiftPM build, when built by hand in audio/.
 audio/.build/
+# The iCloud provisioning profile, made by Xcode for this Mac (docs/icloud.md, Signing).
+app/src-tauri/yoru.provisionprofile

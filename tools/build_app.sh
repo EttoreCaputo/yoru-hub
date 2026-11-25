@@ -28,5 +28,28 @@ export APPLE_SIGNING_IDENTITY
 echo "yoru: signing with $APPLE_SIGNING_IDENTITY"
 
 cd "$root/app"
+# With Xcode's iCloud profile in place (docs/icloud.md, Signing), embed it and
+# claim CloudKit and push; without it the app is built as before.
+icloud=()
+if [[ -f "$root/app/src-tauri/yoru.provisionprofile" ]]; then
+    icloud=(--config src-tauri/tauri.icloud.conf.json)
+    echo "yoru: with iCloud (yoru.provisionprofile)"
+fi
 # Keep the bundle's Hardened Runtime and permission entitlements.
-npm run tauri build -- "$@"
+npm run tauri build -- ${icloud[@]+"${icloud[@]}"} "$@"
+
+# Tauri signs the sidecars with the app's entitlements. iCloud and push are
+# restricted: a bare helper can't carry the profile that grants them, so it
+# gets the plain ones back, and the app is sealed again around it.
+if (( ${#icloud[@]} )); then
+    app="$root/target/release/bundle/macos/Yoru.app"
+    for bin in "$app"/Contents/MacOS/*; do
+        [[ "$(basename "$bin")" == yoru-app ]] && continue
+        codesign --force --options runtime --timestamp=none -s "$APPLE_SIGNING_IDENTITY" \
+            --entitlements "$root/app/src-tauri/Entitlements.plist" "$bin"
+    done
+    codesign --force --options runtime --timestamp=none -s "$APPLE_SIGNING_IDENTITY" \
+        --entitlements "$root/app/src-tauri/Entitlements.icloud.plist" "$app"
+    codesign --verify --strict "$app"
+    echo "yoru: sidecars re-signed without iCloud (the .dmg, if built, is not)"
+fi
