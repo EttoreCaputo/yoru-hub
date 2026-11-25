@@ -625,6 +625,7 @@ const en = {
     noMatch: "No to-do matches the search.",
   },
   icloud: {
+    side: { starting: "Starting…", waiting: "Waiting", error: "Error", noAccount: "No account", title: "iCloud sync: open its settings" },
     off: "Off",
     doerHere: "this Mac fires timers",
     loading: "Reading iCloud…",

@@ -3,8 +3,8 @@
   shown, the pages (Notifications and Settings are icons in the window bar),
   the user's folders (a click shows one on Home, a row dropped on one goes
   in it; docs/app.md),
-  and at the bottom the Pocket recorder (a click opens its dialog) and the
-  board, each connected or not and by what, and "do not disturb". Yoru himself
+  and at the bottom the Pocket recorder (a click opens its dialog), iCloud
+  sync while it's on (a click opens its Settings page) and the board, each connected or not and by what, and "do not disturb". Yoru himself
   isn't here: he sits at the bottom right of the pages (YoruBubble.svelte).
 -->
 <script lang="ts">
@@ -16,6 +16,7 @@
   import { tabs } from "./tabs.svelte";
   import Icon from "./ui/Icon.svelte";
   import { why } from "./api";
+  import { ago } from "./ui/when";
 
   const t = $derived(i18n.t);
 
@@ -40,6 +41,22 @@
     const on = p.phase === "connected";
     return { dot: on ? "done" : "", text: on ? t.pocket.connectedShort : t.pocket.away, by: on ? "bluetooth" : null } as const;
   });
+
+  // iCloud sync, while it's on: a dot, when it last synced, and a cloud.
+  const icloud = $derived.by(() => {
+    if (!store.icloudOn) return null;
+    const c = store.icloud;
+    const ti = t.icloud;
+    if (!c) return { dot: "think", text: ti.side.starting, by: "cloud" } as const;
+    const last = Math.max(c.last_sent, c.last_fetched);
+    if (c.errors.length && c.last_error > last) return { dot: "wrong", text: ti.side.error, by: "cloud" } as const;
+    if (c.account !== "available") return { dot: "wait", text: ti.side.noAccount, by: "cloud" } as const;
+    return { dot: "done", text: last ? ago(last, store.now) : ti.side.waiting, by: "cloud" } as const;
+  });
+  function openICloud() {
+    store.settingsPart = "icloud";
+    store.go("settings");
+  }
 
   // Folders: Home showing one of them, a new one being named, the one an
   // item is dragged over.
@@ -174,6 +191,11 @@
         {@render device("Pocket", pocket)}
       </button>
     {/if}
+    {#if icloud}
+      <button class="nav-row device" title={t.icloud.side.title} onclick={openICloud}>
+        {@render device("iCloud", icloud)}
+      </button>
+    {/if}
     <div class="nav-row device yoru">
       {@render device("Yoru", yoru)}
     </div>
@@ -194,7 +216,7 @@
   </footer>
 </nav>
 
-{#snippet device(name: string, d: { dot: string; text: string; by: "wifi" | "usb" | "bluetooth" | null })}
+{#snippet device(name: string, d: { dot: string; text: string; by: "wifi" | "usb" | "bluetooth" | "cloud" | null })}
   <span class="dot {d.dot}"></span>
   <span class="dname">{name}</span>
   <span class="dstate">{d.text}{#if d.by}<Icon name={d.by} size={14} />{/if}</span>
@@ -370,7 +392,7 @@
     margin: 6px 10px 0;
     font-size: var(--fs-small);
   }
-  /* Pocket and Yoru: the dot on the left, the state and its link on the right. */
+  /* Pocket, iCloud and Yoru: the dot on the left, the state and its link on the right. */
   .device {
     gap: 9px;
     min-height: 32px;

@@ -10,6 +10,7 @@ import { BUNDLED_VERSION } from "./bundled";
 import { tabs } from "./tabs.svelte";
 import { changelog, updateFor, type Update } from "./updates";
 import type {
+  ICloud,
   ICloudStatus,
   ActiveAgent,
   AssistantInfo,
@@ -157,6 +158,8 @@ class Store {
   pocket = $state<PocketStatus | null>(null);
   /** iCloud sync's engine, as the `icloud` event tells it (null until it runs). */
   icloud = $state<ICloudStatus | null>(null);
+  /** iCloud sync is on on this Mac (the sidebar shows it only then). */
+  icloudOn = $state(false);
   /** Goes up when Spoken clips came from another Mac, for the Spoken page to read them again. */
   spokenChanged = $state(0);
   /** The Pocket's dialog is open (from the sidebar, or its Settings page). */
@@ -167,6 +170,8 @@ class Store {
   transcribing = $state<Record<string, number>>({});
   /** Open Settings > Intelligence at a row when arriving from another page. */
   settingsSection = $state<"summarize" | "transcribe" | null>(null);
+  /** Open Settings at one of its pages (the sidebar's iCloud row). */
+  settingsPart = $state<"icloud" | null>(null);
   /** Why a meeting's transcript failed. */
   transcribeErrors = $state<Record<string, string>>({});
   /** The transcription model's download, 0 to 1, while it runs. */
@@ -262,6 +267,7 @@ class Store {
     call<TaskEntry[]>("tasks").then((t) => (this.tasks = t), () => {});
     call<Preset[]>("connector_presets").then((p) => (this.presets = p), () => {});
     call<PocketStatus | null>("pocket_status").then((p) => (this.pocket = p), () => {});
+    void this.refreshICloud();
     call<Meeting | null>("meeting_active").then((m) => (this.recording = m), () => {});
     call<string[]>("meetings_transcribing").then((ids) => {
       this.transcribing = Object.fromEntries(ids.filter((id) => !id.startsWith("summary:")).map((id) => [id, 0]));
@@ -274,6 +280,14 @@ class Store {
     this.currentChat = c.current;
     // A conversation deleted (or a new one left empty) closes its tab.
     tabs.prune((t) => t.kind === "chat" && t.id !== c.current && !c.list.some((x) => x.id === t.id));
+  }
+
+  /** Whether iCloud sync is on, and the engine as it is now. */
+  async refreshICloud() {
+    const c = await call<ICloud>("icloud_status").catch(() => null);
+    if (!c) return;
+    this.icloudOn = c.on;
+    if (c.status.running) this.icloud = c.status as ICloudStatus;
   }
 
   /** Records came from another Mac (docs/icloud.md): the lists they touch are read again.

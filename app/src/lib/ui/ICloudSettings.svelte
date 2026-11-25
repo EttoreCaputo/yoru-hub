@@ -33,6 +33,7 @@
       error = why(e);
     }
     await read();
+    await store.refreshICloud();
   }
 
   const account = $derived(s.account ? (t.accounts[s.account] ?? s.account) : t.accounts.unknown);

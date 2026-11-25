@@ -15,7 +15,7 @@
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store, type Page } from "../store.svelte";
-  import type { Brain, ICloud, ICloudStatus, McpInfo } from "../types";
+  import type { Brain, McpInfo } from "../types";
   import Board from "../ui/Board.svelte";
   import PermissionList from "../ui/PermissionList.svelte";
   import Toggle from "../ui/Toggle.svelte";
@@ -84,6 +84,13 @@
   /** Intelligence's row to open with it: the voice tile opens Speaks, a meeting's problem Transcribes. */
   let row = $state<Job | null>(store.settingsSection);
   store.settingsSection = null;
+  // The sidebar's iCloud row, also while Settings is already open.
+  $effect(() => {
+    if (!store.settingsPart) return;
+    open = store.settingsPart;
+    row = null;
+    store.settingsPart = null;
+  });
   function pick(id: Part, e: Event, job: Job | null = null) {
     open = id;
     row = job;
@@ -104,13 +111,8 @@
     const dot = p.phase === "connected" ? "done" : p.phase === "refused" || p.phase === "no_bluetooth" ? "wrong" : p.phase === "unpaired" ? "" : "think";
     return { text: [tp.phases[p.phase], p.phase === "connected" && p.battery !== null ? `${p.battery}%` : ""].filter(Boolean).join(" · "), dot };
   });
-  let icloudOn = $state(false);
-  // The engine's status comes as the `icloud` event; until the first one, as read here.
-  const readICloud = () =>
-    call<ICloud>("icloud_status").then(
-      (c) => ((icloudOn = c.on), c.status.running && (store.icloud ??= c.status as ICloudStatus)),
-      () => {},
-    );
+  const readICloud = () => store.refreshICloud();
+  const icloudOn = $derived(store.icloudOn);
   $effect(() => {
     void readICloud();
   });

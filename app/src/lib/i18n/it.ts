@@ -623,6 +623,7 @@ const it: Messages = {
     noMatch: "Nessuna cosa da fare corrisponde alla ricerca.",
   },
   icloud: {
+    side: { starting: "Avvio…", waiting: "In attesa", error: "Errore", noAccount: "Nessun account", title: "Sincronizzazione iCloud: apri le impostazioni" },
     off: "Spenta",
     doerHere: "i timer scattano qui",
     loading: "Leggo iCloud…",
