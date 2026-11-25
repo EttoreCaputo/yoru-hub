@@ -145,8 +145,13 @@
   }
 
   let followPointer = $state(true);
+  /** After an answer the board keeps listening a few seconds (a host setting; never the notch). */
+  let followUp = $state(false);
   $effect(() => {
-    void call<{ follow_pointer: boolean }>("status").then((s) => (followPointer = s?.follow_pointer ?? true), () => {});
+    void call<{ follow_pointer: boolean; board_follow_up: boolean }>("status").then((s) => {
+      followPointer = s?.follow_pointer ?? true;
+      followUp = s?.board_follow_up ?? false;
+    }, () => {});
   });
   const running = $derived(store.firmware?.state === "version" ? store.firmware.version : null);
   // Updated over its link instead of esptool (core's ota.rs).
@@ -293,6 +298,10 @@
       <div class="setting">
         <div class="what"><b>{t.followPointer}</b></div>
         <div class="how"><Toggle checked={followPointer} label={t.followPointer} onchange={(on) => ((followPointer = on), call("set_follow_pointer", { on }))} /></div>
+      </div>
+      <div class="setting">
+        <div class="what"><b>{t.followUp}</b><span>{t.followUpHint}</span></div>
+        <div class="how"><Toggle checked={followUp} label={t.followUp} onchange={(on) => ((followUp = on), call("set_board_follow_up", { on }))} /></div>
       </div>
       {#if tableError}<p class="error-text">{tableError}</p>{/if}
       <div class="row foot"><button class="btn quiet small" onclick={() => call("yoru_show_menu", { board: null, open: true, page: null }).catch(() => {})}>{t.openMenu}</button></div>

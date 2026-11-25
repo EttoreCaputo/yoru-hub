@@ -120,6 +120,13 @@ struct Settings {
     /// Yoru in the Mac's notch too (docs/notch.md).
     #[serde(default)]
     notch: bool,
+    /// No Yoru in the menu bar.
+    #[serde(default)]
+    hide_menu_bar_icon: bool,
+    /// The Dock icon stays while the window is closed; by default it goes
+    /// with the window, and Yoru lives in the menu bar.
+    #[serde(default)]
+    dock_in_background: bool,
     /// Sync with the other Macs through iCloud (docs/icloud.md); off until
     /// the user turns it on.
     #[serde(default)]
@@ -141,8 +148,10 @@ struct VoiceSettings {
     keep_recordings: bool,
     /// Answer out loud through the board's speaker.
     speak: bool,
-    /// After a spoken answer, listen a few seconds more without the wake word.
-    follow_up: bool,
+    /// After a spoken answer, the board listens a few seconds more without
+    /// the wake word. The board's only: the notch never keeps listening.
+    /// Off until turned on (it was `follow_up`, on, and for the notch too).
+    board_follow_up: bool,
     /// What tells a goodbye in a follow-up: `""` for a fixed list of
     /// phrases, or a `models::MODELS` id of kind `intent` (EmbeddingGemma).
     intent_model: String,
@@ -195,7 +204,7 @@ impl Default for VoiceSettings {
             language: SttLanguage::Auto,
             keep_recordings: false,
             speak: true,
-            follow_up: true,
+            board_follow_up: false,
             intent_model: String::new(),
             turn_model: String::new(),
             keep_warm: true,
@@ -524,7 +533,7 @@ fn apply_voice(state: &AppState) {
     let listens = settings.enabled;
     // EmbeddingGemma: the follow-ups' meaning, and the memory's search
     // whenever it is downloaded.
-    let intent_wanted = listens && settings.follow_up;
+    let intent_wanted = listens && settings.board_follow_up;
     let embedder = installed_path(&settings.intent_model, Kind::Intent).and_then(|path| {
         let current = current_intent.or_else(|| state.embedder.lock().unwrap().clone());
         current.filter(|i| i.path() == path).or_else(|| {
@@ -549,7 +558,7 @@ fn apply_voice(state: &AppState) {
         })
     });
     cloud::live::choose(&settings.live_model);
-    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.follow_up, intent, turn, voiceprint: state.voiceprinter.clone(), language: None, live: (!settings.live.is_empty()).then(|| settings.live.clone()) };
+    *state.voice.lock().unwrap() = VoiceConfig { dump_dir, stt, tts, agent, follow_up: settings.board_follow_up, intent, turn, voiceprint: state.voiceprinter.clone(), language: None, live: (!settings.live.is_empty()).then(|| settings.live.clone()) };
     apply_language(state);
 }
 
@@ -1152,6 +1161,8 @@ struct Status {
     transcripts: Vec<TranscriptEntry>,
     port_setting: Option<String>,
     follow_pointer: bool,
+    /// The board keeps listening after an answer.
+    board_follow_up: bool,
     /// Yoru in the notch is on.
     notch: bool,
 }
@@ -1161,9 +1172,9 @@ struct Status {
 fn status(state: State<AppState>, board: Option<String>) -> Status {
     let primary = state.primary.lock().unwrap().clone();
     // Read before the struct: a guard in a field lives to its end.
-    let (port_setting, notch) = {
+    let (port_setting, notch, board_follow_up) = {
         let settings = state.settings.lock().unwrap();
-        (settings.port.clone(), settings.notch)
+        (settings.port.clone(), settings.notch, settings.voice.board_follow_up)
     };
     let devices = state.devices.lock().unwrap();
     let link = board.as_deref().and_then(|b| devices.find(b)).or_else(|| devices.current(primary.as_deref())).unwrap_or(&devices.host);
@@ -1186,6 +1197,7 @@ fn status(state: State<AppState>, board: Option<String>) -> Status {
         transcripts: link.transcripts.iter().cloned().collect(),
         port_setting,
         follow_pointer: state.follow_pointer.load(Ordering::Relaxed),
+        board_follow_up,
         notch,
     }
 }
@@ -1419,6 +1431,14 @@ fn set_follow_pointer(state: State<AppState>, on: bool) {
     state.follow_pointer.store(on, Ordering::Relaxed);
     state.settings.lock().unwrap().ignore_pointer = !on;
     state.save_settings();
+}
+
+/// The board keeps listening after an answer, or not (the notch never does).
+#[tauri::command]
+fn set_board_follow_up(state: State<AppState>, on: bool) {
+    state.settings.lock().unwrap().voice.board_follow_up = on;
+    state.save_settings();
+    apply_voice(&state);
 }
 
 /// Bring the app's window up (from the notch), on a meeting's tab when
@@ -1895,12 +1915,73 @@ pub(crate) fn update_tray(app: &AppHandle) {
 }
 
 fn show_main(app: &AppHandle) {
+    // The window comes with its Dock icon, whatever it does in background.
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
 }
+
+/// Close the window, leaving Yoru in the background.
+fn hide_main(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.hide();
+    }
+    apply_icons(app);
+}
+
+/// Where Yoru shows in background, as the user chose (This Mac in Settings).
+#[derive(Clone, Copy, Serialize, Deserialize)]
+struct AppIcons {
+    /// In the menu bar (on by default).
+    menu_bar: bool,
+    /// In the Dock while the window is closed (off by default).
+    dock: bool,
+}
+
+#[tauri::command]
+fn app_icons(state: State<AppState>) -> AppIcons {
+    let settings = state.settings.lock().unwrap();
+    AppIcons { menu_bar: !settings.hide_menu_bar_icon, dock: settings.dock_in_background }
+}
+
+#[tauri::command]
+fn set_app_icons(app: AppHandle, state: State<AppState>, icons: AppIcons) {
+    {
+        let mut settings = state.settings.lock().unwrap();
+        settings.hide_menu_bar_icon = !icons.menu_bar;
+        settings.dock_in_background = icons.dock;
+    }
+    state.save_settings();
+    apply_icons(&app);
+}
+
+/// Show or hide the menu bar's Yoru, and the Dock icon if the window is
+/// closed. With both off, opening the app again brings the window back.
+fn apply_icons(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else { return };
+    let (menu_bar, dock) = {
+        let settings = state.settings.lock().unwrap();
+        (!settings.hide_menu_bar_icon, settings.dock_in_background)
+    };
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_visible(menu_bar);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let shown = app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false));
+        let policy = if shown || dock { tauri::ActivationPolicy::Regular } else { tauri::ActivationPolicy::Accessory };
+        let _ = app.set_activation_policy(policy);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = dock;
+}
+
+/// The menu bar's Yoru: his sphere and hands alone, tinted by macOS.
+const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-template.png");
 
 fn tray_menu(app: &AppHandle, labels: &TrayLabels, quiet: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let show = MenuItem::with_id(app, "show", &labels.show, true, None::<&str>)?;
@@ -1926,11 +2007,17 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 show_main(tray.app_handle());
             }
         });
-    if let Some(icon) = app.default_window_icon() {
-        tray = tray.icon(icon.clone());
+    match tauri::image::Image::from_bytes(TRAY_ICON) {
+        Ok(icon) => tray = tray.icon(icon).icon_as_template(true),
+        Err(_) => {
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+        }
     }
     tray.build(app)?;
     update_tray(app);
+    apply_icons(app);
     Ok(())
 }
 
@@ -2051,7 +2138,7 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
-                    let _ = window.hide();
+                    hide_main(window.app_handle());
                 }
             }
         })
@@ -2084,7 +2171,7 @@ pub fn run() {
             board_voice, set_board_volume, set_board_wake_sound, set_board_wake_word, play_board_sound, test_voice,
             yoru_settings, yoru_set_setting, yoru_react, yoru_show_menu, yoru_clips, yoru_play_clip, yoru_stop_clip,
             timers_info, timer_tool, dismiss_timers,
-            set_follow_pointer, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze,
+            set_follow_pointer, set_board_follow_up, app_icons, set_app_icons, ui_language, set_ui_language, onboarding, set_onboarding, pointer_gaze,
             assistant::assistant_info, assistant::coding_active, assistant::coding_stop, assistant::ollama_models, assistant::provider_models, assistant::set_assistant_settings, assistant::set_do_not_disturb, assistant::ask, assistant::chat, assistant::context_use, assistant::forget_conversation, assistant::chat_title, assistant::set_chat_title, assistant::conversations, assistant::conversation, assistant::new_conversation, assistant::open_conversation, assistant::delete_conversation, assistant::rename_conversation,
             assistant::inbox, assistant::inbox_read, assistant::inbox_read_all, assistant::inbox_dismiss, assistant::inbox_clear, assistant::open_notification, assistant::open_web,
             assistant::memory_graph, assistant::memory_forget_voice,

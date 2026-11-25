@@ -744,16 +744,8 @@
   {/if}
 {/snippet}
 
-<!-- How a job goes beside who does it: a conversation's follow-ups, a meeting's transcript and summary. -->
+<!-- How a job goes beside who does it: a meeting's transcript and summary. (The board's follow-ups are on its own page.) -->
 {#snippet how(job: Job)}
-  {#if vs && ((job === "speak" && vs.speak) || (job === "hear" && live))}
-    <div class="opts">
-      <div class="line">
-        <span class="t"><b>{tb.followUp}</b></span>
-        <Toggle checked={vs.follow_up} label={tb.followUp} onchange={(on) => setVoice({ follow_up: on })} />
-      </div>
-    </div>
-  {/if}
   {#if meet && job === "transcribe"}
     <div class="opts">
       <div class="line">

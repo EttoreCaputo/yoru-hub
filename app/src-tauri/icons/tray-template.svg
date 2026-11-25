@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="112 272 800 552">
+  <!-- The menu bar's Yoru (a template image: macOS tints it white or black):
+       app-icon.svg's sphere and hands alone, the eyes cut through, no tile.
+       tray-template.png is drawn from the same shapes (tools/tray_icon.swift). -->
+  <defs>
+    <mask id="eyes">
+      <rect x="0" y="0" width="1024" height="1024" fill="#fff"/>
+      <rect x="434" y="520" width="48" height="108" rx="24" fill="#000"/>
+      <rect x="542" y="520" width="48" height="108" rx="24" fill="#000"/>
+    </mask>
+  </defs>
+  <ellipse cx="186" cy="618" rx="58" ry="46" transform="rotate(-12 186 618)"/>
+  <ellipse cx="842" cy="438" rx="58" ry="46" transform="rotate(-28 842 438)"/>
+  <circle cx="512" cy="548" r="262" mask="url(#eyes)"/>
+</svg>

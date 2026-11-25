@@ -233,8 +233,8 @@ pub struct VoiceConfig {
     /// Understand what was said with a local language model; without it,
     /// with the rules of [`intents`].
     pub agent: Option<Arc<Agent>>,
-    /// After a spoken answer, listen for a few seconds more without the
-    /// wake word.
+    /// After a spoken answer, the board listens for a few seconds more
+    /// without the wake word (never the notch).
     pub follow_up: bool,
     /// Tell a goodbye in a follow-up with EmbeddingGemma; without it, with a
     /// fixed list of phrases.
@@ -508,7 +508,8 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
                 set_state(&link, state);
                 true
             }
-            Next::Spoken { question } if config.follow_up => match chain.next(question) {
+            // The notch never keeps listening: only the board, if asked to.
+            Next::Spoken { question } if config.follow_up && !in_notch(session) => match chain.next(question) {
                 Some(window) => match link.call("voice/listen", json!({"follow_up": true, "wait_ms": window.wait_ms, "pause_ms": window.pause_ms}), STATE_TIMEOUT) {
                     Ok(_) => false,
                     Err(e) => {
@@ -529,6 +530,11 @@ pub(crate) fn run(config: &Mutex<VoiceConfig>, session: &Session, sink: &EventSi
     // The board is gone mid-conversation.
     sink(BridgeEvent::BoardLog { line: "host: the voice pipeline stopped".into() });
     (session.conversation_over)();
+}
+
+/// The session is the Mac's notch, not a real board.
+fn in_notch(session: &Session) -> bool {
+    session.board.lock().unwrap().as_deref() == Some(crate::notch::ID)
 }
 
 /// Where an answer's wait went, from the end of the utterance: logged once

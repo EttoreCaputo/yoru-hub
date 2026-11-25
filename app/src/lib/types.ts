@@ -243,6 +243,7 @@ export type Status = {
   voice: VoiceState | null;
   port_setting: string | null;
   follow_pointer: boolean;
+  board_follow_up: boolean;
   notch: boolean;
 };
 
@@ -267,7 +268,7 @@ export type VoiceSettings = {
   language: SttLanguage;
   keep_recordings: boolean;
   speak: boolean;
-  follow_up: boolean;
+  board_follow_up: boolean;
   intent_model: string;
   turn_model: string;
   keep_warm: boolean;

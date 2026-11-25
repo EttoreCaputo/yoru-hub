@@ -45,11 +45,18 @@
 
   let mcp = $state<McpInfo | null>(null);
   let notch = $state(false);
+  /** Where Yoru shows while the window is closed: the menu bar, the Dock. */
+  let icons = $state({ menu_bar: true, dock: false });
+  const setIcons = (change: Partial<typeof icons>) => {
+    icons = { ...icons, ...change };
+    void call("set_app_icons", { icons }).catch(() => {});
+  };
   let error = $state("");
 
   async function readAll() {
     mcp = await call<McpInfo>("mcp_info").catch(() => null);
     notch = (await call<{ notch?: boolean }>("status").catch(() => null))?.notch ?? false;
+    icons = (await call<typeof icons>("app_icons").catch(() => null)) ?? icons;
   }
   $effect(() => {
     void readAll();
@@ -272,7 +279,7 @@
   </nav>
 {/snippet}
 
-<!-- Yoru on this Mac: its permissions, the notch, and Claude Code through his MCP server. -->
+<!-- Yoru on this Mac: its permissions, the notch, its icons in background, and Claude Code through his MCP server. -->
 {#snippet macPage()}
   {@const tb = i18n.t.board}
   <h2 class="section-title">{i18n.t.permissions.title}</h2>
@@ -282,6 +289,14 @@
     <div class="setting">
       <div class="what"><b>{tb.notch}</b><span>{tb.notchHint}</span></div>
       <div class="how"><Toggle checked={notch} label={tb.notch} onchange={(on) => ((notch = on), call("set_notch", { on }))} /></div>
+    </div>
+    <div class="setting">
+      <div class="what"><b>{tb.menuBarIcon}</b><span>{tb.menuBarIconHint}</span></div>
+      <div class="how"><Toggle checked={icons.menu_bar} label={tb.menuBarIcon} onchange={(on) => setIcons({ menu_bar: on })} /></div>
+    </div>
+    <div class="setting">
+      <div class="what"><b>{tb.dockIcon}</b><span>{tb.dockIconHint}</span></div>
+      <div class="how"><Toggle checked={icons.dock} label={tb.dockIcon} onchange={(on) => setIcons({ dock: on })} /></div>
     </div>
     {#if mcp}
       <div class="setting">

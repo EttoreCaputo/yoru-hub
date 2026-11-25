@@ -3,8 +3,9 @@
   camera's notch, so it reads as part of the hardware: pure black, flush
   with the top of the screen, its top corners curving out into the menu
   bar, nothing drawn under the camera. Closed, a little Yoru sits on its
-  left and what he's doing on its right. With the pointer on him, or while
-  he hears or talks, it opens downwards: the last exchange as plain text,
+  left and what he's doing on its right. With the pointer on him it opens
+  downwards, and closes as soon as the pointer leaves, even while he hears
+  or talks (a new card or summary opens it on its own): the last exchange as plain text,
   the cards to allow or deny, a field and a button that turns the microphone on and, clicked
   again, off. No
   cards, no greys: white text at a few strengths, and pills.
@@ -39,13 +40,12 @@
   const PANEL = 460;
   /** How much of the words being said fits two lines. */
   const HEARD_CHARS = 110;
-  /** How long an answer stays open once Yoru is done, to be read. */
-  const LINGER_MS = 6000;
   /** How long a summary that's ready keeps the notch open on its own. */
   const NOTICE_MS = 10_000;
-  /** The pointer has to rest a moment to open it, and be away a moment to close it. */
+  /** The pointer has to rest a moment to open it; leaving closes it at once
+   *  (the little wait only rides over the pointer grazing the edge). */
   const ENTER_MS = 120;
-  const LEAVE_MS = 350;
+  const LEAVE_MS = 40;
 
   let geometry = $state<Geometry>({ notch: false, width: 190, height: 32, window: 620 });
   let voice = $state<VoiceState>("idle");
@@ -54,10 +54,8 @@
   let fetching = $state<string | null>(null);
   let error = $state("");
   let pointer = $state(false);
-  let lingerUntil = $state(0);
   let held = $state(false);
   let typed = $state("");
-  let typing = $state(false);
   let answering = $state<string | null>(null);
   /** The microphone's permission: granted, denied, restricted, unknown. */
   let mic = $state("granted");
@@ -80,9 +78,15 @@
   const closedWidth = $derived(geometry.width + 2 * ear);
   const busy = $derived(voice !== "idle" && voice !== "error");
   const card = $derived(store.confirmations[0] ?? null);
-  /** Open while in use, and on its own for a question waiting for an answer
-   *  (a tool to allow, a meeting to record). */
-  const open = $derived(pointer || busy || held || typing || !!card || !!store.asking || store.now < lingerUntil || (!!notice && store.now < notice.until));
+  /** What opens the notch on its own: a question waiting for an answer
+   *  (a tool to allow) or a summary that's ready. */
+  const calling = $derived(card ? `card:${card.id}` : notice && store.now < notice.until ? `notice:${notice.meeting}` : null);
+  /** What was calling when the pointer last left: it doesn't open it again. */
+  let leftOn = $state<string | null>(null);
+  /** Open only with the pointer on it: when it leaves, the notch closes at
+   *  once, whatever Yoru is doing (he goes on, shown beside the camera).
+   *  Something new calling for an answer opens it on its own. */
+  const open = $derived(pointer || (!!calling && calling !== leftOn));
   const last = $derived.by(() => {
     const lastOf = (from: "you" | "yoru") => store.chat.map((l) => l.from).lastIndexOf(from);
     const yoru = lastOf("yoru");
@@ -124,14 +128,18 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
   on<boolean>("notch-pointer", (over) => {
     clearTimeout(timer);
-    timer = setTimeout(() => (pointer = over), over ? ENTER_MS : LEAVE_MS);
+    timer = setTimeout(() => {
+      pointer = over;
+      if (over) return;
+      leftOn = calling;
+      // No typing into a field that's folded away.
+      (document.activeElement as HTMLElement | null)?.blur();
+    }, over ? ENTER_MS : LEAVE_MS);
   });
   on<NotchEvent>("notch", (e) => {
     if (e.event === "state") {
-      const was = voice;
       voice = (e.state as VoiceState) ?? "idle";
       if (voice !== "error") error = "";
-      if (voice === "idle" && was !== "idle") lingerUntil = Date.now() + LINGER_MS;
       if (voice !== "listening") level = 0;
       // The turn ended on its own (an error, or Yoru stopped): the button is off.
       if (held && (voice === "idle" || voice === "error")) held = false;
@@ -149,10 +157,10 @@
     }
   });
 
-  // Closed, the Mac's audio is let go at once: Bluetooth headphones leave
-  // their call mode and paused music plays again.
+  // Closed, the Mac's audio is let go as soon as Yoru is done: Bluetooth
+  // headphones leave their call mode and paused music plays again.
   $effect(() => {
-    if (!open) void call("notch_release").catch(() => {});
+    if (!open && !busy) void call("notch_release").catch(() => {});
   });
 
   // Say where the drawing is, as it opens and closes.
@@ -187,7 +195,6 @@
     if (!text || store.asking) return;
     typed = "";
     await store.ask(text, true);
-    lingerUntil = Date.now() + LINGER_MS;
   }
 
   async function answer(allow: boolean) {
@@ -353,8 +360,6 @@
             bind:value={typed}
             placeholder={store.asking ? i18n.t.composer.thinking : i18n.t.composer.placeholder}
             disabled={!!store.asking}
-            onfocus={() => (typing = true)}
-            onblur={() => (typing = false)}
             spellcheck="false"
           />
           <kbd>{t.key}</kbd>

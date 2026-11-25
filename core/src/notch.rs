@@ -204,6 +204,12 @@ struct State {
     volume: u8,
     voice: String,
     used: Option<Instant>,
+    /// The stream last stopped: the rest of it, still coming from the
+    /// host, is dropped rather than played again from where it was.
+    dropped: Option<u8>,
+    /// Stopped while thinking or talking: whatever the host still says of
+    /// that answer is dropped, until it says the turn is over (`idle`).
+    hushed: bool,
 }
 
 /// `yoru-audio talk` and its commands.
@@ -294,7 +300,20 @@ impl Board {
                 // Said back, as the board does: the host's idea of the state
                 // (alerts wait for "idle") follows what it set.
                 self.reply(id, json!({}));
-                self.set_voice(params["state"].as_str().unwrap_or("idle"));
+                let state = params["state"].as_str().unwrap_or("idle");
+                let hushed = {
+                    let mut s = self.state.lock().unwrap();
+                    if matches!(state, "idle" | "error") {
+                        s.hushed = false;
+                    }
+                    s.hushed
+                };
+                // The answer stopped by the user doesn't show as going on.
+                if hushed && matches!(state, "thinking" | "speaking") {
+                    self.notify("voice_state", json!({"state": "idle"}));
+                } else {
+                    self.set_voice(state);
+                }
             }
             "voice/listen" => {
                 self.reply(id, json!({}));
@@ -448,6 +467,12 @@ impl Board {
 
     /// Stop hearing and tell the host what came of it.
     fn end(&self, reason: &str) {
+        self.finish(reason, false);
+    }
+
+    /// Stop hearing; `discard`: tell the host nothing was said, so it
+    /// doesn't answer.
+    fn finish(&self, reason: &str, discard: bool) {
         let Some(u) = self.state.lock().unwrap().utterance.take() else { return };
         if !u.ready {
             // Let go before the microphone was on: the host never heard of it.
@@ -457,7 +482,7 @@ impl Board {
         }
         self.command(json!({"cmd": "mic", "on": false}));
         // Push-to-talk sends what it has: a short word may be quiet.
-        let speech = u.speech || (u.trigger == "button" && u.seq > 8);
+        let speech = !discard && (u.speech || (u.trigger == "button" && u.seq > 8));
         let reason = if !speech && reason != "host" { "no_speech" } else { reason };
         crate::hostlog::line(TARGET, &format!("utterance #{} ends: {reason}, speech {speech}, {} frames", u.id, u.seq));
         self.notify("utterance_end", json!({"id": u.id, "reason": reason, "speech": speech, "frames": u.seq}));
@@ -465,10 +490,22 @@ impl Board {
         self.set_voice(if speech { "thinking" } else { "idle" });
     }
 
+    /// The stop button: what Yoru hears is thrown away rather than
+    /// answered, and the answer he's thinking of or saying is silenced to
+    /// its end, not just the sentence playing now.
     fn hush(&self) {
-        self.stop_playing("stopped");
-        if self.state.lock().unwrap().utterance.is_some() {
-            self.end("host");
+        let (hearing, answering) = {
+            let state = self.state.lock().unwrap();
+            (state.utterance.is_some(), state.playing.is_some() || matches!(state.voice.as_str(), "thinking" | "speaking"))
+        };
+        if hearing {
+            self.finish("host", true);
+            return;
+        }
+        if answering {
+            self.state.lock().unwrap().hushed = true;
+            self.stop_playing("stopped");
+            self.set_voice("idle");
         }
     }
 
@@ -523,6 +560,9 @@ impl Board {
         }
         let (id, last) = (payload[0], payload[1] & 1 == 1);
         let pcm = &payload[4..];
+        if self.drops(id) {
+            return;
+        }
         let replaced = {
             let state = self.state.lock().unwrap();
             state.playing.as_ref().is_some_and(|p| p.id != id && !p.ended)
@@ -564,6 +604,24 @@ impl Board {
         }
     }
 
+    /// Whether stream `id` is one the user stopped. The first one coming
+    /// while hushed is reported stopped, so the host stops saying it.
+    fn drops(&self, id: u8) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if state.dropped == Some(id) {
+            return true;
+        }
+        if !state.hushed {
+            // A new stream: the ids wrap, so the stopped one is forgotten.
+            state.dropped = None;
+            return false;
+        }
+        state.dropped = Some(id);
+        drop(state);
+        self.notify("playback_end", json!({"id": id, "reason": "stopped", "ms": 0, "underruns": 0, "lost": 0}));
+        true
+    }
+
     /// The helper played a stream to its end.
     fn played(&self, id: u8) {
         let done = {
@@ -587,7 +645,14 @@ impl Board {
 
     /// Stop what is playing, telling the host why.
     fn stop_playing(&self, reason: &str) {
-        let playing = self.state.lock().unwrap().playing.take();
+        let playing = {
+            let mut state = self.state.lock().unwrap();
+            let playing = state.playing.take();
+            if let Some(p) = &playing {
+                state.dropped = Some(p.id);
+            }
+            playing
+        };
         if let Some(p) = playing.filter(|p| !p.ended) {
             self.command(json!({"cmd": "flush"}));
             let ms = (p.samples * 1000 / 16000).min(p.started.elapsed().as_millis() as u64);

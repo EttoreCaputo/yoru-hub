@@ -567,7 +567,7 @@ const voice: VoiceInfo = {
     language: "auto",
     keep_recordings: false,
     speak: true,
-    follow_up: true,
+    board_follow_up: false,
     intent_model: "embeddinggemma-300m",
     turn_model: "",
     keep_warm: true,
