@@ -120,6 +120,11 @@ impl Archive {
         self.chats.lock().unwrap().iter().map(SavedChat::summary).collect()
     }
 
+    /// Every conversation put aside, as saved.
+    pub fn all(&self) -> Vec<SavedChat> {
+        self.chats.lock().unwrap().clone()
+    }
+
     pub fn get(&self, id: &str) -> Option<SavedChat> {
         self.chats.lock().unwrap().iter().find(|c| c.id == id).cloned()
     }

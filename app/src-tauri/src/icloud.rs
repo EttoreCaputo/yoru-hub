@@ -17,8 +17,6 @@ use yoru_core::sync::{Field, Record, Store};
 
 use crate::AppState;
 
-/// The zones the stores use, made on iCloud at the first start.
-const ZONES: &str = "Memory,Settings";
 /// How often what changed here is looked for.
 const PUSH_EVERY: Duration = Duration::from_secs(5);
 /// How often iCloud is asked, on top of its pushes.
@@ -148,7 +146,7 @@ pub fn start(app: &AppHandle) {
     doer.set_active(!PAUSED.load(Ordering::SeqCst));
     let sync_dir = dir.join("sync");
     let _ = std::fs::create_dir_all(&sync_dir);
-    let (Ok(path), Ok(zones)) = (CString::new(sync_dir.to_string_lossy().as_bytes()), CString::new(ZONES)) else { return };
+    let (Ok(path), Ok(zones)) = (CString::new(sync_dir.to_string_lossy().as_bytes()), CString::new(yoru_core::assistant::synced::ZONES.join(","))) else { return };
     unsafe {
         yoru_sync_start(path.as_ptr(), zones.as_ptr(), on_event);
         yoru_sync_account();
@@ -274,6 +272,17 @@ fn tell_pages(app: &AppHandle, kinds: &[&str]) {
     }
     if kinds.iter().any(|k| ["setting", "connector", "skill"].contains(k)) {
         let _ = app.emit("assistant", crate::assistant::info_of(&state.assistant));
+    }
+    if kinds.contains(&"chat") {
+        let _ = app.emit("conversations", state.assistant.conversations());
+    }
+    if kinds.contains(&"task") {
+        let _ = app.emit("tasks", state.assistant.tasks.list());
+    }
+    // The history index follows the conversations and meetings that came.
+    if kinds.iter().any(|k| ["chat", "meeting"].contains(k)) {
+        let assistant = state.assistant.clone();
+        std::thread::spawn(move || assistant.sync_history());
     }
     let _ = app.emit("synced", kinds);
 }

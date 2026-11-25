@@ -275,7 +275,13 @@ impl Memory {
             return id;
         }
         let _ = db.execute("INSERT INTO entities(name, kind, is_user, created) VALUES ('User', 'person', 1, ?1)", [now_ms()]);
-        db.last_insert_rowid()
+        let id = db.last_insert_rowid();
+        // A blank User loses to the one another Mac already knows (docs/icloud.md).
+        let _ = db.execute_batch(
+            "UPDATE entities SET changed = 1 WHERE is_user = 1;
+             UPDATE sync_outbox SET changed = 1 WHERE kind = 'entity' AND uid = 'user';",
+        );
+        id
     }
 
     fn edges(db: &Connection) -> Vec<Edge> {

@@ -57,9 +57,8 @@ final class Engine: CKSyncEngineDelegate, @unchecked Sendable {
         var config = CKSyncEngine.Configuration(database: database, stateSerialization: state, delegate: self)
         config.automaticallySync = true
         engine = CKSyncEngine(config)
-        if state == nil {
-            addZones()
-        }
+        // Every start: cheap, and a zone added since the last one is made.
+        addZones()
     }
 
     var stateFile: URL { dir.appendingPathComponent("cloudkit-state.json") }

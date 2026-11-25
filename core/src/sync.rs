@@ -133,6 +133,12 @@ pub trait Items: Send + Sync {
     fn items(&self) -> Vec<(String, serde_json::Value)>;
     /// Items from another Mac: put each one in (`None`: take it out).
     fn put(&self, changes: Vec<(String, Option<serde_json::Value>)>);
+    /// The item as it travels, when `items` gives only a cheap stand-in for
+    /// it (a folder's file sizes and times, not its audio): called only for
+    /// what goes out.
+    fn expand(&self, _uid: &str, item: serde_json::Value) -> serde_json::Value {
+        item
+    }
 }
 
 /// How long a deletion is remembered, for a Mac that was off.
@@ -162,6 +168,8 @@ pub struct Ledger<I: Items> {
     device: String,
     file: Option<PathBuf>,
     entries: Mutex<BTreeMap<String, Entry>>,
+    /// Records at most per call to `changes`, for items that are big.
+    batch: usize,
 }
 
 /// FNV-1a: the same on every run and every build, unlike std's hasher.
@@ -173,8 +181,21 @@ impl<I: Items> Ledger<I> {
     /// The ledger of `items`, kept in `dir/sync/<kind>.json` (`None`: in memory).
     pub fn new(zone: &'static str, kind: &'static str, items: std::sync::Arc<I>, dir: Option<&Path>) -> Self {
         let file = dir.map(|d| d.join("sync").join(format!("{kind}.json")));
-        let entries = file.as_ref().and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { zone, kind, items, device: device(dir), file, entries: Mutex::new(entries) }
+        let kept: Option<BTreeMap<String, Entry>> = file.as_ref().and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok());
+        let fresh = kept.is_none();
+        let ledger = Self { zone, kind, items, device: device(dir), file, entries: Mutex::new(kept.unwrap_or_default()), batch: usize::MAX };
+        if fresh {
+            let mut entries = ledger.entries.lock().unwrap();
+            ledger.scan_at(&mut entries, 1);
+            ledger.save(&entries);
+        }
+        ledger
+    }
+
+    /// Hand out at most `n` records at a time (meetings with their audio).
+    pub fn batch(mut self, n: usize) -> Self {
+        self.batch = n.max(1);
+        self
     }
 
     fn save(&self, entries: &BTreeMap<String, Entry>) {
@@ -188,7 +209,14 @@ impl<I: Items> Ledger<I> {
 
     /// Stamp what changed here since the last look.
     fn scan(&self, entries: &mut BTreeMap<String, Entry>) -> bool {
-        let now = now_ms();
+        self.scan_at(entries, now_ms())
+    }
+
+    /// Stamp changes at `now`. The first look of a new ledger stamps at 1:
+    /// what a Mac had before it synced (a new Mac's defaults, above all)
+    /// loses to anything another Mac changed, and still goes out to a Mac
+    /// that has nothing.
+    fn scan_at(&self, entries: &mut BTreeMap<String, Entry>, now: i64) -> bool {
         let mut dirty = false;
         let items = self.items.items();
         let here: std::collections::HashSet<&str> = items.iter().map(|(uid, _)| uid.as_str()).collect();
@@ -232,9 +260,15 @@ impl<I: Items> Store for Ledger<I> {
         }
         let mut queued: Vec<(&String, &Entry)> = entries.iter().filter(|(_, e)| e.queued).collect();
         queued.sort_by_key(|(_, e)| e.changed);
-        queued.truncate(max);
+        queued.truncate(max.min(self.batch));
         let items: BTreeMap<String, serde_json::Value> = self.items.items().into_iter().collect();
-        queued.into_iter().map(|(uid, e)| self.record(uid, e, items.get(uid))).collect()
+        queued
+            .into_iter()
+            .map(|(uid, e)| {
+                let value = items.get(uid).filter(|_| !e.deleted).map(|v| self.items.expand(uid, v.clone()));
+                self.record(uid, e, value.as_ref())
+            })
+            .collect()
     }
 
     fn sent(&self, records: &[Record]) {

@@ -124,6 +124,9 @@ struct Settings {
     /// the user turns it on.
     #[serde(default)]
     icloud: bool,
+    /// Meetings go to iCloud with their text only, not their audio.
+    #[serde(default)]
+    icloud_text_only: bool,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -1439,12 +1442,15 @@ fn set_notch(app: AppHandle, state: State<AppState>, on: bool) {
 /// Whether this Mac syncs through iCloud, and how it's going.
 #[tauri::command]
 fn icloud_status(state: State<AppState>) -> serde_json::Value {
-    let on = state.settings.lock().unwrap().icloud;
+    let (on, audio) = {
+        let s = state.settings.lock().unwrap();
+        (s.icloud, !s.icloud_text_only)
+    };
     #[cfg(target_os = "macos")]
     let status = serde_json::to_value(icloud::status()).unwrap_or_default();
     #[cfg(not(target_os = "macos"))]
     let status = serde_json::json!({});
-    serde_json::json!({ "on": on, "status": status })
+    serde_json::json!({ "on": on, "audio": audio, "status": status })
 }
 
 /// Turn iCloud sync on or off on this Mac.
@@ -1465,6 +1471,14 @@ fn set_icloud(app: AppHandle, state: State<AppState>, on: bool) -> Result<(), St
     state.settings.lock().unwrap().icloud = on;
     state.save_settings();
     Ok(())
+}
+
+/// Whether meetings go to iCloud with their audio.
+#[tauri::command]
+fn set_icloud_audio(state: State<AppState>, on: bool) {
+    yoru_core::assistant::synced::MEETING_AUDIO.store(on, Ordering::Relaxed);
+    state.settings.lock().unwrap().icloud_text_only = !on;
+    state.save_settings();
 }
 
 /// The app's language: `None` follows the system's.
@@ -2012,8 +2026,15 @@ pub fn run() {
             pocket::start(handle);
             meeting_watch::start(handle);
             #[cfg(target_os = "macos")]
-            if app.state::<AppState>().settings.lock().unwrap().icloud {
-                icloud::start(handle);
+            {
+                let (on, audio) = {
+                    let s = app.state::<AppState>().settings.lock().unwrap().clone();
+                    (s.icloud, !s.icloud_text_only)
+                };
+                yoru_core::assistant::synced::MEETING_AUDIO.store(audio, Ordering::Relaxed);
+                if on {
+                    icloud::start(handle);
+                }
             }
             build_tray(handle)?;
             Ok(())
@@ -2045,6 +2066,7 @@ pub fn run() {
             set_notch,
             icloud_status,
             set_icloud,
+            set_icloud_audio,
             show_app,
             status, list_ports, set_port, set_transport, boards, show_board, set_primary, rename_board,
             wifi_info, wifi_scan, wifi_setup, wifi_enable, wifi_forget, wifi_pair,
