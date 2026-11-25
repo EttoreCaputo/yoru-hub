@@ -1212,6 +1212,8 @@ const en = {
     gateTitle: "Yoru needs the microphone",
     gateText: "Without it he can't hear you. Allow it and Yoru picks up right where he was.",
     later: "The calendar and the system audio can wait: they are for meetings only.",
+    gateDone: "Thanks! Give the others too if you'd like Yoru to record meetings.",
+    continue: "Continue",
   },
 
   setup: {
@@ -1220,6 +1222,10 @@ const en = {
     next: "Next",
     done: "Start",
     steps: ["Welcome", "Permissions", "Yoru", "Setup", "A service", "You"],
+    stepOf: (n: number, of: number) => `Step ${n} of ${of}`,
+    says: ["Hi! Let's get to know each other.", "May I hear you? Just the microphone is a must.", "I also live on a little round screen.", "Pick how I think and talk.", "Shall I keep an eye on something for you?", "Last thing: tell me about you."],
+    granted: "Got it, now I can hear you!",
+    ready: "All set. Let's start!",
     welcome: {
       title: "Hi, I'm Yoru",
       text: "A few choices and I'm ready: the language, what I may use on this Mac, the board, how I think and talk, a first service. It takes a couple of minutes, and everything can be changed later in Settings.",

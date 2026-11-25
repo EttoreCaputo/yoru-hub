@@ -34,6 +34,13 @@
   // The notch's Open on a summary that's ready.
   on<string>("open-meeting", (id) => tabs.open({ kind: "meeting", id }));
 
+  // The gate comes when the microphone goes missing after the first run,
+  // and stays once it's given until Continue (the other permissions too).
+  let gate = $state(false);
+  $effect(() => {
+    if (store.onboarding?.done && store.micMissing) gate = true;
+  });
+
   const PAGES = { home: Home, inbox: Inbox, connectors: Connectors, tasks: Tasks, memory: Memory, meetings: Meetings, todos: Todos, spoken: Spoken, animations: Animations, settings: Settings };
   const Page = $derived(PAGES[store.page]);
   // Services, Spoken and Animations are opened from Settings, and lead back to it.
@@ -80,7 +87,7 @@
   {#if store.pocketShown && store.pocket}<PocketDialog pocket={store.pocket} onclose={() => (store.pocketShown = false)} />{/if}
   <!-- The first run asks for the permissions itself; after it, the gate
        waits for the microphone if it was taken away. -->
-  {#if store.onboarding && !store.onboarding.done}<Setup />{:else if store.micMissing}<PermissionGate />{/if}
+  {#if store.onboarding && !store.onboarding.done}<Setup />{:else if gate}<PermissionGate onclose={() => (gate = false)} />{/if}
 </div>
 
 <style>

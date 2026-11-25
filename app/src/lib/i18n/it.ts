@@ -1210,6 +1210,8 @@ const it: Messages = {
     gateTitle: "Yoru ha bisogno del microfono",
     gateText: "Senza, non può sentirti. Consentilo e Yoru riparte da dove era.",
     later: "Il calendario e l'audio di sistema possono aspettare: servono solo per le riunioni.",
+    gateDone: "Grazie! Se vuoi che Yoru registri le riunioni, consenti anche gli altri.",
+    continue: "Continua",
   },
 
   setup: {
@@ -1218,6 +1220,10 @@ const it: Messages = {
     next: "Avanti",
     done: "Comincia",
     steps: ["Benvenuto", "Permessi", "Yoru", "Profilo", "Un servizio", "Tu"],
+    stepOf: (n: number, of: number) => `Passo ${n} di ${of}`,
+    says: ["Ciao! Facciamo conoscenza.", "Posso sentirti? Serve solo il microfono.", "Vivo anche su un piccolo schermo rotondo.", "Scegli come penso e parlo.", "Tengo d'occhio qualcosa per te?", "Ultima cosa: raccontami di te."],
+    granted: "Fatto, ora ti sento!",
+    ready: "Tutto pronto. Cominciamo!",
     welcome: {
       title: "Ciao, sono Yoru",
       text: "Poche scelte e sono pronto: la lingua, cosa posso usare su questo Mac, la scheda, come penso e parlo, un primo servizio. Ci vogliono un paio di minuti, e puoi cambiare tutto dopo nelle Impostazioni.",
