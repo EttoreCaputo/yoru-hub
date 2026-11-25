@@ -29,6 +29,7 @@ import type {
   ConnectorStatus,
   Meeting,
   MeetingSettings,
+  CalendarMeeting,
   PocketStatus,
   MeetingSources,
   Notification,
@@ -329,6 +330,19 @@ let meetings: Meeting[] = [
   },
 ];
 let recording: Meeting | null = null;
+// The Mac calendar's meetings around today (`meeting_calendar`): one recorded
+// (the weekly), one past and not recorded, and some to come.
+const today0 = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+const at = (day: number, h: number, m = 0) => new Date(today0).setDate(new Date(today0).getDate() + day) + (h * 60 + m) * MIN;
+const soon = Math.ceil((now() + 50 * MIN) / (30 * MIN)) * 30 * MIN;
+const calendar: CalendarMeeting[] = [
+  { id: "ev-weekly", title: "Weekly with Marco", start: meetings[0].started_at, end: meetings[0].started_at + 45 * MIN, call: "Zoom" },
+  { id: "ev-design", title: "Design review", start: soon, end: soon + 45 * MIN, call: "Meet" },
+  { id: "ev-client", title: "Client call", start: at(-1, 10), end: at(-1, 11), call: "Teams" },
+  { id: "ev-roadmap", title: "Q1 roadmap", start: at(1, 11), end: at(1, 12), call: "Meet" },
+  { id: "ev-giulia", title: "1:1 with Giulia", start: at(2, 15), end: at(2, 15, 30), call: "Zoom" },
+  { id: "ev-sprint", title: "Sprint planning", start: at(-2, 14), end: at(-2, 15), call: "Meet" },
+];
 // The to-dos ticked off, as `<meeting>/<text>` (done.json in the app).
 const todosDone = new Set<string>();
 function todosNow() {
@@ -386,7 +400,7 @@ function pocketDownload(names: string[]) {
   next();
 }
 
-let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, detail: "detailed", summary_style: "auto", auto_summary: true, summarize_by: "", detect: false };
+let meetingSettings: MeetingSettings = { transcribe: "after", transcribe_by: "local", language: "", speakers: true, detail: "detailed", summary_style: "auto", auto_summary: true, summarize_by: "", detect: false, auto_record: [] };
 let meters: ReturnType<typeof setInterval> | undefined;
 
 function startMeeting(a: Record<string, any>): Meeting {
@@ -823,6 +837,7 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   open_privacy: (a) => void (permissions[a.kind as keyof typeof permissions] = "granted"),
   meeting_sources: () => meetingSources,
   meetings_list: () => meetings,
+  meeting_calendar: (a) => calendar.filter((e) => e.end > a.from && e.start < a.to),
   folders: () => folderView(),
   create_folder: (a) => {
     const name = String(a.name).trim();

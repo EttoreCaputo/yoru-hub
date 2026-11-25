@@ -4,7 +4,8 @@
   talks to him through the Mac's microphone instead: click to start, click
   again to send what you said; while he answers aloud, it stops him.
   `conversation` is the one it goes on: an earlier one is opened again
-  first, and `new` starts one (in a tab of its own).
+  first, and `new` starts one (in a tab of its own). `about` goes before
+  what's typed, to tell Yoru what it's about (the meeting picked).
 -->
 <script lang="ts">
   import { call } from "../api";
@@ -18,8 +19,9 @@
     mic = false,
     conversation,
     placeholder,
+    about,
     text = $bindable(""),
-  }: { autofocus?: boolean; big?: boolean; mic?: boolean; conversation?: string; placeholder?: string; text?: string } = $props();
+  }: { autofocus?: boolean; big?: boolean; mic?: boolean; conversation?: string; placeholder?: string; about?: string; text?: string } = $props();
   const t = $derived(i18n.t.composer);
   const ready = $derived(store.info?.ready ?? false);
   let field: HTMLTextAreaElement | undefined = $state();
@@ -32,7 +34,8 @@
     const said = text.trim();
     if (!said || store.asking || !ready) return;
     text = "";
-    await store.ask(said, false, await target());
+    // `about` says what the question is about (a meeting), for Yoru only.
+    await store.ask(about ? `${about}\n\n${said}` : said, false, await target());
     field?.focus();
   }
 

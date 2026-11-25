@@ -2075,7 +2075,7 @@ pub fn run() {
             confirmations, confirm, mcp_info, claude_mcp,
             voice_info, set_voice, set_api_key, check_api_key, open_key_page, elevenlabs_voices, download_model, cancel_download, delete_model, install_engine,
             spoken_clips, spoken_audio, delete_spoken, clear_spoken, export_spoken,
-            meetings::meeting_sources, meetings::meetings_list, meetings::meeting_active, meetings::meeting_start, meetings::meeting_stop,
+            meetings::meeting_sources, meetings::meeting_calendar, meetings::meetings_list, meetings::meeting_active, meetings::meeting_start, meetings::meeting_stop,
             meetings::rename_meeting, meetings::delete_meeting, folders::folders, folders::create_folder, folders::rename_folder, folders::delete_folder, folders::move_to_folder, meetings::meeting_audio, meetings::open_audio_privacy,
             meetings::meeting_transcribe, meetings::meetings_transcribing, meetings::meeting_transcript, meetings::meeting_export, meetings::rename_speaker, meetings::meeting_summarize, meetings::meeting_summary, meetings::meeting_todos, meetings::set_meeting_todo, meetings::meeting_summarizers,
             meetings::meeting_settings, meetings::set_meeting_settings, meetings::meeting_model, meetings::meeting_model_download, meetings::meeting_import,

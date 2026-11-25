@@ -371,8 +371,10 @@ export type Speaker = { key: string; number: number; name: string | null };
 /** `timed` false: a simple transcript, paragraphs without times or speakers. */
 export type Transcript = { engine: string; language: string | null; lines: TranscriptLine[]; timed: boolean; speakers: Speaker[] };
 /** `meeting_settings`: when to transcribe, the language (empty: Parakeet finds it), whether to tell the speakers apart, and whether to notice meetings on their own (`detect`). */
-export type MeetingSettings = { transcribe: "after" | "live" | "manual"; /** One of `Summarizers.transcribers`: `local` (Parakeet) or a service's model (`groq:whisper-large-v3-turbo`). */ transcribe_by: string; language: string; speakers: boolean; /** Timed lines and speakers, or only the words. */ detail: "detailed" | "simple"; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; /** Empty: Yoru's brain writes the summaries; else one of `Summarizers.models`. */ summarize_by: string; detect: boolean };
+export type MeetingSettings = { transcribe: "after" | "live" | "manual"; /** One of `Summarizers.transcribers`: `local` (Parakeet) or a service's model (`groq:whisper-large-v3-turbo`). */ transcribe_by: string; language: string; speakers: boolean; /** Timed lines and speakers, or only the words. */ detail: "detailed" | "simple"; /** The default style of a summary (`Summary.style`). */ summary_style: string; auto_summary: boolean; /** Empty: Yoru's brain writes the summaries; else one of `Summarizers.models`. */ summarize_by: string; detect: boolean; /** Calendar meetings (event ids) recorded without asking when their call starts. */ auto_record: string[] };
 /** What can be recorded right now (`meeting_sources`). */
+/** A meeting in the Mac's calendar (`meeting_calendar`): `call` is the service its link is on (`Zoom`), empty if none. */
+export type CalendarMeeting = { id: string; title: string; start: number; end: number; call: string };
 export type MeetingSources = { apps: { id: string; name: string; playing: boolean; icon?: string }[]; microphones: { id: string; name: string; default: boolean }[] };
 /** What to record (`meeting_start`): everything played, or one app's sound, and microphones. */
 export type MeetingRequest = { system: boolean; app: string | null; microphones: string[]; title: string | null };

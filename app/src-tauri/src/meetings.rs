@@ -12,6 +12,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use yoru_core::assistant::{self, Brain};
+use yoru_core::meetings::detect::{self, CalendarMeeting};
 use yoru_core::meetings::{self, Event, Format, Meeting, Recording, Request, Settings, Sources, Summary, Transcript, When};
 
 use crate::AppState;
@@ -73,6 +74,13 @@ fn blocking<T: Send + 'static>(job: impl FnOnce() -> std::io::Result<T> + Send +
 #[tauri::command]
 pub async fn meeting_sources() -> Result<Sources, String> {
     blocking(meetings::sources).await
+}
+
+/// The meetings in the Mac's calendar between `from` and `to` (Unix ms),
+/// for the Meetings page's calendar; `Err("denied")` without access to it.
+#[tauri::command]
+pub async fn meeting_calendar(from: i64, to: i64) -> Result<Vec<CalendarMeeting>, String> {
+    tauri::async_runtime::spawn_blocking(move || detect::events(from, to)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

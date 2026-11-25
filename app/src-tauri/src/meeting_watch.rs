@@ -50,7 +50,8 @@ fn run(app: AppHandle) {
     let mut calendar_at: Option<Instant> = None;
     loop {
         thread::sleep(TICK);
-        if !meetings::settings().detect {
+        let settings = meetings::settings();
+        if !settings.detect {
             watch = None;
             calendar_at = None;
             shared.users.lock().unwrap().clear();
@@ -72,6 +73,7 @@ fn run(app: AppHandle) {
                 shared.detector.lock().unwrap().set_meetings(found);
             }
         }
+        shared.detector.lock().unwrap().set_auto(settings.auto_record);
         let users = shared.users.lock().unwrap().clone();
         let action = shared.detector.lock().unwrap().step(now_ms(), &users, recordings::recording(&app));
         if let Some(action) = action {

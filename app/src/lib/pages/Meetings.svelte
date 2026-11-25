@@ -1,32 +1,41 @@
 <!--
-  Meetings (docs/meetings.md): record what the computer plays (all of it,
-  or one app's sound) and the microphones, each as a track of its own, or
-  bring in an audio or video file (the button, or dropped on the window);
-  listen again, and read the transcript Parakeet makes on this computer,
-  with "you" told apart by track and the others by voice (Nemotron), each
-  of them nameable, and the summary (the local model, or the assistant's
-  brain): what was said, decided, left to do and left open. A meeting's
-  transcript and summary open in a tab of their own (MeetingView.svelte);
-  the meetings are listed on Home, their settings are in Settings.
+  Meetings (docs/meetings.md): a calendar of the week or the day, with the
+  meetings in the Mac's calendar and what was recorded laid on the same
+  hours, one block each (a recording made during a calendar meeting is that
+  meeting). Picking a block opens it in the panel on the window's right
+  (MeetingPanel.svelte): its summary, the recording that runs, or whether
+  to record it when it starts. New meeting records now (the dialog keeps
+  what the window bar's Record records), brings in an audio or video file
+  (or one dropped on the window), or opens the Pocket. Past lists every
+  recording. The field at the bottom asks Yoru, about the meeting picked.
 -->
 <script lang="ts">
   import Icon from "../ui/Icon.svelte";
   import { call, inPreview, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
+  import { addDays, page, startOfDay, type Block } from "../meetings-page.svelte";
   import { store } from "../store.svelte";
-  import type { Meeting, MeetingSources } from "../types";
+  import type { Meeting } from "../types";
   import { tabs } from "../tabs.svelte";
-  import Toggle from "../ui/Toggle.svelte";
-  import { clock } from "../ui/when";
+  import Composer from "../ui/Composer.svelte";
+  import RecordDialog from "../ui/RecordDialog.svelte";
 
   const t = $derived(i18n.t.meetings);
+  const HOUR = 56;
+  const MIN = 60_000;
   let error = $state("");
-  let sources = $state<MeetingSources | null>(null);
   let importing = $state(false);
   let dropping = $state(false);
+  let menu = $state(false);
+  let search = $state("");
+  let body: HTMLElement | undefined = $state();
+  let searchField: HTMLInputElement | undefined = $state();
 
   $effect(() => {
-    void readSources();
+    void page.readCalendar();
+    void page.readSettings();
+    const timer = setInterval(() => void page.readCalendar(), 60_000);
+    return () => clearInterval(timer);
   });
 
   // Audio or video files dropped on the window become meetings.
@@ -54,12 +63,13 @@
 
   /** A file as a new meeting: `path`, or one picked in Finder. */
   async function bringIn(path?: string) {
+    menu = false;
     importing = true;
     error = "";
     try {
       const m = await call<Meeting | null>("meeting_import", { path: path ?? null });
-      void store.refreshMeetings();
-      if (m) tabs.open({ kind: "meeting", id: m.id });
+      await store.refreshMeetings();
+      if (m) page.picked = { meeting: m.id };
     } catch (e) {
       error = why(e);
     } finally {
@@ -67,95 +77,210 @@
     }
   }
 
-  async function readSources() {
-    try {
-      sources = await call<MeetingSources>("meeting_sources");
-      if (!store.recordMics) store.recordMics = sources.microphones.filter((m) => m.default).map((m) => m.id);
-      const played = store.recordPlayed;
-      if (played !== "system" && played !== "none" && !sources.apps.some((a) => a.id === played)) store.recordPlayed = "system";
-    } catch (e) {
-      error = why(e);
+  // The days shown: the weekdays, and Saturday and Sunday only when there's
+  // something on them or one of them is today.
+  const today = $derived(startOfDay(store.now));
+  const days = $derived.by(() => {
+    const all = Array.from({ length: page.days }, (_, i) => addDays(page.from, i));
+    if (page.view === "day") return all;
+    return all.filter((d, i) => i < 5 || d === today || page.all.some((b) => b.start >= d && b.start < addDays(d, 1)));
+  });
+
+  // The hours: 8 to 19, stretched to what's on the days shown.
+  const shown = $derived(page.all.filter((b) => days.some((d) => b.start < addDays(d, 1) && b.end > d)));
+  const first = $derived(Math.min(8, ...shown.map((b) => new Date(b.start).getHours())));
+  const last = $derived(Math.max(19, ...shown.map((b) => { const e = new Date(b.end); return e.getHours() + (e.getMinutes() ? 1 : 0) || 24; })));
+  const hours = $derived(Array.from({ length: last - first + 1 }, (_, i) => first + i));
+  const y = (at: number, day: number) => ((at - day) / MIN / 60 - first) * HOUR;
+
+  /** Where each block goes in its day: side by side when they overlap. */
+  function lanes(day: number) {
+    const end = addDays(day, 1);
+    const list = page.all.filter((b) => b.start < end && b.end > day);
+    const placed: { b: Block; lane: number; of: number }[] = [];
+    let group: typeof placed = [];
+    let groupEnd = 0;
+    const close = () => {
+      const of = Math.max(...group.map((g) => g.lane)) + 1;
+      for (const g of group) g.of = of;
+    };
+    for (const b of list) {
+      if (group.length && b.start >= groupEnd) {
+        close();
+        group = [];
+      }
+      const free = [0, 1, 2, 3, 4, 5].find((l) => !group.some((g) => g.lane === l && g.b.end > b.start)) ?? 0;
+      const p = { b, lane: free, of: 1 };
+      group.push(p);
+      placed.push(p);
+      groupEnd = Math.max(groupEnd, b.end);
     }
+    if (group.length) close();
+    return placed;
   }
 
-  const mics = $derived(store.recordMics ?? []);
-  const toggleMic = (id: string, on: boolean) => (store.recordMics = on ? [...mics, id] : mics.filter((m) => m !== id));
-  const played = $derived(store.recordPlayed);
-  const pick = (id: string) => (store.recordPlayed = id);
+  // The view starts around now, or at the first meeting of the day shown.
+  let scrolledFor = "";
+  $effect(() => {
+    const key = `${page.view}:${page.from}`;
+    if (!body || scrolledFor === key) return;
+    scrolledFor = key;
+    const inView = today >= page.from && today < page.to;
+    const at = inView ? store.now : (shown[0]?.start ?? page.from + first * 3_600_000);
+    body.scrollTop = Math.max(0, y(at, startOfDay(at)) - HOUR);
+  });
 
-  const when = (at: number) => `${i18n.date(at)} · ${i18n.time(at)}`;
-  const name = (m: Meeting) => m.title ?? t.untitled(when(m.started_at));
-  const elapsed = $derived(store.recording ? (store.now - store.recording.started_at) / 1000 : 0);
+  const month = $derived(i18n.date(page.view === "day" ? page.from : addDays(page.from, 3), { month: "long", year: "numeric" }));
+  const name = (b: Block) => b.title || t.untitled(`${i18n.date(b.start)} · ${i18n.time(b.start)}`);
+  const sub = (b: Block) =>
+    b.state === "live"
+      ? t.stLive
+      : b.state === "work"
+        ? t.stWork
+        : b.state === "miss"
+          ? t.stMiss
+          : b.state === "cal"
+            ? page.auto.includes(b.event!.id) ? t.autoBadge : b.event!.call || `${i18n.time(b.start)}–${i18n.time(b.end)}`
+            : b.meeting?.origin === "pocket"
+              ? "Pocket"
+              : `${Math.max(1, Math.round((b.meeting?.duration_ms ?? 0) / MIN))} min`;
+
+  function open(b: Block) {
+    if (b.meeting && b.state !== "live") tabs.open({ kind: "meeting", id: b.meeting.id });
+  }
+
+  // Past: every recording, newest first, kept to the search.
+  const past = $derived(
+    store.meetings.filter((m) => m.state !== "recording" && (!search.trim() || (m.title ?? "").toLowerCase().includes(search.trim().toLowerCase()))),
+  );
+  function showPast(focus = false) {
+    page.past = true;
+    menu = false;
+    if (focus) setTimeout(() => searchField?.focus());
+  }
+
+  const picked = $derived(page.block);
+  const about = $derived(picked?.meeting ? t.aboutPrefix(name(picked), picked.meeting.id) : undefined);
 </script>
 
-<div class="page meetings">
-  <div class="page-head">
-    <div>
-      <h1>{t.title}</h1>
-      <p class="lede">{t.lede}</p>
-    </div>
-    <div class="actions">
-      <button class="btn" disabled={importing} onclick={() => bringIn()}>{importing ? t.importing : t.import}</button>
-    </div>
-  </div>
+<svelte:window onclick={() => (menu = false)} />
 
+<div class="meetings">
   {#if dropping}<div class="drop" aria-hidden="true"><span>{t.dropHere}</span></div>{/if}
 
-  <section class="panel recorder" class:live={!!store.recording}>
-    {#if store.recording}
-      <div class="live-head">
-        <span class="rec" aria-hidden="true"></span>
-        <b>{name(store.recording)}</b>
-        <span class="mono time">{clock(elapsed)}</span>
+  {#if page.past}
+    <div class="head">
+      <button class="icon-btn" onclick={() => (page.past = false)} aria-label={t.backToCalendar} title={t.backToCalendar}><Icon name="chevron-left" size={18} /></button>
+      <h1>{t.pastTitle}</h1>
+    </div>
+    <label class="search">
+      <Icon name="search" size={16} />
+      <input type="search" bind:this={searchField} bind:value={search} placeholder={t.searchPast} aria-label={t.searchPast} />
+    </label>
+    <div class="list">
+      {#each past as m (m.id)}
+        {@const b = page.all.find((x) => x.meeting?.id === m.id)}
+        <button class="row" class:on={page.picked?.meeting === m.id} onclick={() => (page.picked = { meeting: m.id })} ondblclick={() => tabs.open({ kind: "meeting", id: m.id })}>
+          <span class="when">{i18n.date(m.started_at, { weekday: "short", day: "numeric", month: "short" })}</span>
+          <span class="what">
+            <b>{b ? name(b) : (m.title ?? t.untitled(i18n.time(m.started_at)))}</b>
+            {#if m.origin === "pocket"}<Icon name="phone" size={13} />{/if}
+          </span>
+          <span class="tag {b?.state ?? 'recorded'}">{b?.state === "work" ? t.stWork : m.summarized_at ? t.stSummarized : m.transcribed_at ? t.stTranscribed : t.stRecorded}</span>
+          <span class="dur">{Math.max(1, Math.round(m.duration_ms / MIN))} min</span>
+        </button>
+      {:else}
+        <p class="faint none">{search.trim() ? t.noMatchPast : t.noPast}</p>
+      {/each}
+    </div>
+  {:else}
+    <div class="head">
+      <h1>{t.title}</h1>
+      <span class="grow"></span>
+      <button class="icon-btn" onclick={() => showPast(true)} aria-label={t.searchPast} title={t.searchPast}><Icon name="search" size={17} /></button>
+      <button class="btn" onclick={() => showPast()}>{t.past}</button>
+      <div class="menu-wrap">
+        <button class="btn primary" disabled={importing} aria-haspopup="menu" aria-expanded={menu} onclick={(e) => (e.stopPropagation(), (menu = !menu))}>
+          {importing ? t.importing : t.newMeeting}<Icon name="chevron-down" size={15} stroke={2} />
+        </button>
+        {#if menu}
+          <div class="menu" role="menu">
+            <button role="menuitem" disabled={!!store.recording} onclick={() => ((menu = false), (page.dialog = { mode: "record" }))}><span class="rec"></span>{t.recordNow}</button>
+            <button role="menuitem" onclick={() => bringIn()}><Icon name="upload" size={16} />{t.importFile}</button>
+            {#if store.pocket}<button role="menuitem" onclick={() => ((menu = false), (store.pocketShown = true))}><Icon name="phone" size={16} />{t.fromPocket}</button>{/if}
+            <hr />
+            <button role="menuitem" class="quiet" onclick={() => ((menu = false), (page.dialog = { mode: "sources" }))}><Icon name="sliders" size={16} />{t.sources}</button>
+          </div>
+        {/if}
       </div>
-      <div class="meters">
-        {#each store.recording.tracks as track (track.name)}
-          <div class="meter">
-            <span class="dim">{track.kind === "mic" ? t.you : t.others} · {track.source}</span>
-            <span class="meter level" style:--p={Math.sqrt(store.levels[track.name] ?? 0)}><span></span></span>
+    </div>
+
+    <div class="tools">
+      <button class="icon-btn" onclick={() => page.step(-1)} aria-label={t.previous} title={t.previous}><Icon name="chevron-left" size={18} /></button>
+      <button class="icon-btn" onclick={() => page.step(1)} aria-label={t.next} title={t.next}><Icon name="chevron-right" size={18} /></button>
+      <span class="month">{month}</span>
+      <button class="btn small quiet" onclick={() => page.today()}>{t.today}</button>
+      <span class="grow"></span>
+      <div class="seg" role="radiogroup" aria-label={t.view}>
+        <button role="radio" aria-checked={page.view === "day"} class:on={page.view === "day"} onclick={() => page.show("day")}>{t.dayView}</button>
+        <button role="radio" aria-checked={page.view === "week"} class:on={page.view === "week"} onclick={() => page.show("week")}>{t.weekView}</button>
+      </div>
+    </div>
+
+    {#if page.calendarError}
+      <p class="note-line">
+        {page.calendarError === "denied" ? t.calendarDenied : t.calendarFailed(page.calendarError)}
+        {#if page.calendarError === "denied"}
+          <button class="btn small" onclick={() => call("open_privacy", { kind: "calendar" }).catch((e) => (error = why(e)))}>{t.openPrivacy}</button>
+        {/if}
+      </p>
+    {/if}
+
+    <div class="cal" style:--n={days.length}>
+      <div class="days">
+        <span></span>
+        {#each days as d (d)}
+          <div class="day" class:today={d === today}>
+            {i18n.date(d, { weekday: "short" })}
+            <b>{new Date(d).getDate()}</b>
           </div>
         {/each}
       </div>
-    {:else}
-      <div class="played">
-        <div class="setting">
-          <div class="what"><b>{t.played}</b><span>{t.playedHint}</span></div>
-          <div class="how"><button class="btn small quiet" onclick={readSources}>{t.refresh}</button></div>
-        </div>
-        <div class="tiles-row" role="radiogroup" aria-label={t.played}>
-          <button class="tile inset source" class:on={played === "system"} role="radio" aria-checked={played === "system"} onclick={() => pick("system")}>
-            <span class="glyph"><Icon name="monitor" size={24} stroke={1.6} /></span>
-            <span class="label">{t.everything}</span>
-          </button>
-          {#each sources?.apps ?? [] as app (app.id)}
-            <button class="tile inset source" class:on={played === app.id} role="radio" aria-checked={played === app.id} title={app.name} onclick={() => pick(app.id)}>
-              {#if app.icon}
-                <img src="data:image/png;base64,{app.icon}" alt="" />
-              {:else}
-                <span class="glyph letter">{app.name.slice(0, 1)}</span>
-              {/if}
-              {#if app.playing}<span class="playing" title={t.playingNow}>♪</span>{/if}
-              <span class="label">{app.name}</span>
-            </button>
+      <div class="body" bind:this={body}>
+        <div class="grid" style:height="{(hours.length - 1) * HOUR + 16}px">
+          {#each hours as h, i (h)}
+            <span class="hour" style:top="{i * HOUR + 8}px">{i ? h : ""}</span>
+            <span class="line" style:top="{i * HOUR + 8}px"></span>
           {/each}
-          <button class="tile inset source" class:on={played === "none"} role="radio" aria-checked={played === "none"} onclick={() => pick("none")}>
-            <span class="glyph"><Icon name="ban" size={24} stroke={1.6} /></span>
-            <span class="label">{t.nothing}</span>
-          </button>
+          <div class="cols">
+            {#each days as d (d)}
+              <div class="col">
+                {#each lanes(d) as { b, lane, of } (b.key)}
+                  {@const top = Math.max(0, y(b.start, d)) + 9}
+                  {@const height = Math.max(20, y(Math.min(b.end, addDays(d, 1)), d) - Math.max(0, y(b.start, d)) - 3)}
+                  <button
+                    class="block {b.state}"
+                    class:sel={picked?.key === b.key}
+                    style:top="{top}px"
+                    style:height="{height}px"
+                    style:left="calc({(lane / of) * 100}% + 3px)"
+                    style:width="calc({100 / of}% - 6px)"
+                    onclick={(e) => (e.stopPropagation(), page.pick(picked?.key === b.key ? null : b))}
+                    ondblclick={() => open(b)}
+                    title={name(b)}
+                  >
+                    <span class="name">{#if b.state === "live"}<span class="rec"></span>{/if}{name(b)}</span>
+                    {#if height > 34}<small>{sub(b)}</small>{/if}
+                  </button>
+                {/each}
+                {#if d === today}<span class="now" style:top="{y(store.now, d) + 8}px"></span>{/if}
+              </div>
+            {/each}
+          </div>
         </div>
       </div>
-      {#each sources?.microphones ?? [] as mic (mic.id)}
-        <div class="setting">
-          <div class="what"><b>{mic.name}</b><span>{mic.default ? t.micDefault : t.mic}</span></div>
-          <div class="how"><Toggle checked={mics.includes(mic.id)} label={mic.name} onchange={(on) => toggleMic(mic.id, on)} /></div>
-        </div>
-      {/each}
-      <div class="setting">
-        <input class="title" type="text" placeholder={t.titlePlaceholder} bind:value={store.recordTitle} aria-label={t.titlePlaceholder} />
-      </div>
-      <p class="faint note">{t.recordAbove} {t.consent}</p>
-    {/if}
-  </section>
+    </div>
+  {/if}
 
   {#if error}<p class="error-text">{error}</p>{/if}
   {#if store.recordingError?.code === "no_system_audio"}
@@ -168,11 +293,358 @@
   {:else if store.recordingError}
     <p class="error-text">{store.recordingError.message}</p>
   {/if}
+
+  <div class="dock">
+    <Composer mic conversation="new" {about} placeholder={picked?.meeting ? t.askAbout(name(picked)) : page.past ? t.askPast : t.askWeek} />
+  </div>
 </div>
 
+{#if page.dialog}<RecordDialog />{/if}
+
 <style>
-  .small {
+  .meetings {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 26px 32px 0;
+    box-sizing: border-box;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .grow {
+    flex: 1;
+  }
+  .head .btn :global(svg) {
+    margin-left: 4px;
+  }
+  .menu-wrap {
+    position: relative;
+  }
+  .menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 20;
+    width: 260px;
+    padding: 6px;
+    border-radius: var(--r);
+    background: var(--ink-2);
+    box-shadow: 0 0 0 1px var(--rim-2), var(--shadow);
+  }
+  .menu button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--pearl);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .menu button:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  .menu button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .menu .quiet {
+    color: var(--haze);
+  }
+  .menu hr {
+    border: 0;
+    border-top: 1px solid var(--rim);
+    margin: 4px 6px;
+  }
+  .rec {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin: 0 3px;
+    border-radius: 50%;
+    background: var(--wrong);
+    flex-shrink: 0;
+  }
+  .block .rec {
+    width: 7px;
+    height: 7px;
+    margin: 0 5px 1px 0;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.3;
+    }
+  }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+  .month {
+    margin: 0 8px 0 6px;
+    font: 600 var(--fs-head)/1 var(--display);
+    white-space: nowrap;
+  }
+  .month::first-letter {
+    text-transform: uppercase;
+  }
+  .seg {
+    display: flex;
+    padding: 2px;
+    border-radius: var(--r-sm);
+    background: var(--ink-2);
+    box-shadow: 0 0 0 1px var(--rim);
+  }
+  .seg button {
+    padding: 4px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--haze);
+    font: inherit;
     font-size: var(--fs-meta);
+    cursor: pointer;
+  }
+  .seg button.on {
+    background: var(--ink-3);
+    color: var(--pearl);
+  }
+  .note-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 10px;
+    color: var(--haze);
+    font-size: var(--fs-meta);
+  }
+  .cal {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--r);
+    background: var(--ink);
+    box-shadow: 0 0 0 1px var(--rim);
+    overflow: hidden;
+  }
+  .days {
+    display: grid;
+    grid-template-columns: 38px repeat(var(--n), minmax(0, 1fr));
+    padding: 10px 0 8px;
+    border-bottom: 1px solid var(--rim);
+  }
+  .day {
+    text-align: center;
+    color: var(--haze);
+    font-size: var(--fs-small);
+  }
+  .day b {
+    display: block;
+    width: 30px;
+    height: 30px;
+    margin: 3px auto 0;
+    border-radius: 50%;
+    font: 500 15px/30px var(--display);
+    color: var(--pearl);
+  }
+  .day.today b {
+    background: var(--think);
+    color: #fff;
+  }
+  .body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .grid {
+    position: relative;
+  }
+  .hour {
+    position: absolute;
+    left: 0;
+    width: 30px;
+    text-align: right;
+    transform: translateY(-7px);
+    color: var(--dusk);
+    font-size: 11px;
+  }
+  .line {
+    position: absolute;
+    left: 38px;
+    right: 0;
+    border-top: 1px solid var(--rim);
+  }
+  .cols {
+    position: absolute;
+    inset: 0 0 0 38px;
+    display: grid;
+    grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  }
+  .col {
+    position: relative;
+    border-left: 1px solid var(--rim);
+  }
+  .block {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 4px 7px;
+    border: 0;
+    border-radius: 7px;
+    overflow: hidden;
+    font: 500 12px/1.25 var(--sans);
+    text-align: left;
+    cursor: pointer;
+  }
+  .block .name,
+  .block small {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .block small {
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 0.75;
+  }
+  .block.done,
+  .block.recorded {
+    background: color-mix(in srgb, var(--think) 16%, var(--ink));
+    color: color-mix(in srgb, var(--think) 55%, var(--pearl));
+    box-shadow: inset 3px 0 0 var(--think);
+  }
+  .block.recorded {
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--think) 45%, transparent);
+  }
+  .block.work {
+    background: color-mix(in srgb, var(--wait) 14%, var(--ink));
+    color: color-mix(in srgb, var(--wait) 60%, var(--pearl));
+    box-shadow: inset 3px 0 0 var(--wait);
+  }
+  .block.live {
+    background: color-mix(in srgb, var(--wrong) 18%, var(--ink));
+    color: color-mix(in srgb, var(--wrong) 55%, var(--pearl));
+    box-shadow: inset 3px 0 0 var(--wrong), 0 0 0 1px color-mix(in srgb, var(--wrong) 45%, transparent);
+  }
+  .block.cal {
+    background: var(--ink-2);
+    color: var(--pearl-mid);
+    box-shadow: inset 0 0 0 1px var(--rim-2);
+  }
+  .block.miss {
+    background: transparent;
+    color: var(--dusk);
+    border: 1px dashed var(--rim-2);
+  }
+  .block.sel {
+    outline: 2px solid var(--pearl-mid);
+    outline-offset: 1px;
+    z-index: 2;
+  }
+  .now {
+    position: absolute;
+    left: -1px;
+    right: 0;
+    z-index: 3;
+    border-top: 1.5px solid var(--wrong);
+    pointer-events: none;
+  }
+  .now::before {
+    content: "";
+    position: absolute;
+    left: -4px;
+    top: -4.5px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--wrong);
+  }
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    margin-bottom: 10px;
+    border-radius: var(--r);
+    background: var(--ink-2);
+    box-shadow: 0 0 0 1px var(--rim);
+    color: var(--dusk);
+  }
+  .search input {
+    flex: 1;
+    padding: 9px 0;
+    border: 0;
+    background: none;
+  }
+  .list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) auto 60px;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 11px 8px;
+    border: 0;
+    border-top: 1px solid var(--rim);
+    background: none;
+    color: var(--pearl);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .row:hover,
+  .row.on {
+    background: var(--hover);
+  }
+  .row .when,
+  .row .dur {
+    color: var(--haze);
+    font-size: var(--fs-meta);
+  }
+  .row .dur {
+    text-align: right;
+  }
+  .row .what {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--dusk);
+  }
+  .row .what b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--pearl);
+    font-weight: 600;
+  }
+  .tag.work {
+    color: var(--wait);
+  }
+  .none {
+    padding: 20px 8px;
+  }
+  .dock {
+    width: min(560px, calc(100% - 48px));
+    margin: 0 auto;
+    padding: 12px 0 20px;
   }
   .drop {
     position: fixed;
@@ -187,117 +659,5 @@
   .drop span {
     font: 600 var(--fs-head)/1.2 var(--display);
     color: var(--pearl);
-  }
-  .recorder.live {
-    border-color: color-mix(in srgb, var(--wrong) 40%, var(--rim));
-  }
-  .live-head {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .time {
-    color: var(--haze);
-  }
-  .rec {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--wrong);
-    flex-shrink: 0;
-  }
-  .live .rec {
-    animation: pulse 1.4s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    50% {
-      opacity: 0.35;
-    }
-  }
-  .meters {
-    display: grid;
-    gap: 10px;
-    margin-top: 16px;
-  }
-  .meter {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 220px;
-    align-items: center;
-    gap: 14px;
-    font-size: var(--fs-meta);
-  }
-  .level {
-    height: 6px;
-  }
-  .level > span {
-    transition-duration: 200ms;
-    transition-timing-function: linear;
-  }
-  .played {
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--rim);
-  }
-  .played .setting {
-    padding-top: 2px;
-  }
-  .tiles-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .source {
-    position: relative;
-    justify-items: center;
-    gap: 6px;
-    width: 88px;
-    padding: 10px 6px 8px;
-    border-color: transparent;
-    background: transparent;
-    font: 500 var(--fs-small)/1.2 var(--sans);
-  }
-  .source.on {
-    border-color: var(--rim-2);
-  }
-  .source img,
-  .glyph {
-    width: 44px;
-    height: 44px;
-  }
-  .glyph {
-    display: grid;
-    place-items: center;
-    border-radius: 11px;
-    background: var(--ink-3);
-    color: var(--pearl-mid);
-  }
-  .letter {
-    font: 600 21px/1 var(--display);
-  }
-  .label {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .playing {
-    position: absolute;
-    top: 6px;
-    right: 14px;
-    width: 18px;
-    height: 18px;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    background: var(--done);
-    color: var(--eye);
-    font-size: var(--fs-small);
-  }
-  .title {
-    flex: 1;
-    max-width: 360px;
-  }
-  .note {
-    font-size: var(--fs-meta);
-    margin-top: 8px;
   }
 </style>

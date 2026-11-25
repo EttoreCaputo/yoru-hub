@@ -9,15 +9,16 @@
 //!   the calendar has a meeting on: it takes the microphone for much else.
 //!
 //! A recording the detection started stops once the call app has let the
-//! microphone go for a while. [`Detector`] only decides; the app asks the
-//! questions and records.
+//! microphone go for a while. A meeting the user marked ahead (on the
+//! Meetings page's calendar, `Settings::auto_record`) is recorded without
+//! asking. [`Detector`] only decides; the app asks the questions and records.
 
 use std::collections::HashSet;
 use std::io::{self, BufRead, BufReader};
 use std::process::{ChildStdin, Command, Stdio};
 use std::thread;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Asked this long before a calendar meeting starts.
@@ -62,8 +63,16 @@ const BROWSERS: &[&str] = &[
 /// Yoru's own app: its notch and its recordings use the microphone too.
 const OURS: &str = "it.bytebusters.yoru";
 
-/// Links that make a calendar event a call.
-const CALL_LINKS: &[&str] = &["meet.google.com", "zoom.us/", "teams.microsoft.com", "teams.live.com", "webex.com", "whereby.com", "facetime.apple.com"];
+/// Links that make a calendar event a call, and the service each is.
+const CALL_LINKS: &[(&str, &str)] = &[
+    ("meet.google.com", "Meet"),
+    ("zoom.us/", "Zoom"),
+    ("teams.microsoft.com", "Teams"),
+    ("teams.live.com", "Teams"),
+    ("webex.com", "Webex"),
+    ("whereby.com", "Whereby"),
+    ("facetime.apple.com", "FaceTime"),
+];
 
 /// An app taking sound from a microphone.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -74,13 +83,15 @@ pub struct MicUser {
 }
 
 /// A meeting in the calendar.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CalendarMeeting {
     pub id: String,
     pub title: String,
     /// Unix ms.
     pub start: i64,
     pub end: i64,
+    /// The service its call link is on (`Zoom`, `Meet`), empty if none.
+    pub call: String,
 }
 
 fn is_call_app(id: &str) -> bool {
@@ -109,8 +120,8 @@ pub fn meetings_in(answer: &str) -> Vec<CalendarMeeting> {
                 return None;
             }
             let text = format!("{} {} {}", e["video_call"].as_str().unwrap_or(""), e["location"].as_str().unwrap_or(""), e["description"].as_str().unwrap_or(""));
-            let call = e["video_call"].is_string() || CALL_LINKS.iter().any(|l| text.contains(l)) || attendees.len() >= 2;
-            if !call {
+            let service = CALL_LINKS.iter().find(|(link, _)| text.contains(link)).map(|(_, name)| *name);
+            if !(e["video_call"].is_string() || service.is_some() || attendees.len() >= 2) {
                 return None;
             }
             Some(CalendarMeeting {
@@ -118,6 +129,7 @@ pub fn meetings_in(answer: &str) -> Vec<CalendarMeeting> {
                 title: e["summary"].as_str().unwrap_or("").trim().to_string(),
                 start: time(&e["start"])?,
                 end: time(&e["end"])?,
+                call: service.unwrap_or("").to_string(),
             })
         })
         .collect()
@@ -126,12 +138,17 @@ pub fn meetings_in(answer: &str) -> Vec<CalendarMeeting> {
 /// How far ahead the calendar is read.
 const LOOK_AHEAD_MIN: i64 = 120;
 
-/// The meetings in the Mac's calendar (EventKit, through `yoru-audio
-/// events`) from a little while ago to two hours ahead. The first time,
-/// macOS asks whether Yoru may read the calendar; `Err("denied")` if not.
+/// The meetings in the Mac's calendar from a little while ago to two hours
+/// ahead: what the detection watches.
 pub fn calendar(now_ms: i64) -> Result<Vec<CalendarMeeting>, String> {
-    let from = (now_ms - EARLY_MS).to_string();
-    let to = (now_ms + LOOK_AHEAD_MIN * 60 * 1000).to_string();
+    events(now_ms - EARLY_MS, now_ms + LOOK_AHEAD_MIN * 60 * 1000)
+}
+
+/// The meetings in the Mac's calendar (EventKit, through `yoru-audio
+/// events`) between `from` and `to` (Unix ms). The first time, macOS asks
+/// whether Yoru may read the calendar; `Err("denied")` if not.
+pub fn events(from: i64, to: i64) -> Result<Vec<CalendarMeeting>, String> {
+    let (from, to) = (from.to_string(), to.to_string());
     let out = Command::new(super::helper().map_err(|e| e.to_string())?)
         .args(["events", &from, &to])
         .stdin(Stdio::null())
@@ -185,11 +202,18 @@ pub struct Detector {
     quiet_since: Option<i64>,
     /// A question is waiting for the user: one at a time.
     asking: bool,
+    /// Meetings (their ids) to record without asking.
+    auto: HashSet<String>,
 }
 
 impl Detector {
     pub fn set_meetings(&mut self, meetings: Vec<CalendarMeeting>) {
         self.meetings = meetings;
+    }
+
+    /// The meetings to record without asking (`Settings::auto_record`).
+    pub fn set_auto(&mut self, ids: impl IntoIterator<Item = String>) {
+        self.auto = ids.into_iter().collect();
     }
 
     /// The question asked is answered (or gone unanswered).
@@ -242,6 +266,11 @@ impl Detector {
             if let Some(armed) = self.armed.take() {
                 return Some(Action::Record { app: (*app).clone(), title: armed.title });
             }
+            if let Some(m) = on.as_ref().filter(|m| self.auto.contains(&m.id) && !self.asked.contains(&m.id)) {
+                self.asked.insert(m.id.clone());
+                self.asked.insert(format!("app:{}", app.id));
+                return Some(Action::Record { app: (*app).clone(), title: m.title.clone() });
+            }
             let call = format!("app:{}", app.id);
             let fresh = !self.asked.contains(&call) && on.as_ref().is_none_or(|m| !self.asked.contains(&m.id));
             if !fresh {
@@ -254,7 +283,12 @@ impl Detector {
             self.asking = true;
             return Some(Action::Ask { app: (*app).clone(), meeting: on });
         }
-        let soon = self.meetings.iter().find(|m| m.start - HEADS_UP_MS <= now && now <= m.start + 60_000 && !self.asked.contains(&m.id)).cloned()?;
+        // A meeting marked ahead needs no question: it's recorded when the call starts.
+        let soon = self
+            .meetings
+            .iter()
+            .find(|m| m.start - HEADS_UP_MS <= now && now <= m.start + 60_000 && !self.asked.contains(&m.id) && !self.auto.contains(&m.id))
+            .cloned()?;
         self.asked.insert(soon.id.clone());
         self.asking = true;
         Some(Action::HeadsUp(soon))
@@ -298,7 +332,7 @@ mod tests {
     }
 
     fn standup(start: i64) -> CalendarMeeting {
-        CalendarMeeting { id: "ev1".into(), title: "Standup".into(), start, end: start + 30 * MIN }
+        CalendarMeeting { id: "ev1".into(), title: "Standup".into(), start, end: start + 30 * MIN, call: String::new() }
     }
 
     #[test]
@@ -311,8 +345,23 @@ mod tests {
             {"event_id": "e", "summary": "Declined", "start": "2026-11-18T14:00:00+01:00", "end": "2026-11-18T15:00:00+01:00", "all_day": false,
              "attendees": [{"email": "me@x", "self": true, "response": "declined"}, {"email": "o@x", "self": false}]},
         ]});
-        let found: Vec<String> = meetings_in(&answer.to_string()).into_iter().map(|m| m.id).collect();
-        assert_eq!(found, ["a", "c"]);
+        let found: Vec<(String, String)> = meetings_in(&answer.to_string()).into_iter().map(|m| (m.id, m.call)).collect();
+        assert_eq!(found, [("a".into(), "Meet".into()), ("c".into(), "Zoom".into())]);
+    }
+
+    #[test]
+    fn a_meeting_marked_ahead_is_recorded_without_asking() {
+        let mut d = Detector::default();
+        let t = 1_000 * MIN;
+        d.set_meetings(vec![standup(t)]);
+        d.set_auto(["ev1".to_string()]);
+        // No heads-up for it.
+        assert_eq!(d.step(t - 2 * MIN, &[], false), None);
+        let zoom = app("us.zoom.xos");
+        assert_eq!(d.step(t + MIN, &[zoom.clone()], false), Some(Action::Record { app: zoom.clone(), title: "Standup".into() }));
+        d.following(&zoom.id);
+        // Stopped by hand: not recorded again, nor asked about.
+        assert_eq!(d.step(t + 2 * MIN, &[zoom], false), None);
     }
 
     #[test]

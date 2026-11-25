@@ -22,6 +22,8 @@
   import { SETTINGS_PAGES } from "./lib/icons/pages";
   import { look } from "./lib/look.svelte";
   import ActivityPanel from "./lib/ui/ActivityPanel.svelte";
+  import MeetingPanel from "./lib/ui/MeetingPanel.svelte";
+  import { page as meetingsPage } from "./lib/meetings-page.svelte";
   import PocketDialog from "./lib/ui/PocketDialog.svelte";
   import Icon from "./lib/ui/Icon.svelte";
   import { on } from "./lib/api";
@@ -37,9 +39,12 @@
   // Services, Spoken and Animations are opened from Settings, and lead back to it.
   const fromSettings = $derived(!tabs.shown && (SETTINGS_PAGES as readonly string[]).includes(store.page));
   // The Home, Memory and a conversation fill the card and scroll inside; the other pages scroll here.
-  const fill = $derived(tabs.shown ? tabs.shown.kind === "chat" : store.page === "home" || store.page === "memory");
-  // Yoru waits at the bottom right of the pages where he isn't already the page.
-  const bubbled = $derived(tabs.shown ? tabs.shown.kind !== "chat" : store.page !== "home");
+  const fill = $derived(tabs.shown ? tabs.shown.kind === "chat" : store.page === "home" || store.page === "memory" || store.page === "meetings");
+  // Yoru waits at the bottom right of the pages where he isn't already the page
+  // (the Meetings page has the field to ask him at its bottom).
+  const bubbled = $derived(tabs.shown ? tabs.shown.kind !== "chat" : store.page !== "home" && store.page !== "meetings");
+  // On the Meetings page the right side is the meeting picked, or today's.
+  const meetingSide = $derived(!tabs.shown && store.page === "meetings");
   let main: HTMLElement | undefined = $state();
   // Each page starts at its top.
   $effect(() => {
@@ -50,7 +55,7 @@
 </script>
 
 <!-- The frame: the bar on top, the sidebar on the left, the page as a card,
-     and the activity panel on the right, on every page. -->
+     and the activity panel on the right (on Meetings, the meeting's panel). -->
 <div class="app" class:folded={!look.sidebar}>
   <WindowBar />
   <Sidebar />
@@ -71,7 +76,7 @@
     {/if}
   </main>
   {#if bubbled && !(store.onboarding && !store.onboarding.done)}<YoruBubble />{/if}
-  {#if look.activity}<ActivityPanel />{/if}
+  {#if meetingSide}{#if look.activity || meetingsPage.picked}<MeetingPanel />{/if}{:else if look.activity}<ActivityPanel />{/if}
   {#if store.pocketShown && store.pocket}<PocketDialog pocket={store.pocket} onclose={() => (store.pocketShown = false)} />{/if}
   <!-- The first run asks for the permissions itself; after it, the gate
        waits for the microphone if it was taken away. -->

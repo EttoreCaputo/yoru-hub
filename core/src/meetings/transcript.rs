@@ -68,11 +68,14 @@ pub struct Settings {
     /// Notice a meeting starting (the calendar, a call app taking the
     /// microphone) and ask whether to record it (docs/meetings.md, Detection).
     pub detect: bool,
+    /// Calendar meetings (their event ids) to record without asking when
+    /// their call starts, marked on the Meetings page.
+    pub auto_record: Vec<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, detail: Detail::Detailed, summary_style: "auto".into(), auto_summary: true, summarize_by: String::new(), detect: false }
+        Settings { transcribe: When::After, transcribe_by: "local".into(), language: String::new(), speakers: true, detail: Detail::Detailed, summary_style: "auto".into(), auto_summary: true, summarize_by: String::new(), detect: false, auto_record: Vec::new() }
     }
 }
 
