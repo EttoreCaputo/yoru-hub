@@ -88,4 +88,5 @@ fn link_sync_engine(swift: &dyn Fn(&[&str]) -> std::process::Output) {
     println!("cargo:rustc-link-lib=framework=CloudKit");
     println!("cargo:rustc-link-lib=framework=Security");
     println!("cargo:rustc-link-lib=framework=Foundation");
+    println!("cargo:rustc-link-lib=framework=AppKit");
 }

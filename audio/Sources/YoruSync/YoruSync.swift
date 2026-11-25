@@ -8,6 +8,7 @@
 // `app/src-tauri/src/icloud.rs`: {zone, kind, uid, changed, by, deleted, data},
 // `data` being the record's fields as a JSON string.
 
+import AppKit
 import CloudKit
 import Foundation
 
@@ -285,6 +286,10 @@ public func yoru_sync_start(_ dir: UnsafePointer<CChar>, _ zones: UnsafePointer<
     guard shared == nil else { return }
     let zones = String(cString: zones).split(separator: ",").map(String.init)
     shared = Engine(dir: URL(fileURLWithPath: String(cString: dir)), zones: zones, callback: callback)
+    // CloudKit's pushes (another Mac changed something) reach CKSyncEngine
+    // only in an app registered for remote notifications; the 5-minute
+    // fetch stays as the fallback.
+    DispatchQueue.main.async { NSApplication.shared.registerForRemoteNotifications() }
 }
 
 /// Records changed here, as JSON: sent soon.

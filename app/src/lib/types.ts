@@ -408,6 +408,24 @@ export type Permissions = Record<PermissionKind, PermissionState>;
 /** A bridge event: `kind` and its fields, plus the board it comes from. */
 export type BridgeEvent = { kind: string; target?: string | null; board?: string | null; [field: string]: unknown };
 
+/** iCloud sync as it is now (`icloud_status`'s `status`, the `icloud` event; docs/icloud.md). */
+export type ICloudStatus = {
+  running: boolean;
+  entitled: boolean;
+  account: string;
+  last_sent: number;
+  last_fetched: number;
+  sent: number;
+  received: number;
+  errors: string[];
+  last_error: number;
+  device: string;
+  doer: string;
+  is_doer: boolean;
+};
+/** `icloud_status`: whether sync is on here, meetings with audio, and the engine. */
+export type ICloud = { on: boolean; audio: boolean; status: Partial<ICloudStatus> };
+
 /** The Pocket recorder's settings (`pocket_settings`). */
 export type PocketSettings = { enabled: boolean; auto_sync: boolean; delete_after_sync: boolean; set_clock: boolean; wifi: boolean };
 /** A recording on the Pocket; `meeting` is the meeting it became. */

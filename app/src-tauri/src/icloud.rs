@@ -79,6 +79,9 @@ pub struct Status {
     pub sent: u64,
     pub received: u64,
     pub errors: Vec<String>,
+    /// Unix ms of the last error: older than the last records sent or
+    /// received, it's over.
+    pub last_error: i64,
     /// This Mac's id.
     pub device: String,
     /// The Mac that fires timers, tasks and watchers, and whether it's this one.
@@ -189,7 +192,12 @@ fn run() {
         let doer = yoru_core::doer::is_doer();
         if was_doer != Some(doer) {
             was_doer = Some(doer);
-            log(&if doer { "this Mac is the doer".to_string() } else { format!("the doer is {}", sync.doer.holder().0) });
+            let holder = sync.doer.holder().0;
+            log(&match (doer, holder.is_empty()) {
+                (true, _) => "this Mac is the doer".to_string(),
+                (false, true) => "waiting to hear from iCloud before claiming the doer".to_string(),
+                (false, false) => format!("the doer is {holder}"),
+            });
         }
         for store in &sync.stores {
             let records = store.changes(BATCH);
@@ -256,6 +264,7 @@ extern "C" fn on_event(event: *const c_char, text: *const c_char) {
             log(&text);
             let mut st = sync.status.lock().unwrap();
             st.errors.push(text);
+            st.last_error = now;
             let excess = st.errors.len().saturating_sub(20);
             st.errors.drain(..excess);
         }

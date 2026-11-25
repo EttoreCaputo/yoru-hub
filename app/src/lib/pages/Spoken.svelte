@@ -7,6 +7,7 @@
 <script lang="ts">
   import { call, why } from "../api";
   import { i18n } from "../i18n/index.svelte";
+  import { store } from "../store.svelte";
   import type { SpokenClip } from "../types";
   import ConfirmButton from "../ui/ConfirmButton.svelte";
   import { clock } from "../ui/when";
@@ -45,6 +46,11 @@
       void context?.close();
       context = null;
     };
+  });
+
+  // Clips from another Mac (iCloud): the list is read again.
+  $effect(() => {
+    if (store.spokenChanged) call<SpokenClip[]>("spoken_clips").then((c) => (clips = c), () => {});
   });
 
   function stop() {

@@ -10,6 +10,7 @@ import { BUNDLED_VERSION } from "./bundled";
 import { tabs } from "./tabs.svelte";
 import { changelog, updateFor, type Update } from "./updates";
 import type {
+  ICloudStatus,
   ActiveAgent,
   AssistantInfo,
   AssistantSettings,
@@ -154,6 +155,10 @@ class Store {
   recordBusy = $state<"starting" | "stopping" | null>(null);
   /** The Pocket recorder, or null where it can't run. */
   pocket = $state<PocketStatus | null>(null);
+  /** iCloud sync's engine, as the `icloud` event tells it (null until it runs). */
+  icloud = $state<ICloudStatus | null>(null);
+  /** Goes up when Spoken clips came from another Mac, for the Spoken page to read them again. */
+  spokenChanged = $state(0);
   /** The Pocket's dialog is open (from the sidebar, or its Settings page). */
   pocketShown = $state(false);
   /** Every meeting, newest first, for the Home's list and the tabs. */
@@ -223,6 +228,8 @@ class Store {
     on<AssistantInfo>("assistant", (info) => (this.info = info));
     on<MeetingEvent>("meeting", (e) => this.#onMeeting(e));
     on<MacEvent>("notch", (e) => this.#onMac(e));
+    on<ICloudStatus>("icloud", (s) => (this.icloud = s));
+    on<string[]>("synced", (kinds) => this.#synced(kinds));
     on<PocketEvent>("pocket", (e) => (e.kind === "status" ? (this.pocket = e.status) : this.#recorded(e.meeting)));
     void this.#load();
   }
@@ -267,6 +274,18 @@ class Store {
     this.currentChat = c.current;
     // A conversation deleted (or a new one left empty) closes its tab.
     tabs.prune((t) => t.kind === "chat" && t.id !== c.current && !c.list.some((x) => x.id === t.id));
+  }
+
+  /** Records came from another Mac (docs/icloud.md): the lists they touch are read again.
+   *  The inbox, tasks, conversations and the assistant's settings come as their own events. */
+  #synced(kinds: string[]) {
+    const has = (...k: string[]) => k.some((x) => kinds.includes(x));
+    if (has("meeting")) void this.refreshMeetings();
+    if (has("folder")) void this.refreshFolders();
+    if (has("watcher")) void this.refreshWatchers();
+    if (has("timer")) void this.refreshTimers();
+    if (has("connector")) void this.refreshConnectors();
+    if (has("clip")) this.spokenChanged++;
   }
 
   /** A meeting recorded, transcribed or summarized: the list follows. */

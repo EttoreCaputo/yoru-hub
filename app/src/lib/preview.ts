@@ -616,6 +616,16 @@ const boards: DeviceInfo[] = offline
 const shownBoard = () => boards.find((b) => b.current) ?? null;
 let onboardingDone = !params.has("setup");
 const permissions = { microphone: params.get("mic") ?? "granted", calendar: params.has("setup") ? "unknown" : "granted", system_audio: params.has("setup") ? "unknown" : "granted" };
+// iCloud sync on, this Mac the doer, a fetch a minute ago.
+let icloud = {
+  on: true,
+  audio: true,
+  status: {
+    running: true, entitled: true, account: "available", last_sent: Date.now() - 20_000, last_fetched: Date.now() - 70_000,
+    sent: 214, received: 166, errors: [], last_error: 0, device: "08db09af6e97f26d", doer: "08db09af6e97f26d", is_doer: true,
+  },
+};
+
 const handlers = new Map<string, Handler[]>();
 
 function emit(event: string, payload: unknown) {
@@ -834,6 +844,9 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   },
   delete_meeting: (a) => (meetings = meetings.filter((m) => m.id !== a.id)),
   meeting_audio: () => tone(),
+  icloud_status: () => icloud,
+  set_icloud: (a) => void (icloud = { ...icloud, on: !!a.on }),
+  set_icloud_audio: (a) => void (icloud = { ...icloud, audio: !!a.on }),
   pocket_status: () => pocket,
   pocket_settings: () => pocket.settings,
   set_pocket_settings: (a) => void ((pocket = { ...pocket, settings: a.settings as PocketStatus["settings"] }), emitPocket()),

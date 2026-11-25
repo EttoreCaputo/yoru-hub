@@ -15,11 +15,12 @@
   import { call, why } from "../api";
   import { i18n, LANGUAGES, type Lang } from "../i18n/index.svelte";
   import { store, type Page } from "../store.svelte";
-  import type { Brain, McpInfo } from "../types";
+  import type { Brain, ICloud, ICloudStatus, McpInfo } from "../types";
   import Board from "../ui/Board.svelte";
   import PermissionList from "../ui/PermissionList.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import PocketSettingsPage from "../ui/PocketSettings.svelte";
+  import ICloudSettingsPage from "../ui/ICloudSettings.svelte";
   import Intelligence, { type Job } from "../ui/Intelligence.svelte";
   import { PAGE_ICONS } from "../icons/pages";
   import Icon from "../ui/Icon.svelte";
@@ -70,13 +71,13 @@
   }
 
   // The parts with a page of their own here; the other rows open an app page.
-  type Part = "brain" | "mac" | "board" | "pocket";
-  const PART_ICONS: Record<Part, IconName> = { brain: "sparkles", mac: "laptop", board: "cpu", pocket: "mic" };
+  type Part = "brain" | "mac" | "board" | "pocket" | "icloud";
+  const PART_ICONS: Record<Part, IconName> = { brain: "sparkles", mac: "laptop", board: "cpu", pocket: "mic", icloud: "cloud" };
   type Row = { part: Part } | { page: Page };
   const GROUPS: { id: string; rows: Row[] }[] = [
     { id: "yoru", rows: [{ part: "brain" }, { page: "routines" }, { page: "tasks" }] },
     { id: "devices", rows: [{ part: "board" }, { part: "pocket" }, { part: "mac" }] },
-    { id: "accounts", rows: [{ page: "connectors" }] },
+    { id: "accounts", rows: [{ page: "connectors" }, { part: "icloud" }] },
   ];
 
   let open = $state<Part | null>(store.settingsSection ? "brain" : null);
@@ -103,6 +104,25 @@
     const dot = p.phase === "connected" ? "done" : p.phase === "refused" || p.phase === "no_bluetooth" ? "wrong" : p.phase === "unpaired" ? "" : "think";
     return { text: [tp.phases[p.phase], p.phase === "connected" && p.battery !== null ? `${p.battery}%` : ""].filter(Boolean).join(" · "), dot };
   });
+  let icloudOn = $state(false);
+  // The engine's status comes as the `icloud` event; until the first one, as read here.
+  const readICloud = () =>
+    call<ICloud>("icloud_status").then(
+      (c) => ((icloudOn = c.on), c.status.running && (store.icloud ??= c.status as ICloudStatus)),
+      () => {},
+    );
+  $effect(() => {
+    void readICloud();
+  });
+  const icloudSummary = $derived.by(() => {
+    const ti = i18n.t.icloud;
+    if (!icloudOn) return { text: ti.off, dot: "" };
+    const c = store.icloud;
+    if (!c) return { text: ti.accounts.unknown, dot: "think" };
+    if (c.errors.length && c.last_error > Math.max(c.last_sent, c.last_fetched)) return { text: c.errors[c.errors.length - 1], dot: "wrong" };
+    if (c.account !== "available") return { text: ti.accounts[c.account] ?? c.account, dot: "wait" };
+    return { text: [ti.accounts.available, c.is_doer ? ti.doerHere : ""].filter(Boolean).join(" · "), dot: "done" };
+  });
   const summary = $derived<Record<Part, { text: string; dot: string }>>({
     brain: !store.info?.ready
       ? { text: brainProblem, dot: "wrong" }
@@ -113,6 +133,7 @@
         ? { text: t.boardOff, dot: "" }
         : { text: [store.boardState === "boot" ? i18n.t.link.boot : i18n.t.link.live, via, firmware].filter(Boolean).join(" · "), dot: store.boardState === "boot" ? "think" : "done" },
     pocket: pocketSummary,
+    icloud: icloudSummary,
   });
   const loginNeeded = $derived(store.connectors.filter((c) => c.enabled && (c.state === "needs_login" || c.state === "error")).length);
   const connectorsOn = $derived(store.connectors.filter((c) => c.enabled).length);
@@ -126,7 +147,7 @@
 <div class="page">
   {#if open}
     <div class="sub" in:fly={{ y: 10, duration: 260 }}>
-      <button class="btn quiet small back" onclick={() => ((open = null), readAll())}>
+      <button class="btn quiet small back" onclick={() => ((open = null), readAll(), readICloud())}>
         <Icon name="chevron-left" size={16} />{t.back}
       </button>
       <div class="sub-head">
@@ -139,7 +160,8 @@
       {#if open === "brain"}<Intelligence {row} />{@render pageLink("spoken")}
       {:else if open === "mac"}{@render macPage()}
       {:else if open === "board"}<Board />{@render pageLink("animations")}
-      {:else}<PocketSettingsPage />{/if}
+      {:else if open === "pocket"}<PocketSettingsPage />
+      {:else}<ICloudSettingsPage />{/if}
       {#if error}<p class="error-text note">{error}</p>{/if}
     </div>
   {:else}
