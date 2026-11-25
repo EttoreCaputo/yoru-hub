@@ -905,6 +905,10 @@ impl Assistant {
                 loop {
                     std::thread::sleep(Duration::from_secs(120));
                     let Some(me) = me.upgrade() else { return };
+                    // With several Macs, one consolidates (docs/icloud.md).
+                    if !crate::doer::is_doer() {
+                        continue;
+                    }
                     // In yoru.log: the app has no terminal, and a memory that
                     // stops learning must say why.
                     for line in me.sleep_once() {

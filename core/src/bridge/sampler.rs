@@ -101,7 +101,9 @@ impl Sampler {
     /// One snapshot of the computer, with the timers it set off.
     fn sample(&self, config: &BridgeConfig, alert_tx: &Sender<AlertInput>) -> Snapshot {
         let mut snapshot = Snapshot::now();
-        for fired in config.timers.tick() {
+        // With several Macs, only the doer rings (docs/icloud.md).
+        let fired = if crate::doer::is_doer() { config.timers.tick() } else { Vec::new() };
+        for fired in fired {
             let _ = alert_tx.send(AlertInput::Timer(fired));
         }
         snapshot.host = Some(crate::presence::sample());

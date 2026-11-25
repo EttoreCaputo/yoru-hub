@@ -83,10 +83,14 @@ pub struct Status {
     pub errors: Vec<String>,
     /// This Mac's id.
     pub device: String,
+    /// The Mac that fires timers, tasks and watchers, and whether it's this one.
+    pub doer: String,
+    pub is_doer: bool,
 }
 
 struct Sync {
     stores: Vec<Arc<dyn Store>>,
+    doer: Arc<yoru_core::doer::Doer>,
     app: AppHandle,
     status: Mutex<Status>,
 }
@@ -100,6 +104,7 @@ pub fn set_paused(paused: bool) {
     PAUSED.store(paused, Ordering::SeqCst);
     if let Some(sync) = SYNC.get() {
         sync.status.lock().unwrap().running = !paused;
+        sync.doer.set_active(!paused);
     }
     if !paused {
         fetch_now();
@@ -114,7 +119,12 @@ pub fn entitled() -> bool {
 /// The status, for the Settings page.
 pub fn status() -> Status {
     match SYNC.get() {
-        Some(s) => s.status.lock().unwrap().clone(),
+        Some(s) => {
+            let mut st = s.status.lock().unwrap().clone();
+            st.doer = s.doer.holder().0;
+            st.is_doer = yoru_core::doer::is_doer();
+            st
+        }
         None => Status { entitled: entitled(), ..Default::default() },
     }
 }
@@ -127,12 +137,15 @@ pub fn start(app: &AppHandle) {
     }
     let state = app.state::<AppState>();
     let Some(dir) = state.assistant.dir().cloned() else { return };
-    let stores = yoru_core::assistant::synced::stores(&state.assistant, Some(state.watchers.clone()));
-    let device = stores.first().map(|s| s.device()).unwrap_or_default();
+    let mut stores = yoru_core::assistant::synced::stores(&state.assistant, Some(state.watchers.clone()));
+    let device = yoru_core::sync::device(Some(&dir));
+    let doer = yoru_core::doer::doer(|| device.clone());
+    stores.push(doer.clone());
     let status = Status { running: true, entitled: true, device, ..Default::default() };
-    if SYNC.set(Sync { stores, app: app.clone(), status: Mutex::new(status) }).is_err() {
+    if SYNC.set(Sync { stores, doer: doer.clone(), app: app.clone(), status: Mutex::new(status) }).is_err() {
         return;
     }
+    doer.set_active(!PAUSED.load(Ordering::SeqCst));
     let sync_dir = dir.join("sync");
     let _ = std::fs::create_dir_all(&sync_dir);
     let (Ok(path), Ok(zones)) = (CString::new(sync_dir.to_string_lossy().as_bytes()), CString::new(ZONES)) else { return };
@@ -145,6 +158,13 @@ pub fn start(app: &AppHandle) {
     log(&format!("started ({})", Path::new(&sync_dir).display()));
 }
 
+/// The user is at this Mac: with no board anywhere, it becomes the doer.
+pub fn used_now() {
+    if let Some(sync) = SYNC.get() {
+        sync.doer.used_now();
+    }
+}
+
 /// Ask iCloud now (the window came forward, the Mac woke up).
 pub fn fetch_now() {
     if SYNC.get().is_some() && !PAUSED.load(Ordering::SeqCst) {
@@ -155,10 +175,23 @@ pub fn fetch_now() {
 fn run() {
     let Some(sync) = SYNC.get() else { return };
     let mut fetched = Instant::now();
+    let mut was_doer = None;
     loop {
         std::thread::sleep(PUSH_EVERY);
         if PAUSED.load(Ordering::SeqCst) {
             continue;
+        }
+        let board = {
+            let state = sync.app.state::<AppState>();
+            let devices = state.devices.lock().unwrap();
+            devices.boards.values().any(|l| l.kind == "connected")
+        };
+        sync.doer.set_board(board);
+        sync.doer.tick(yoru_core::sync::now_ms());
+        let doer = yoru_core::doer::is_doer();
+        if was_doer != Some(doer) {
+            was_doer = Some(doer);
+            log(&if doer { "this Mac is the doer".to_string() } else { format!("the doer is {}", sync.doer.holder().0) });
         }
         for store in &sync.stores {
             let records = store.changes(BATCH);
@@ -216,6 +249,7 @@ extern "C" fn on_event(event: *const c_char, text: *const c_char) {
             st.sent += records.len() as u64;
             st.last_sent = now;
         }
+        "status" if text == "fetched" => sync.doer.heard(),
         "account" => {
             log(&format!("account: {text}"));
             sync.status.lock().unwrap().account = text;

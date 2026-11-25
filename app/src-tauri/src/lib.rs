@@ -2022,6 +2022,7 @@ pub fn run() {
             // The window came forward: see what the other Macs did.
             #[cfg(target_os = "macos")]
             if let WindowEvent::Focused(true) = event {
+                icloud::used_now();
                 icloud::fetch_now();
             }
             // Keep streaming to the board when the window is closed.

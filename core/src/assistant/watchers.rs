@@ -230,7 +230,8 @@ pub fn run_scheduler(
     on_event: &(dyn Fn(ScheduleEvent) + Send + Sync),
 ) {
     while !stop.load(Ordering::Relaxed) {
-        if assistant.is_ready() {
+        // With several Macs, only the doer runs them (docs/icloud.md).
+        if assistant.is_ready() && crate::doer::is_doer() {
             let routines = assistant.settings().routines;
             let now = Local::now();
             if routines.recap_due(now, watchers.recap_day()) {

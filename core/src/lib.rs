@@ -51,6 +51,7 @@ pub mod spoken;
 pub mod stream;
 pub mod stt;
 pub mod sync;
+pub mod doer;
 pub mod timers;
 pub mod tts;
 pub mod turn;

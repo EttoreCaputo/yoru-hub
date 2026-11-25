@@ -27,7 +27,7 @@ Yoru Hub on two or more Macs signed in to the same Apple ID shares one Yoru: the
 
 **Conflicts.** Every record carries `updated` (ms) and the Mac that wrote it. Last writer wins per record: facts are almost always appended and closed (`valid_to`), not edited, so a real clash is rare. A deletion is a tombstone record, kept 30 days, so a Mac that was off doesn't bring the row back.
 
-**Who does things.** Timers, routines, watchers and memory consolidation have side effects: two Macs firing the same alarm or extracting the same facts twice is wrong. One Mac is the *doer*: the one with the board connected; with no board, the one used last. Its claim is a lease record in zone `Settings` (`doer`: the Mac's id and an expiry, renewed every minute, taken over when it expires). The others show everything and fire nothing. Consolidation additionally takes the episode's own lease, so an episode is consolidated once.
+**Who does things.** Timers, routines, watchers and memory consolidation have side effects: two Macs firing the same alarm or extracting the same facts twice is wrong. One Mac is the *doer*: the one with the board connected; with no board, the one used last (its window came forward a minute or more after the doer's). Its claim is a lease record in zone `Settings` (`lease:doer`: the Mac's id, an expiry 3 minutes ahead, whether it has a board, when it was used), renewed every minute and taken over when it runs out, so a Mac switched off hands over by itself (`core/src/doer.rs`). The others show everything and fire nothing: the timers' tick (`bridge/sampler.rs`), the scheduler (watchers, the recap, tasks; a task asked for from the board still runs where it was asked) and the sleep all ask `doer::is_doer()`. A Mac that just started waits to hear from iCloud before claiming (2 minutes at most: offline, it is its own doer). Without sync, or with it off, every Mac is its own doer. Consolidation doesn't take a lease per episode: only the doer consolidates, so an episode can be done twice only across a handover, before the other Mac's marks have arrived.
 
 **When it syncs.** CloudKit pushes changes to the other Macs (silent notifications, `aps-environment`); as a fallback the app fetches every 5 minutes, on wake and when its window comes forward. Local changes are sent within a few seconds, in batches.
 
@@ -59,7 +59,7 @@ It is a development profile: the app runs only on the Macs listed in it and talk
 
 1. **Global ids** in `memory.db` (uid columns, backfill, refs by uid), tombstones, the outbox; stamps and tombstones for the JSON stores through ledgers: done 2026-11-25, tested with two data folders exchanging records (`memory::sync` and `synced` tests). The conversations move to step 4 with the meetings.
 2. **The engine**: `YoruSync` with CKSyncEngine, the profile embedded, the zones `Memory` and `Settings`: done 2026-11-25. On this Mac the first start sent every record (50) to the Development environment; the way back is still to be seen with a second Mac.
-3. **Doer lease**: timers, routines, watchers and consolidation fire only on the doer.
+3. **Doer lease**: timers, routines, watchers, tasks and consolidation fire only on the doer: done 2026-11-25 (`doer` tests; `yoru.log` says which Mac is the doer).
 4. **Conversations, meetings, Spoken**, with assets and the audio setting.
 5. **The Settings page** and push.
 6. Later: Developer ID build and Production schema; secrets through iCloud Keychain.
