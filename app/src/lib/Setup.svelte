@@ -7,7 +7,7 @@
   after the other. Six steps: the language, the Mac's permissions (the
   microphone is required: nothing goes on without it, and the step stays
   once it's given, for the others) with Yoru in the notch and noticing
-  meetings, Yoru on the desk, a setup (ui/Profiles.svelte), a first
+  meetings, Yoru on the desk, the brain (a provider and its key), a first
   service, and a few lines about you (the first memory). Once the
   microphone is Yoru's every other step can be skipped; Settings can run
   it again. Always the dark look: it's Yoru's night, whatever the theme.
@@ -17,10 +17,11 @@
   import { call, why } from "./api";
   import { i18n, LANGUAGES, type Lang } from "./i18n/index.svelte";
   import { store } from "./store.svelte";
-  import type { MeetingSettings, PermissionKind } from "./types";
+  import type { KeySource, MeetingSettings, PermissionKind, VoiceInfo } from "./types";
   import PermissionList from "./ui/PermissionList.svelte";
   import Toggle from "./ui/Toggle.svelte";
-  import Profiles from "./ui/Profiles.svelte";
+  import KeyField from "./ui/KeyField.svelte";
+  import { PROFILES, applyProfile, keyOf, prepareLocal, type ProfileId } from "./profiles";
   import ServiceIcon from "./ui/ServiceIcon.svelte";
   import YoruBoard from "./YoruBoard.svelte";
 
@@ -71,6 +72,42 @@
       const current = await call<MeetingSettings>("meeting_settings").catch(() => null);
       if (current) await call("set_meeting_settings", { settings: { ...current, detect: meetings.detect } }).catch(() => {});
     }
+  }
+
+  // The brain: a provider and its key, nothing else. Its ready setup
+  // (profiles.ts) is applied as soon as the key works, and what it runs on
+  // this Mac downloads in the background; Settings → Intelligence has the rest.
+  let provider = $state<ProfileId | null>(null);
+  let applying = $state(false);
+  let applied = $state<ProfileId | null>(null);
+  const sourceOf = (id: ProfileId): KeySource | null => {
+    const i = store.info;
+    return (id === "google" ? i?.google_key : id === "openai" ? i?.openai_key : id === "anthropic" ? i?.key : i?.groq_key) ?? null;
+  };
+
+  async function pick(id: ProfileId) {
+    provider = id;
+    error = "";
+    react("curious");
+    if (keyOf(id)) await useProvider(id);
+  }
+  async function useProvider(id: ProfileId) {
+    applying = true;
+    error = "";
+    try {
+      const voice = await applyProfile(id, await call<VoiceInfo>("voice_info"));
+      applied = id;
+      react("excited");
+      void prepareLocal(id, voice).catch(() => {});
+    } catch (e) {
+      error = why(e);
+    } finally {
+      applying = false;
+    }
+  }
+  async function keyed() {
+    await store.refreshInfo();
+    if (provider && keyOf(provider)) await useProvider(provider);
   }
 
   // Yoru, the guide: a reaction for each step, and what he says.
@@ -232,15 +269,15 @@
           {:else if step === 1}
             <h1 id="setup-title" class="rise" style:--i={0}>{t.access.title}</h1>
             <p class="lead rise" style:--i={1}>{t.access.text}</p>
-            <div class="rise" style:--i={2}><PermissionList ongrant={granted} /></div>
+            <div class="rise" style:--i={2}><PermissionList hints={t.access.hints} ongrant={granted} /></div>
             <section class="panel rise" style:--i={3}>
               <div class="setting">
-                <div class="what"><b>{i18n.t.board.notch}</b><span>{i18n.t.board.notchHint}</span></div>
+                <div class="what"><b>{i18n.t.board.notch}</b><span>{t.access.notchHint}</span></div>
                 <div class="how"><Toggle checked={notch} label={i18n.t.board.notch} onchange={(on) => ((notch = on), on && react("happy"))} /></div>
               </div>
               {#if meetings}
                 <div class="setting">
-                  <div class="what"><b>{i18n.t.meetings.detect}</b><span>{i18n.t.meetings.detectHint}</span></div>
+                  <div class="what"><b>{i18n.t.meetings.detect}</b><span>{t.access.meetingsHint}</span></div>
                   <div class="how"><Toggle checked={meetings.detect} label={i18n.t.meetings.detect} onchange={(on) => (meetings = { ...meetings!, detect: on })} /></div>
                 </div>
               {/if}
@@ -259,8 +296,29 @@
           {:else if step === 3}
             <h1 id="setup-title" class="rise" style:--i={0}>{t.brain.title}</h1>
             <p class="lead rise" style:--i={1}>{t.brain.text}</p>
-            <div class="rise" style:--i={2}><Profiles compact /></div>
-            {#if store.info?.ready}<p class="status rise" style:--i={3}><span class="dot done"></span>{t.brain.ok}</p>{/if}
+            <div class="providers">
+              {#each PROFILES as id, i (id)}
+                <button class="tile provider rise" style:--i={2 + i} class:on={provider === id} disabled={applying} onclick={() => pick(id)}>
+                  <ServiceIcon id="ai-{id}" name={i18n.t.profiles.names[id]} size={44} />
+                  <b>{i18n.t.profiles.names[id]}</b>
+                  {#if applied === id}<span class="ready" aria-hidden="true"></span>{/if}
+                </button>
+              {/each}
+            </div>
+            {#if provider}
+              {#key provider}
+                <div class="keyed rise" style:--i={0}>
+                  {#if applying}
+                    <p class="status"><span class="dot think"></span>{t.brain.applying}</p>
+                  {:else if applied === provider}
+                    <p class="status"><span class="dot done"></span>{t.brain.ok}</p>
+                  {:else}
+                    <KeyField provider={provider} source={sourceOf(provider)} onchange={keyed} />
+                  {/if}
+                </div>
+              {/key}
+            {/if}
+            {#if error && step === 3}<p class="error-text">{error}</p>{/if}
           {:else if step === 4}
             <h1 id="setup-title" class="rise" style:--i={0}>{t.service.title}</h1>
             <p class="lead rise" style:--i={1}>{t.service.text}</p>
@@ -610,7 +668,11 @@
     max-height: 100%;
     min-height: 0;
     overflow: hidden auto;
-    padding: 24px 6px;
+    /* Room for the glows and shadows inside the scroller, which clips
+       them: the padding is taken back with a margin, and the edges fade. */
+    padding: 40px 40px;
+    margin: 0 -40px;
+    mask-image: linear-gradient(transparent, #000 32px, #000 calc(100% - 32px), transparent);
     scrollbar-width: none;
   }
   .step {
@@ -675,10 +737,11 @@
       filter: blur(4px);
     }
   }
-  .page :global(.panel) {
+  .step :global(.panel) {
     backdrop-filter: blur(14px);
   }
   .tile {
+    backdrop-filter: blur(14px);
     transition:
       transform 0.35s var(--spring),
       border-color 0.2s,
@@ -717,6 +780,41 @@
     border-radius: 50%;
     background: #000;
     box-shadow: 0 0 0 6px #1a1826, 0 18px 40px -12px rgba(0, 0, 0, 0.9);
+  }
+  .providers {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .provider {
+    position: relative;
+    justify-items: center;
+    gap: 10px;
+    padding: 18px 10px 14px;
+  }
+  /* The one in use: a green tick on its corner. */
+  .ready {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--done);
+    box-shadow: 0 0 10px var(--done);
+    animation: tick-pop 0.5s var(--spring) both;
+  }
+  @keyframes tick-pop {
+    from {
+      transform: scale(0);
+    }
+  }
+  .keyed {
+    padding: 14px 16px;
+    border-radius: var(--r-lg);
+    border: 1px solid var(--rim);
+    background: var(--ink);
+    backdrop-filter: blur(14px);
   }
   .services {
     display: grid;

@@ -15,7 +15,8 @@
   import Icon from "./Icon.svelte";
 
   /** In Settings, a granted one can be changed too (macOS turns it off, not the app). */
-  let { manage = false, ongrant }: { manage?: boolean; ongrant?: (kind: PermissionKind) => void } = $props();
+  /** `hints`: a shorter line per permission (the first run's). */
+  let { manage = false, hints, ongrant }: { manage?: boolean; hints?: Record<PermissionKind, string>; ongrant?: (kind: PermissionKind) => void } = $props();
 
   const KINDS: PermissionKind[] = ["microphone", "calendar", "system_audio"];
   const ICON: Record<PermissionKind, IconName> = { microphone: "mic", calendar: "calendar", system_audio: "volume" };
@@ -67,7 +68,7 @@
         </span>
         <div class="what">
           <b>{t[kind].name}{#if kind === "microphone"}<span class="tag outline req">{t.required}</span>{/if}</b>
-          <span>{t[kind].why}</span>
+          <span>{hints?.[kind] ?? t[kind].why}</span>
           {#if state === "denied" || state === "restricted"}<span class="off">{t.denied}</span>{/if}
         </div>
         <div class="how">

@@ -36,3 +36,18 @@ export async function applyProfile(id: ProfileId, voice: VoiceInfo): Promise<Voi
   await call("set_meeting_settings", { settings: { ...meetings, transcribe_by } });
   return result;
 }
+
+const LOCAL_VOICES = ["it_IT-paola-medium", "en_GB-alba-medium"];
+
+/** What a profile runs on this Mac (meeting transcription, hearing for
+ * Claude, Piper's voices), downloaded where missing. Google needs none. */
+export async function prepareLocal(id: ProfileId, voice: VoiceInfo): Promise<void> {
+  if (id === "google") return;
+  if ((await call<boolean>("meeting_model").catch(() => true)) === false) await call("meeting_model_download");
+  const whisper = voice.recommendation?.whisper ?? "small";
+  if (id === "anthropic" && !voice.models.some((m) => m.id === whisper && m.installed)) await call("download_model", { id: whisper });
+  if (!voice.piper) await call("install_engine", { engine: "piper" });
+  for (const v of LOCAL_VOICES) {
+    if (!voice.models.some((m) => m.id === v && m.installed)) await call("download_model", { id: v });
+  }
+}
