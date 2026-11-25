@@ -149,8 +149,9 @@ pub fn rename_meeting(id: String, title: String) -> Result<Meeting, String> {
 }
 
 #[tauri::command]
-pub fn delete_meeting(id: String) -> Result<Vec<Meeting>, String> {
+pub fn delete_meeting(state: State<AppState>, id: String) -> Result<Vec<Meeting>, String> {
     meetings::delete(&id).map_err(|e| e.to_string())?;
+    state.assistant.folders.forget(assistant::folders::Kind::Meeting, &id);
     Ok(meetings::list())
 }
 

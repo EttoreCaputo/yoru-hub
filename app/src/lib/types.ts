@@ -39,6 +39,12 @@ export type ChatTitle = { text: string; by_user: boolean; lines: number };
 export type ChatSummary = { id: string; title: string; by_user: boolean; started: number; updated: number; lines: number; preview: string };
 /** Every conversation with a line, newest first, and the one Yoru is in (`conversations`). */
 export type Conversations = { current: string; list: ChatSummary[] };
+
+/** Home's folders (folders.json): the live ones in order, and which item is in which. */
+export type Folder = { id: string; name: string; order: number; updated: number };
+export type FolderKind = "chat" | "meeting";
+export type FolderPlace = { kind: FolderKind; id: string; folder: string | null; updated: number };
+export type FolderView = { folders: Folder[]; places: FolderPlace[] };
 /** One conversation, to read (`conversation`). */
 export type SavedChat = { id: string; title: ChatTitle; lines: ChatLine[] };
 export type Reply = { text: string; actions: Action[]; model: string; elapsed_ms: number };

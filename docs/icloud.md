@@ -14,6 +14,7 @@ Yoru Hub on two or more Macs signed in to the same Apple ID shares one Yoru: the
 | Conversations (`conversations/*.json`, titles) | one record per conversation, zone `Chats` | the JSON as an asset; last writer wins, the conversation in progress is only written by the Mac it's on |
 | Meetings (`meetings/<id>/`) | one record per meeting, zone `Meetings` | `meeting.json`, `transcript.json`, `summary.json` as fields; `mic.m4a` and `others.m4a` as assets (setting: text only, or with audio) |
 | Spoken (`spoken/`) | one record per clip, zone `Spoken` | the audio as an asset |
+| Folders (`folders.json`) | one record per folder and one per item's place, zone `Settings` | already shaped for it: each record has its `updated` stamp; deleted folders and items taken out are tombstones kept 30 days; a place whose folder is gone counts as no folder |
 | Tasks, timers, inbox, watchers, routines, skills, `assistant.json`, `connectors.json` (the list, not the tokens) | one record per item, zone `Settings` | each JSON file split into its items, with an `updated` stamp |
 | `history.db` | not synced | it's an index of the conversations and meetings: each Mac rebuilds it (`History::sync`) |
 | `keys.json`, OAuth tokens, Pocket key | not synced | secrets stay in this Mac's keychain; each Mac logs in on its own (iCloud Keychain later, maybe) |

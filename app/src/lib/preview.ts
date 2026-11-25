@@ -10,6 +10,10 @@
 //               first run's permissions step, the gate, the notch's row
 
 import type {
+  Folder,
+  FolderKind,
+  FolderPlace,
+  FolderView,
   ActionItem,
   Action,
   AccountVoice,
@@ -287,6 +291,11 @@ const meetingSources: MeetingSources = {
     { id: "usb-mic", name: "USB Microphone", default: false },
   ],
 };
+
+// Home's folders, as folders.json keeps them.
+let folders: Folder[] = [{ id: "f1", name: "Work", order: 0, updated: 0 }];
+let places: FolderPlace[] = [];
+const folderView = (): FolderView => ({ folders, places: places.filter((p) => p.folder && folders.some((f) => f.id === p.folder)) });
 
 let meetings: Meeting[] = [
   {
@@ -798,6 +807,24 @@ const COMMANDS: Record<string, (a: Record<string, any>) => unknown> = {
   open_privacy: (a) => void (permissions[a.kind as keyof typeof permissions] = "granted"),
   meeting_sources: () => meetingSources,
   meetings_list: () => meetings,
+  folders: () => folderView(),
+  create_folder: (a) => {
+    const name = String(a.name).trim();
+    if (!name) throw "a folder needs a name";
+    if (folders.some((f) => f.name.toLowerCase() === name.toLowerCase())) throw `there's already a folder called ${name}`;
+    folders.push({ id: `f${now()}`, name, order: folders.length, updated: now() });
+    return folderView();
+  },
+  rename_folder: (a) => ((folders = folders.map((f) => (f.id === a.id ? { ...f, name: String(a.name).trim(), updated: now() } : f))), folderView()),
+  delete_folder: (a) => {
+    folders = folders.filter((f) => f.id !== a.id);
+    places = places.map((p) => (p.folder === a.id ? { ...p, folder: null, updated: now() } : p));
+    return folderView();
+  },
+  move_to_folder: (a) => {
+    places = [...places.filter((p) => !(p.kind === a.kind && p.id === a.id)), { kind: a.kind as FolderKind, id: String(a.id), folder: (a.folder as string | null) ?? null, updated: now() }];
+    return folderView();
+  },
   meeting_active: () => recording,
   meeting_start: startMeeting,
   meeting_stop: stopMeeting,

@@ -19,6 +19,8 @@ import type {
   ChatLine,
   ChatTitle,
   ChatSummary,
+  FolderKind,
+  FolderView,
   Conversations,
   Confirmation,
   DeviceInfo,
@@ -109,6 +111,11 @@ class Store {
   conversations = $state<ChatSummary[]>([]);
   /** The one Yoru is in: what's said to the board or the notch goes there. */
   currentChat = $state("");
+  /** Home's folders, and the one Home shows (null: everything). */
+  folders = $state<FolderView>({ folders: [], places: [] });
+  folder = $state<string | null>(null);
+  /** A conversation or meeting being dragged from Home, to drop on a folder. */
+  dragging = $state<{ kind: FolderKind; id: string } | null>(null);
   /** What the user is saying, written so far, while they speak; gone once the line is in the chat. */
   hearing = $state("");
   #hearingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -238,6 +245,7 @@ class Store {
     const conversations = await quiet(call<Conversations>("conversations"));
     if (conversations) this.#applyConversations(conversations);
     void this.refreshMeetings();
+    void this.refreshFolders();
     if (confirmations) this.confirmations = confirmations;
     if (onboarding) this.onboarding = onboarding;
     void this.refreshPermissions();
@@ -285,6 +293,41 @@ class Store {
   async setTodo(todo: Todo, done: boolean) {
     this.todos = this.todos.map((x) => (x === todo ? { ...x, done } : x));
     this.todos = await call<Todo[]>("set_meeting_todo", { id: todo.meeting, text: todo.item.text, done });
+  }
+
+  // Folders.
+
+  async refreshFolders() {
+    this.#applyFolders((await call<FolderView>("folders").catch(() => null)) ?? this.folders);
+  }
+
+  #applyFolders(v: FolderView) {
+    this.folders = v;
+    // The folder shown was deleted: Home shows everything again.
+    if (this.folder && !v.folders.some((f) => f.id === this.folder)) this.folder = null;
+  }
+
+  /** A folder's command (create, rename, delete, move to): the folders as they are after it. */
+  async changeFolders(command: "create_folder" | "rename_folder" | "delete_folder" | "move_to_folder", args: Record<string, unknown>) {
+    this.#applyFolders(await call<FolderView>(command, args));
+  }
+
+  /** Which folder an item is in (null: none). */
+  folderOf(kind: FolderKind, id: string): string | null {
+    return this.folders.places.find((p) => p.kind === kind && p.id === id)?.folder ?? null;
+  }
+
+  /** How many conversations and meetings folder `id` holds (only those that still exist). */
+  folderCount(id: string): number {
+    return this.folders.places.filter(
+      (p) => p.folder === id && (p.kind === "chat" ? this.conversations.some((c) => c.id === p.id) : this.meetings.some((m) => m.id === p.id)),
+    ).length;
+  }
+
+  /** Home, showing one folder (null: everything). */
+  openFolder(id: string | null) {
+    this.folder = id;
+    this.go("home");
   }
 
   // Conversations.

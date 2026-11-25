@@ -43,6 +43,7 @@ pub mod context;
 #[cfg(test)]
 mod eval;
 pub mod external;
+pub mod folders;
 pub mod inbox;
 mod live;
 pub mod memory;
@@ -366,6 +367,8 @@ pub struct Assistant {
     log: Mutex<Vec<ChatLine>>,
     /// The conversation's title ([`title`]).
     pub titles: title::Titles,
+    /// The user's folders on Home ([`folders`]).
+    pub folders: folders::Folders,
     /// The other conversations ([`chats`]).
     archive: chats::Archive,
     listeners: Mutex<Vec<ChatListener>>,
@@ -424,6 +427,7 @@ impl Assistant {
             log: Mutex::new(log),
             titles: title::Titles::open(file("conversation_title.json")),
             archive: chats::Archive::open(file("conversations")),
+            folders: folders::Folders::open(file("folders.json")),
             listeners: Mutex::default(),
             app_changes: Mutex::default(),
             quiet_until: Mutex::default(),
@@ -595,6 +599,7 @@ impl Assistant {
         } else {
             self.archive.take(id);
         }
+        self.folders.forget(folders::Kind::Chat, id);
     }
 
     /// The user's title for conversation `id` (empty: Yoru names it).

@@ -1,6 +1,8 @@
 <!--
   The sidebar: with two boards or more the list of them to pick the one
   shown, the pages (Notifications and Settings are icons in the window bar),
+  the user's folders (a click shows one on Home, a row dropped on one goes
+  in it; docs/app.md),
   and at the bottom the Pocket recorder (a click opens its dialog) and the
   board, each connected or not and by what, and "do not disturb". Yoru himself
   isn't here: he sits at the bottom right of the pages (YoruBubble.svelte).
@@ -13,6 +15,7 @@
   import { store, type Page } from "./store.svelte";
   import { tabs } from "./tabs.svelte";
   import Icon from "./ui/Icon.svelte";
+  import { why } from "./api";
 
   const t = $derived(i18n.t);
 
@@ -37,6 +40,69 @@
     const on = p.phase === "connected";
     return { dot: on ? "done" : "", text: on ? t.pocket.connectedShort : t.pocket.away, by: on ? "bluetooth" : null } as const;
   });
+
+  // Folders: Home showing one of them, a new one being named, the one an
+  // item is dragged over.
+  const tf = $derived(t.folders);
+  let naming = $state(false);
+  let name = $state("");
+  let folderError = $state("");
+  let over = $state<string | null>(null);
+  const inFolder = (id: string) => store.folderCount(id);
+  const folderOn = (id: string) => store.page === "home" && store.folder === id && !tabs.shown;
+
+  // Enter and the blur that follows both land here: one create at a time.
+  let busy = false;
+  async function create() {
+    if (!naming || busy) return;
+    const n = name.trim();
+    if (!n) return (naming = false);
+    busy = true;
+    try {
+      await store.changeFolders("create_folder", { name: n });
+      naming = false;
+      name = "";
+      folderError = "";
+    } catch (e) {
+      folderError = why(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function nameKeys(e: KeyboardEvent) {
+    if (e.key === "Enter") void create();
+    else if (e.key === "Escape") {
+      naming = false;
+      name = "";
+      folderError = "";
+    }
+  }
+
+  function dragOver(e: DragEvent, id: string) {
+    if (!store.dragging) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    over = id;
+  }
+
+  async function drop(e: DragEvent, id: string) {
+    e.preventDefault();
+    over = null;
+    const item = store.dragging;
+    store.dragging = null;
+    if (!item) return;
+    try {
+      await store.changeFolders("move_to_folder", { kind: item.kind, id: item.id, folder: id });
+    } catch (e) {
+      folderError = why(e);
+    }
+  }
+
+  const focus = (el: HTMLInputElement) => el.focus();
+
+  // Home is on while it shows everything; a folder's row is on while it shows that.
+  const isOn = (p: Page) => store.page === p && !tabs.shown && (p !== "home" || !store.folder);
 
   const badge = (p: Page): { n?: number; dot?: string } | null => {
     if (p === "home" && store.confirmations.length) return { dot: "wait" };
@@ -66,6 +132,41 @@
   <ul>
     {#each MAIN as p (p)}{@render item(p)}{/each}
   </ul>
+
+  <div class="folders" role="group" aria-label={tf.title}>
+    <div class="label">
+      <span>{tf.title}</span>
+      <button class="icon-btn small" title={tf.create} aria-label={tf.create} onclick={() => ((naming = true), (folderError = ""))}><Icon name="folder-plus" size={15} /></button>
+    </div>
+    <ul>
+      {#each store.folders.folders as f (f.id)}
+        {@const on = folderOn(f.id)}
+        <li>
+          <button
+            class="nav-row folder"
+            class:on
+            class:over={over === f.id}
+            aria-current={on ? "page" : undefined}
+            title={store.dragging ? tf.dropHere(f.name) : f.name}
+            onclick={() => store.openFolder(f.id)}
+            ondragover={(e) => dragOver(e, f.id)}
+            ondragleave={() => over === f.id && (over = null)}
+            ondrop={(e) => drop(e, f.id)}>
+            <Icon name="folder" size={16} filled={on} />
+            <span class="fname">{f.name}</span>
+            {#if inFolder(f.id)}<span class="fcount">{tf.count(inFolder(f.id))}</span>{/if}
+          </button>
+        </li>
+      {/each}
+      {#if naming}
+        <li class="naming">
+          <Icon name="folder" size={16} />
+          <input type="text" bind:value={name} placeholder={tf.namePlaceholder} aria-label={tf.namePlaceholder} title={tf.nameHint} maxlength="60" onkeydown={nameKeys} onblur={() => void create()} use:focus />
+        </li>
+      {/if}
+    </ul>
+    {#if folderError}<p class="error-text ferror">{folderError}</p>{/if}
+  </div>
 
   <footer>
     {#if pocket}
@@ -102,8 +203,8 @@
 {#snippet item(p: Page)}
   {@const b = badge(p)}
   <li>
-    <button class="nav-row" class:on={store.page === p && !tabs.shown} aria-current={store.page === p && !tabs.shown ? "page" : undefined} onclick={() => store.go(p)}>
-      <Icon name={PAGE_ICONS[p]} filled={store.page === p && !tabs.shown} />
+    <button class="nav-row" class:on={isOn(p)} aria-current={isOn(p) ? "page" : undefined} onclick={() => (p === "home" ? store.openFolder(null) : store.go(p))}>
+      <Icon name={PAGE_ICONS[p]} filled={isOn(p)} />
       <span>{t.nav[p]}</span>
       {#if b?.n}<span class="count">{b.n}</span>{:else if b?.dot}<span class="dot {b.dot}"></span>{/if}
     </button>
@@ -208,6 +309,66 @@
   }
   footer {
     margin-top: auto;
+  }
+  /* Folders: under the pages, scrolling on their own when there are many. */
+  .folders {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin-top: 18px;
+    padding-bottom: 12px;
+  }
+  .folders .label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 4px 4px 10px;
+    color: var(--haze);
+    font: 600 var(--fs-meta)/1 var(--sans);
+  }
+  .folders ul {
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .folders .nav-row {
+    gap: 11px;
+    min-height: 34px;
+  }
+  .folders .nav-row.on {
+    font-weight: 600;
+  }
+  /* An item dragged over: the folder it would go in. */
+  .folders .nav-row.over {
+    background: var(--hover);
+    color: var(--pearl);
+    box-shadow: inset 0 0 0 1.5px var(--pearl-deep);
+  }
+  .fname {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fcount {
+    color: var(--dusk);
+    font-size: var(--fs-small);
+    font-variant-numeric: tabular-nums;
+  }
+  .naming {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 2px 4px 2px 10px;
+    color: var(--haze);
+  }
+  .naming input {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+  }
+  .ferror {
+    margin: 6px 10px 0;
+    font-size: var(--fs-small);
   }
   /* Pocket and Yoru: the dot on the left, the state and its link on the right. */
   .device {
