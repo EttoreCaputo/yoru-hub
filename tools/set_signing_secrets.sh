@@ -16,7 +16,7 @@
 #    (G2 Sub-CA), upload the request, download the .cer.
 # Or Xcode → Settings → Accounts → Manage Certificates → + → Developer ID
 # Application, then Keychain Access → Export only that one as a .p12.
-# And an app-specific password for notarization, made at account.apple.com
+# For notarization (optional), an app-specific password made at account.apple.com
 # → Sign-In and Security → App-Specific Passwords.
 
 set -euo pipefail
@@ -66,13 +66,19 @@ if [[ "$identity" != *"($team)"* ]]; then
 fi
 echo "yoru: $identity"
 
-read -r -p "Apple ID (email) for notarization: " apple_id
-read -r -s -p "App-specific password: " apple_password; echo
+read -r -p "Apple ID (email) for notarization, empty to skip it: " apple_id
+if [[ -n "$apple_id" ]]; then
+    read -r -s -p "App-specific password: " apple_password; echo
+fi
 
 base64 -i "$p12" | tr -d '\n' | gh secret set APPLE_CERTIFICATE
 printf '%s' "$p12_password" | gh secret set APPLE_CERTIFICATE_PASSWORD
 printf '%s' "$identity" | gh secret set APPLE_SIGNING_IDENTITY
-printf '%s' "$apple_id" | gh secret set APPLE_ID
-printf '%s' "$apple_password" | gh secret set APPLE_PASSWORD
 printf '%s' "$team" | gh secret set APPLE_TEAM_ID
-echo "yoru: secrets set; the next push to main or develop builds a signed, notarized app"
+if [[ -n "$apple_id" ]]; then
+    printf '%s' "$apple_id" | gh secret set APPLE_ID
+    printf '%s' "$apple_password" | gh secret set APPLE_PASSWORD
+    echo "yoru: secrets set; the next push to main or develop builds a signed, notarized app"
+else
+    echo "yoru: secrets set; the next push builds a signed app, not notarized (run again with an Apple ID to notarize)"
+fi
