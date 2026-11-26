@@ -4,29 +4,50 @@
 # yourself, in a terminal: it asks for the passwords and hands them straight
 # to `gh secret set`, so they never land in a file or in the shell history.
 #
-#   tools/set_signing_secrets.sh path/to/DeveloperID.p12
+#   tools/set_signing_secrets.sh DeveloperID.key developerID_application.cer
+#   tools/set_signing_secrets.sh DeveloperID.p12
 #
-# Before it:
-# 1. Xcode → Settings → Accounts → the team 79AC9KV62T → Manage Certificates
-#    → + → Developer ID Application. The certificate and its key land in the
-#    login keychain.
-# 2. Keychain Access → My Certificates → "Developer ID Application: …" →
-#    Export (.p12) with a password. Only that one: the workflow must not get
-#    the other certificates.
-# 3. An app-specific password for notarization, made at account.apple.com
-#    → Sign-In and Security → App-Specific Passwords.
+# Before it, the certificate. Without Keychain Access or Xcode:
+# 1. A key and a request:
+#      openssl req -new -newkey rsa:2048 -nodes -keyout DeveloperID.key \
+#        -out DeveloperID.certSigningRequest -subj "/CN=<your name>/C=IT"
+#    Keep the key private and out of the repository.
+# 2. developer.apple.com → Certificates → + → Developer ID Application
+#    (G2 Sub-CA), upload the request, download the .cer.
+# Or Xcode → Settings → Accounts → Manage Certificates → + → Developer ID
+# Application, then Keychain Access → Export only that one as a .p12.
+# And an app-specific password for notarization, made at account.apple.com
+# → Sign-In and Security → App-Specific Passwords.
 
 set -euo pipefail
 
 team=79AC9KV62T
-p12="${1:-}"
-if [[ -z "$p12" || ! -f "$p12" ]]; then
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
-    exit 1
-fi
+usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+[[ $# -ge 1 && -f "$1" ]] || usage
 gh auth status > /dev/null
 
-read -r -s -p "Password of $(basename "$p12"): " p12_password; echo
+if [[ $# -eq 2 ]]; then
+    # Key and .cer: bundle them, with Apple's G2 intermediate that the CI's
+    # keychain lacks, into a .p12 under a random password nobody types.
+    [[ -f "$2" ]] || usage
+    work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+    openssl x509 -inform DER -in "$2" -out "$work/cert.pem" 2> /dev/null ||
+        openssl x509 -in "$2" -out "$work/cert.pem"
+    curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer |
+        openssl x509 -inform DER -out "$work/ca.pem"
+    openssl x509 -in "$work/cert.pem" -noout -pubkey > "$work/a"
+    openssl pkey -in "$1" -pubout > "$work/b"
+    cmp -s "$work/a" "$work/b" || { echo "yoru: $1 is not the key of $2" >&2; exit 1; }
+    p12_password="$(openssl rand -hex 24)"
+    p12="$work/DeveloperID.p12"
+    # 3DES and SHA-1: the p12 that macOS's `security import` reads.
+    P="$p12_password" openssl pkcs12 -export -inkey "$1" -in "$work/cert.pem" \
+        -certfile "$work/ca.pem" -out "$p12" -passout env:P \
+        -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
+else
+    p12="$1"
+    read -r -s -p "Password of $(basename "$p12"): " p12_password; echo
+fi
 # The certificate's name, e.g. "Developer ID Application: Ettore Caputo (79AC9KV62T)".
 certificate() {
     # An older Keychain Access exports with RC2/3DES, which OpenSSL 3 reads only with -legacy.
