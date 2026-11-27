@@ -221,6 +221,12 @@ impl Detector {
         self.asking = false;
     }
 
+    /// The heads-up about `meeting` went unanswered (missed, not refused):
+    /// it is asked about again when its call starts.
+    pub fn missed(&mut self, meeting: &CalendarMeeting) {
+        self.asked.remove(&meeting.id);
+    }
+
     /// The user said yes ahead to `meeting`.
     pub fn armed(&mut self, meeting: &CalendarMeeting) {
         self.armed = Some(Armed { title: meeting.title.clone(), until: meeting.start + ARMED_MS });
@@ -388,6 +394,20 @@ mod tests {
         assert!(matches!(d.step(t - MIN, &[], false), Some(Action::HeadsUp(_))));
         d.answered();
         assert_eq!(d.step(t, &[app("us.zoom.xos")], false), None);
+    }
+
+    #[test]
+    fn a_missed_heads_up_is_asked_again_when_the_call_starts() {
+        let mut d = Detector::default();
+        let t = 1_000 * MIN;
+        d.set_meetings(vec![standup(t)]);
+        assert!(matches!(d.step(t - 2 * MIN, &[], false), Some(Action::HeadsUp(_))));
+        // The call starts while the card still waits: one question at a time.
+        let chrome = app("com.google.Chrome");
+        assert_eq!(d.step(t - MIN, &[chrome.clone()], false), None);
+        d.answered();
+        d.missed(&standup(t));
+        assert_eq!(d.step(t, &[chrome.clone()], false), Some(Action::Ask { app: chrome, meeting: Some(standup(t)) }));
     }
 
     #[test]

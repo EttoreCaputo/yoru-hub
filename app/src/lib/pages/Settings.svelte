@@ -45,6 +45,7 @@
 
   let mcp = $state<McpInfo | null>(null);
   let notch = $state(false);
+  let atLogin = $state(false);
   /** Where Yoru shows while the window is closed: the menu bar, the Dock. */
   let icons = $state({ menu_bar: true, dock: false });
   const setIcons = (change: Partial<typeof icons>) => {
@@ -57,6 +58,7 @@
     mcp = await call<McpInfo>("mcp_info").catch(() => null);
     notch = (await call<{ notch?: boolean }>("status").catch(() => null))?.notch ?? false;
     icons = (await call<typeof icons>("app_icons").catch(() => null)) ?? icons;
+    atLogin = (await call<boolean>("open_at_login").catch(() => null)) ?? false;
   }
   $effect(() => {
     void readAll();
@@ -286,6 +288,19 @@
   <PermissionList manage />
   <p class="dim small perm-hint">{i18n.t.permissions.settingsHint}</p>
   <section class="panel">
+    <div class="setting">
+      <div class="what"><b>{tb.openAtLogin}</b><span>{tb.openAtLoginHint}</span></div>
+      <div class="how">
+        <Toggle
+          checked={atLogin}
+          label={tb.openAtLogin}
+          onchange={(on) => {
+            atLogin = on;
+            call<boolean>("set_open_at_login", { on }).then((now) => (atLogin = now)).catch(() => (atLogin = !on));
+          }}
+        />
+      </div>
+    </div>
     <div class="setting">
       <div class="what"><b>{tb.notch}</b><span>{tb.notchHint}</span></div>
       <div class="how"><Toggle checked={notch} label={tb.notch} onchange={(on) => ((notch = on), call("set_notch", { on }))} /></div>

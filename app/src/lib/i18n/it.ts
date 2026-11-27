@@ -446,6 +446,8 @@ const it: Messages = {
   },
 
   meetings: {
+    pillStop: "Ferma la registrazione",
+    pillRecording: "Registrazione in corso",
     simpleTranscript: "Trascrizione delle riunioni",
     simpleLocal: "Su questo computer. L'audio rimane qui.",
     detail: "Tipo di trascrizione",
@@ -832,6 +834,8 @@ const it: Messages = {
     localVoiceEngine: "Le voci di questo Mac",
     customServicesHint: "Scegli servizi e voci separati, indipendentemente dalla configurazione guidata.",
     mac: "Sul Mac",
+    openAtLogin: "Apri Yoru all'avvio del Mac",
+    openAtLoginHint: "Così ti avvisa delle riunioni, fa suonare i timer e svolge le attività pianificate anche dopo un riavvio.",
     notch: "Yoru nella notch",
     notchHint: "Un piccolo Yoru accanto alla fotocamera. Tieni premuto ⌥ Spazio per parlargli col microfono del Mac.",
     menuBarIcon: "Yoru nella barra dei menu",

@@ -178,6 +178,13 @@ pub fn place(app: &AppHandle, window: &WebviewWindow) {
     });
 }
 
+/// Put `window` just under the menu bar, centred on the notch (else on the
+/// main screen), below the notch's own window: the recording pill.
+/// On the main thread.
+pub fn place_under_bar(window: &WebviewWindow, width: f64, height: f64) {
+    mac::place_under_bar(window, width, height);
+}
+
 /// Let clicks through but on what the page draws, and tell it when the
 /// pointer comes and goes. Ends with the window.
 fn follow_pointer(app: AppHandle) {
@@ -261,6 +268,34 @@ mod mac {
         Some(geometry)
     }
 
+    /// Under the menu bar of the screen `place` picks, one level below the
+    /// notch's window, so the open panel covers it.
+    pub fn place_under_bar(window: &WebviewWindow, width: f64, height: f64) -> Option<()> {
+        let marker = MainThreadMarker::new()?;
+        let screens = NSScreen::screens(marker);
+        let notched = screens.iter().find(|s| s.safeAreaInsets().top > 0.0);
+        let screen = notched.or_else(|| NSScreen::mainScreen(marker))?;
+        let frame = screen.frame();
+        let visible = screen.visibleFrame();
+        let bar = (frame.origin.y + frame.size.height - (visible.origin.y + visible.size.height)).max(screen.safeAreaInsets().top);
+        let ns: *mut NSWindow = window.ns_window().ok()?.cast();
+        // SAFETY: Tauri hands over its live NSWindow; we're on the main thread.
+        let ns = unsafe { ns.as_ref()? };
+        ns.setOpaque(false);
+        ns.setBackgroundColor(Some(&NSColor::clearColor()));
+        ns.setHasShadow(false);
+        ns.setLevel(NSStatusWindowLevel);
+        ns.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        let origin = NSPoint::new(frame.origin.x + (frame.size.width - width) / 2.0, frame.origin.y + frame.size.height - bar - height);
+        ns.setFrame_display(NSRect::new(origin, NSSize::new(width, height)), true);
+        Some(())
+    }
+
     /// The screens' frames, to notice when they change.
     pub fn screens_signature() -> Vec<(i64, i64, i64, i64)> {
         // NSScreen wants the main thread; CoreGraphics answers anywhere.
@@ -293,5 +328,9 @@ mod mac {
 
     pub fn screens_signature() -> Vec<(i64, i64, i64, i64)> {
         Vec::new()
+    }
+
+    pub fn place_under_bar(_: &WebviewWindow, _: f64, _: f64) -> Option<()> {
+        None
     }
 }

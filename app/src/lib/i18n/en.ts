@@ -448,6 +448,8 @@ const en = {
   },
 
   meetings: {
+    pillStop: "Stop recording",
+    pillRecording: "Recording",
     simpleTranscript: "Meeting transcription",
     simpleLocal: "On this computer. Audio stays here.",
     detail: "Kind of transcript",
@@ -834,6 +836,8 @@ const en = {
     localVoiceEngine: "This Mac's voices",
     customServicesHint: "Choose separate services and voices, independently of the guided setup.",
     mac: "On the Mac",
+    openAtLogin: "Open Yoru at login",
+    openAtLoginHint: "So he tells you about meetings, rings timers and runs scheduled tasks after a restart too.",
     notch: "Yoru in the notch",
     notchHint: "A small Yoru beside the camera. Hold ⌥ Space to talk to him through the Mac's microphone.",
     menuBarIcon: "Yoru in the menu bar",

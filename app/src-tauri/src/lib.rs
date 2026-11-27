@@ -33,12 +33,14 @@ mod folders;
 #[cfg(target_os = "macos")]
 mod icloud;
 mod instances;
+mod login;
 mod meeting_watch;
 mod meetings;
 mod notch;
 
 mod permissions;
 mod pocket;
+mod rec_pill;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
@@ -134,6 +136,10 @@ struct Settings {
     /// Meetings go to iCloud with their text only, not their audio.
     #[serde(default)]
     icloud_text_only: bool,
+    /// Yoru was added to the login items once (src/login.rs); after that
+    /// only the toggle changes them.
+    #[serde(default)]
+    login_item_set: bool,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -1459,6 +1465,42 @@ fn set_notch(app: AppHandle, state: State<AppState>, on: bool) {
     notch::apply(&app, on);
 }
 
+/// Whether Yoru opens at login.
+#[tauri::command]
+fn open_at_login() -> bool {
+    login::enabled()
+}
+
+/// Open Yoru at login, or not.
+#[tauri::command]
+fn set_open_at_login(state: State<AppState>, on: bool) -> Result<bool, String> {
+    login::set(on)?;
+    state.settings.lock().unwrap().login_item_set = true;
+    state.save_settings();
+    Ok(login::enabled())
+}
+
+/// The first start of the installed app adds it to the login items, so the
+/// meeting detection and the timers run after a restart without anyone
+/// opening it. A copy run from elsewhere (a build) is left out.
+fn first_login_item(state: &AppState) {
+    if state.settings.lock().unwrap().login_item_set {
+        return;
+    }
+    let installed = std::env::current_exe().is_ok_and(|p| p.starts_with("/Applications"));
+    if !installed {
+        return;
+    }
+    match login::set(true) {
+        Ok(()) => {
+            state.settings.lock().unwrap().login_item_set = true;
+            state.save_settings();
+            yoru_core::hostlog::line("login", "Yoru opens at login");
+        }
+        Err(e) => yoru_core::hostlog::line("login", &format!("adding the login item: {e}")),
+    }
+}
+
 /// Whether this Mac syncs through iCloud, and how it's going.
 #[tauri::command]
 fn icloud_status(state: State<AppState>) -> serde_json::Value {
@@ -2105,6 +2147,7 @@ pub fn run() {
             let quitter = handle.clone();
             let _ = ctrlc::set_handler(move || quitter.exit(0));
             std::thread::spawn(permissions::log_state);
+            first_login_item(&app.state::<AppState>());
             let notch_on = app.state::<AppState>().settings.lock().unwrap().notch;
             notch::apply(handle, notch_on);
             let manager = start_bridge(handle, port);
@@ -2152,6 +2195,8 @@ pub fn run() {
             permissions::request_permission,
             permissions::open_privacy,
             set_notch,
+            open_at_login,
+            set_open_at_login,
             icloud_status,
             set_icloud,
             set_icloud_audio,

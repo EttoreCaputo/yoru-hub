@@ -124,13 +124,14 @@ fn act(app: &AppHandle, shared: &Arc<Shared>, action: Action) {
         Action::HeadsUp(m) => {
             log(&format!("detection: {} starts at {}, asking", m.title, detect::clock(m.start)));
             let text = Words::of(app).heads_up(&m);
-            ask(app, shared, text, move |shared, _| shared.detector.lock().unwrap().armed(&m));
+            let missed = m.clone();
+            ask(app, shared, text, move |shared, _| shared.detector.lock().unwrap().armed(&m), move |shared| shared.detector.lock().unwrap().missed(&missed));
         }
         Action::Ask { app: caller, meeting } => {
             log(&format!("detection: {} took the microphone, asking", caller.name));
             let text = Words::of(app).call(&caller, meeting.as_ref());
             let title = meeting.map(|m| m.title);
-            ask(app, shared, text, move |shared, app| record(app, shared, &caller, title));
+            ask(app, shared, text, move |shared, app| record(app, shared, &caller, title), |_| {});
         }
         Action::Record { app: caller, title } => {
             log(&format!("detection: {} took the microphone, recording as asked", caller.name));
@@ -143,8 +144,15 @@ fn act(app: &AppHandle, shared: &Arc<Shared>, action: Action) {
     }
 }
 
-/// Ask on the Allow card, on a thread of its own; `yes` runs on Allow.
-fn ask(app: &AppHandle, shared: &Arc<Shared>, text: String, yes: impl FnOnce(&Shared, &AppHandle) + Send + 'static) {
+/// Ask on the Allow card, on a thread of its own; `yes` runs on Allow,
+/// `missed` when the card expires unanswered.
+fn ask(
+    app: &AppHandle,
+    shared: &Arc<Shared>,
+    text: String,
+    yes: impl FnOnce(&Shared, &AppHandle) + Send + 'static,
+    missed: impl FnOnce(&Shared) + Send + 'static,
+) {
     let (app, shared) = (app.clone(), shared.clone());
     let tool = Words::of(&app).tool;
     thread::spawn(move || {
@@ -155,8 +163,10 @@ fn ask(app: &AppHandle, shared: &Arc<Shared>, text: String, yes: impl FnOnce(&Sh
             Some(false) => "denied",
             None => "no answer",
         }));
-        if answer == Some(true) {
-            yes(&shared, &app);
+        match answer {
+            Some(true) => yes(&shared, &app),
+            None => missed(&shared),
+            Some(false) => {}
         }
         shared.detector.lock().unwrap().answered();
     });

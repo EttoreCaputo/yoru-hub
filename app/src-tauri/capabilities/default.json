@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Main window: bridge events, and dragging the window by its own bar",
-  "windows": ["main", "notch"],
+  "windows": ["main", "notch", "rec-pill"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging"

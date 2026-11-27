@@ -117,6 +117,7 @@ pub fn record(app: &AppHandle, request: Request) -> Result<Meeting, String> {
         if done.is_some() {
             events.state::<Meetings>().active.lock().unwrap().take();
             board(&events, "idle", None);
+            crate::rec_pill::hide(&events);
         }
         let _ = events.emit("meeting", &event);
         if let Some(id) = done {
@@ -128,6 +129,7 @@ pub fn record(app: &AppHandle, request: Request) -> Result<Meeting, String> {
     *app.state::<Meetings>().active.lock().unwrap() = Some(recording);
     board_recording(app, &shown);
     let _ = app.emit("meeting", &Event::Started { meeting: meeting.clone() });
+    crate::rec_pill::show(app);
     Ok(meeting)
 }
 
