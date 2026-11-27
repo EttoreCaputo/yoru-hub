@@ -18,11 +18,13 @@
 # Application, then Keychain Access → Export only that one as a .p12.
 # For notarization (optional), an app-specific password made at account.apple.com
 # → Sign-In and Security → App-Specific Passwords.
+# For iCloud (optional, needs notarization), the Developer ID profile in
+# app/src-tauri/yoru.production.provisionprofile (docs/icloud.md).
 
 set -euo pipefail
 
 team=79AC9KV62T
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 [[ $# -ge 1 && -f "$1" ]] || usage
 gh auth status > /dev/null
 
@@ -75,6 +77,11 @@ base64 -i "$p12" | tr -d '\n' | gh secret set APPLE_CERTIFICATE
 printf '%s' "$p12_password" | gh secret set APPLE_CERTIFICATE_PASSWORD
 printf '%s' "$identity" | gh secret set APPLE_SIGNING_IDENTITY
 printf '%s' "$team" | gh secret set APPLE_TEAM_ID
+profile="$(dirname "$0")/../app/src-tauri/yoru.production.provisionprofile"
+if [[ -f "$profile" ]]; then
+    base64 -i "$profile" | tr -d '\n' | gh secret set APPLE_PROVISIONING_PROFILE
+    echo "yoru: with the Developer ID profile: the notarized build has iCloud"
+fi
 if [[ -n "$apple_id" ]]; then
     printf '%s' "$apple_id" | gh secret set APPLE_ID
     printf '%s' "$apple_password" | gh secret set APPLE_PASSWORD

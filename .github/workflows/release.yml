@@ -253,8 +253,10 @@ jobs:
       # notarize it and staples the ticket: macOS opens it without asking.
       # Without them the app is signed ad hoc, as before.
       - name: Use the Developer ID certificate
+        id: signing
         shell: bash
         env:
+          PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
           CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -264,6 +266,33 @@ jobs:
         run: |
           if [ -z "$CERTIFICATE" ]; then
             echo "No APPLE_CERTIFICATE secret: the app is signed ad hoc"
+            exit 0
+          fi
+          # With the Developer ID profile too, the app gets iCloud: built
+          # with Tauri, then signed and notarized by tools/sign_release.sh,
+          # which needs the identity in a keychain of its own.
+          if [ -n "$PROFILE" ] && [ -n "$NOTARY_ID" ]; then
+            echo "$PROFILE" | base64 --decode > app/src-tauri/yoru.production.provisionprofile
+            keychain="$RUNNER_TEMP/yoru.keychain-db"
+            pass="$(uuidgen)"
+            echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/yoru.p12"
+            curl -fsSL -o "$RUNNER_TEMP/g2.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+            security create-keychain -p "$pass" "$keychain"
+            security set-keychain-settings -lut 7200 "$keychain"
+            security unlock-keychain -p "$pass" "$keychain"
+            security import "$RUNNER_TEMP/yoru.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security import "$RUNNER_TEMP/g2.cer" -k "$keychain" || true
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pass" "$keychain" > /dev/null
+            security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+            rm "$RUNNER_TEMP/yoru.p12"
+            {
+              echo "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY"
+              echo "APPLE_ID=$NOTARY_ID"
+              echo "APPLE_PASSWORD=$NOTARY_PASSWORD"
+              echo "APPLE_TEAM_ID=${TEAM_ID:-79AC9KV62T}"
+            } >> "$GITHUB_ENV"
+            echo "icloud=true" >> "$GITHUB_OUTPUT"
+            echo "Signed with the Developer ID certificate and profile (iCloud), notarized"
             exit 0
           fi
           {
@@ -284,6 +313,7 @@ jobs:
 
       - uses: tauri-apps/tauri-action@v0
         id: bundle
+        if: steps.signing.outputs.icloud != 'true'
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -297,7 +327,7 @@ jobs:
       # One more try when the first fails, usually a download that timed out
       # or was reset. The compile is cached by then.
       - name: Retry the bundle
-        if: steps.bundle.outcome == 'failure'
+        if: steps.signing.outputs.icloud != 'true' && steps.bundle.outcome == 'failure'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -307,9 +337,35 @@ jobs:
           assetNamePattern: "[name]_[version]_${{ matrix.platform }}[ext]"
           args: ${{ matrix.args }} --config src-tauri/tauri.sidecars.conf.json
 
+      # The iCloud build (docs/icloud.md): Tauri builds the .app with the
+      # Developer ID profile embedded and signs it, without notarizing (no
+      # APPLE_ID in its environment); tools/sign_release.sh gives the sidecars
+      # their plain entitlements back, notarizes the app, makes the .dmg and
+      # notarizes that. One more try when the build fails, as above.
+      - name: Build, sign and notarize with iCloud
+        if: steps.signing.outputs.icloud == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd app
+          build() {
+            env -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID npm run tauri build -- \
+              ${{ matrix.args }} --bundles app \
+              --config src-tauri/tauri.sidecars.conf.json \
+              --config src-tauri/tauri.icloud.production.conf.json
+          }
+          build || build
+          cd ..
+          version="$(jq -r .version app/src-tauri/tauri.conf.json)"
+          dmg="Yoru_${version}_${{ matrix.platform }}.dmg"
+          tools/sign_release.sh "target/${{ matrix.target }}/release/bundle/macos/Yoru.app" "$dmg"
+          gh release upload "${{ needs.release.outputs.tag }}" "$dmg" --clobber
+
       # tauri-action always uploads the macOS .app as .app.tar.gz too; the
       # .dmg is the only download macOS needs.
       - name: Drop the .app.tar.gz
+        if: steps.signing.outputs.icloud != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

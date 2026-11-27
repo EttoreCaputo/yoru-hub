@@ -13,3 +13,4 @@ firmware/
 audio/.build/
 # The iCloud provisioning profile, made by Xcode for this Mac (docs/icloud.md, Signing).
 app/src-tauri/yoru.provisionprofile
+app/src-tauri/yoru.production.provisionprofile
